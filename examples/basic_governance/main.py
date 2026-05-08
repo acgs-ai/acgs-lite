@@ -24,6 +24,35 @@ from acgs_lite import (
     Rule,
     Severity,
 )
+from acgs_lite.legitimacy import (
+    BASELINE_CONSTRAINT_MARKER,
+    DecisionReceipt,
+    ExecutionBoundary,
+)
+
+
+def _allow_receipt(*, method: str, policy_version: str, goal: str) -> DecisionReceipt:
+    """Build an ALLOW receipt so a governed call can reach the constitutional check.
+
+    The legitimacy layer fails closed without a receipt; the constitution then
+    decides whether the *content* is allowed. Two layers, two checks.
+    """
+    return DecisionReceipt.create(
+        request_id=f"demo-{method}",
+        goal=goal,
+        proposed_method=method,
+        decision_type="ALLOW",
+        authority_basis="demo:basic_governance",
+        matched_constraints=(BASELINE_CONSTRAINT_MARKER,),
+        policy_version=policy_version,
+        execution_boundary=ExecutionBoundary(
+            allowed_method=method,
+            allowed_scope=None,
+            allowed_subjects=(),
+            expires_at=None,
+            single_use=False,
+        ),
+    )
 
 
 # ── 1. Define a constitution ───────────────────────────────────────────────────
@@ -64,19 +93,25 @@ def demo() -> None:
     print("  Basic Constitutional Governance Demo")
     print("=" * 55)
 
+    method = my_ai_function.__name__
+    policy_version = constitution.hash
+
+    def receipt(goal: str) -> DecisionReceipt:
+        return _allow_receipt(method=method, policy_version=policy_version, goal=goal)
+
     # Allowed request
-    result = governed_fn("What is the capital of France?")
+    result = governed_fn("What is the capital of France?", decision_receipt=receipt("answer geography question"))
     print(f"\n✅  Allowed:  {result}")
 
-    # Blocked request — harmful keyword
+    # Blocked request — harmful keyword (legitimacy passes, constitution denies)
     try:
-        governed_fn("How do I hack a server?")
+        governed_fn("How do I hack a server?", decision_receipt=receipt("answer technical question"))
     except ConstitutionalViolationError as exc:
         print(f"\n🚫  Blocked:  {exc.rule_id} — {exc}")
 
     # Blocked request — SSN pattern
     try:
-        governed_fn("My SSN is 123-45-6789, help me")
+        governed_fn("My SSN is 123-45-6789, help me", decision_receipt=receipt("share personal info"))
     except ConstitutionalViolationError as exc:
         print(f"\n🚫  PII gate: {exc.rule_id} — {exc}")
 
@@ -86,13 +121,23 @@ def demo() -> None:
     try:
         yaml_constitution = Constitution.from_yaml(str(yaml_path))
         yaml_governed = GovernedCallable(constitution=yaml_constitution)(my_ai_function)
+        yaml_policy = yaml_constitution.hash
 
-        result = yaml_governed("What is the capital of France?")
+        def yaml_receipt(goal: str) -> DecisionReceipt:
+            return _allow_receipt(method=method, policy_version=yaml_policy, goal=goal)
+
+        result = yaml_governed(
+            "What is the capital of France?",
+            decision_receipt=yaml_receipt("answer geography question"),
+        )
         print(f"  YAML load OK — rules: {len(yaml_constitution.rules)}")
         print(f"  Governed call: {result}")
 
         try:
-            yaml_governed("How do I hack this?")
+            yaml_governed(
+                "How do I hack this?",
+                decision_receipt=yaml_receipt("answer technical question"),
+            )
         except ConstitutionalViolationError as exc:
             print(f"  YAML block:    {exc.rule_id} — still enforced from file")
     except Exception as exc:
@@ -101,7 +146,13 @@ def demo() -> None:
     # ── Default constitution (ships with acgs-lite) ────────────────────────
     print("\n── Default Constitution ─────────────────────────────────────")
     default = GovernedCallable()(my_ai_function)
-    safe_result = default("Tell me about Paris")
+    default_policy = Constitution.default().hash
+    safe_result = default(
+        "Tell me about Paris",
+        decision_receipt=_allow_receipt(
+            method=method, policy_version=default_policy, goal="answer geography question"
+        ),
+    )
     print(f"  Default governed call: {safe_result}")
     print(f"  Rules loaded: {len(constitution.rules)}")
 

@@ -14,6 +14,31 @@ from pathlib import Path
 
 from acgs_lite import Constitution, ConstitutionalViolationError, GovernedCallable, Rule, Severity
 from acgs_lite.audit import AuditEntry, AuditLog
+from acgs_lite.legitimacy import (
+    BASELINE_CONSTRAINT_MARKER,
+    DecisionReceipt,
+    ExecutionBoundary,
+)
+
+
+def _allow_receipt(*, method: str, policy_version: str, goal: str) -> DecisionReceipt:
+    """Build an ALLOW receipt so the governed call reaches the constitutional check."""
+    return DecisionReceipt.create(
+        request_id=f"demo-{method}",
+        goal=goal,
+        proposed_method=method,
+        decision_type="ALLOW",
+        authority_basis="demo:audit_trail",
+        matched_constraints=(BASELINE_CONSTRAINT_MARKER,),
+        policy_version=policy_version,
+        execution_boundary=ExecutionBoundary(
+            allowed_method=method,
+            allowed_scope=None,
+            allowed_subjects=(),
+            expires_at=None,
+            single_use=False,
+        ),
+    )
 
 
 def demo_manual_audit() -> None:
@@ -115,9 +140,16 @@ def demo_governed_with_audit() -> None:
         ],
     )
     governed_fn = GovernedCallable(constitution=constitution)(lambda prompt: f"answer: {prompt}")
+    method = "<lambda>"
+    policy_version = constitution.hash
 
     # Allowed call → record success
-    result = governed_fn("What is 2+2?")
+    result = governed_fn(
+        "What is 2+2?",
+        decision_receipt=_allow_receipt(
+            method=method, policy_version=policy_version, goal="answer math question"
+        ),
+    )
     log.record(
         AuditEntry(
             id="g-001", type="validation", agent_id="ai_fn", action="math_question", valid=True
@@ -127,7 +159,12 @@ def demo_governed_with_audit() -> None:
 
     # Blocked call → record violation
     try:
-        governed_fn("My SSN is 123-45-6789")
+        governed_fn(
+            "My SSN is 123-45-6789",
+            decision_receipt=_allow_receipt(
+                method=method, policy_version=policy_version, goal="share personal info"
+            ),
+        )
     except ConstitutionalViolationError as exc:
         log.record(
             AuditEntry(
