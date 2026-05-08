@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "python -m pip install '.[docs]' && python -m mkdocs build --strict"
+  }
+}
