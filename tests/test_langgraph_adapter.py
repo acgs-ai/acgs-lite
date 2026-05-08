@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+import acgs_lite.adapters.langgraph as langgraph_adapter
 from acgs_lite import (
     Constitution,
     GovernanceEngine,
@@ -137,6 +138,33 @@ def test_wrap_tool_call_uses_generated_tool_call_id_when_missing() -> None:
 
     assert message.tool_call_id
     assert message.status == "error"
+
+
+def test_wrap_tool_call_denial_message_does_not_require_langchain_core(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _engine(
+        [_rule("B1", ["plaintext"], severity=Severity.HIGH, workflow_action=ViolationAction.BLOCK)],
+        strict=False,
+    )
+    request = _Request(
+        tool_call={"id": "call-no-langchain", "name": "send", "args": {"payload": "plaintext"}},
+        runtime=_Runtime(),
+    )
+
+    def _missing_langchain(name: str) -> Any:
+        if name == "langchain_core.messages":
+            raise ModuleNotFoundError(name)
+        raise AssertionError(name)
+
+    monkeypatch.setattr(langgraph_adapter, "import_module", _missing_langchain)
+
+    message = make_wrap_tool_call(engine)(request, lambda _: {"ok": True})
+
+    assert message.tool_call_id == "call-no-langchain"
+    assert message.name == "send"
+    assert message.status == "error"
+    assert message.artifact["rule_id"] == "B1"
 
 
 def test_wrap_tool_call_halt_raises_policy_denied_even_when_fail_open_disabled() -> None:

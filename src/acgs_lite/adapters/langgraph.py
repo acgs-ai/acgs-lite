@@ -37,6 +37,15 @@ class _EvaluatedCall:
     force_raise: bool = False
 
 
+@dataclass(slots=True)
+class _ToolMessageFallback:
+    content: str
+    tool_call_id: str
+    name: str
+    status: str
+    artifact: dict[str, Any]
+
+
 def make_wrap_tool_call(
     engine: GovernanceEngine,
     *,
@@ -527,22 +536,30 @@ def _deny_with_tool_message(evaluated: _EvaluatedCall) -> Any:
         evaluated.decision,
         policy_hash=evaluated.policy_hash,
     )
+    content = denial_error.args[0] if denial_error.args else "Denied by policy."
+    artifact = {
+        "policy_hash": denial_error.policy_hash,
+        "rule_id": denial_error.rule_id,
+        "decision_state": evaluated.decision.state,
+    }
     try:
         messages_module = import_module("langchain_core.messages")
         tool_message_cls = messages_module.ToolMessage
-    except ModuleNotFoundError as exc:
-        raise denial_error from exc
+    except ModuleNotFoundError:
+        return _ToolMessageFallback(
+            content=content,
+            tool_call_id=evaluated.action_id,
+            name=evaluated.context.tool_name,
+            status="error",
+            artifact=artifact,
+        )
 
     return tool_message_cls(
-        content=denial_error.args[0] if denial_error.args else "Denied by policy.",
+        content=content,
         tool_call_id=evaluated.action_id,
         name=evaluated.context.tool_name,
         status="error",
-        artifact={
-            "policy_hash": denial_error.policy_hash,
-            "rule_id": denial_error.rule_id,
-            "decision_state": evaluated.decision.state,
-        },
+        artifact=artifact,
     )
 
 
