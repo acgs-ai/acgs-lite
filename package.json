@@ -1,6 +1,6 @@
 {
   "private": true,
   "scripts": {
-    "build": "python -m pip install '.[docs]' && python -m mkdocs build --strict"
+    "build": "python -m pip install '.[docs]' && if [ -d .git ]; then python -m mkdocs build --strict; else MKDOCS_GIT_REVISION_DATE_ENABLED=false python -m mkdocs build --strict; fi"
   }
 }

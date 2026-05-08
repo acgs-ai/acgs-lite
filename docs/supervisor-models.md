@@ -88,6 +88,6 @@ assert result.is_safe == True
 | **Formal Verification** | High | Financial/Safety-Critical (Payments, IoT control) |
 
 ## Next Steps
-- Learn more about [Z3 Integration](architecture.md#formal-verification) in the Architecture doc.
+- Learn more about [Z3 Integration](architecture.md#formal-verification-z3) in the Architecture doc.
 - See how to use [MACI Roles](maci.md) to separate Proposer and Supervisor.
 - Explore [Industry Use Cases](use-cases.md) for these patterns.

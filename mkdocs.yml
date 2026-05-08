@@ -20,7 +20,9 @@ plugins:
       css_dir: css
       javascript_dir: js
   - git-revision-date-localized:
+      enabled: !ENV [MKDOCS_GIT_REVISION_DATE_ENABLED, true]
       enable_creation_date: true
+      fallback_to_build_date: true
       type: date
 
 extra:
@@ -72,6 +74,8 @@ nav:
       - MCP Governance Guide: mcp-guide.md
       - Supervisor Models: supervisor-models.md
       - Testing Governance: testing-governance.md
+      - Governed Self-Evolution: self-evolution.md
+      - Stability: stability.md
   - Quickstart: quickstart.md
   - Architecture: architecture.md
   - Integrations: integrations.md
@@ -94,6 +98,10 @@ nav:
   - Security: security.md
   - Additional Resources:
       - MCP Notes: mcp.md
+      - Telegram Webhook: telegram-webhook.md
+      - Upgrade to v2.10: upgrade-v2.10.md
+      - Agent Skill Audit: AGENT_SKILL_AUDIT.md
+      - Runtime Optimization Report: RUNTIME_OPTIMIZATION_REPORT.md
       - External Distribution Submissions: external-distribution-submissions.md
       - Launch Copy Drafts: launch-copy-drafts.md
       - Final Launch Copy: final-launch-copy.md
