@@ -1,6 +1,11 @@
 {
   "private": true,
   "scripts": {
-    "build": "python -m pip install '.[docs]' && if [ -d .git ]; then python -m mkdocs build --strict; else MKDOCS_GIT_REVISION_DATE_ENABLED=false python -m mkdocs build --strict; fi"
+    "build": "python -m pip install '.[docs]' && if [ -d .git ]; then python -m mkdocs build --strict; else MKDOCS_GIT_REVISION_DATE_ENABLED=false python -m mkdocs build --strict; fi",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.90.0"
   }
 }

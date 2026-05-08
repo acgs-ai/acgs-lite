@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "acgs-governance-proxy",
+  "compatibility_date": "2026-05-08",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "site"
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+}
