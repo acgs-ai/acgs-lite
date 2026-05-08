@@ -1,10 +1,10 @@
-# Testing Governance: Verifying Your Agentic Firewall
+# Testing Governance: Verifying Fail-Closed Boundaries
 
-**Meta Description**: Learn how to use the ACGS-Lite testing framework to verify your constitution. Ensure your safety rules correctly block threats and allow legitimate agent actions.
+**Meta Description**: Learn how to use the ACGS-Lite testing framework to verify that governance rules block prohibited actions and allow legitimate agent actions.
 
 ---
 
-A Constitution is code. Like any other code, it must be tested. ACGS-Lite provides a robust testing framework (`acgs test`) to ensure your safety rules are both **Effective** (blocking real threats) and **Functional** (not blocking legitimate work).
+A Constitution is code. Like any other code, it must be tested. ACGS-Lite provides a testing framework (`acgs test`) to ensure your governance rules are both **Effective** (blocking prohibited actions) and **Functional** (not blocking legitimate work).
 
 ## 🧪 The Testing Workflow
 

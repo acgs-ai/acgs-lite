@@ -54,7 +54,7 @@ Once connected, your agent will have access to the following governance tools:
 
 | Tool | Purpose |
 | :--- | :--- |
-| `validate_action` | The "Agentic Firewall." Validates text against the constitution and returns a pass/fail result. |
+| `validate_action` | Validates text against the constitution and returns a pass/fail result before execution. |
 | `check_compliance` | A fast, non-logging check to see if a text snippet contains any violations. |
 | `get_constitution` | Returns the active rules, their severity, and the **Constitutional Hash**. |
 | `get_audit_log` | Retrieves recent decisions for real-time monitoring. |

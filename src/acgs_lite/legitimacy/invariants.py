@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from acgs_lite.errors import ConstitutionalViolationError
-from acgs_lite.legitimacy.decide import CANONICAL_DECISION_STATES, canonicalize_decision_state
+from acgs_lite.legitimacy.decide import canonicalize_decision_state
 from acgs_lite.legitimacy.receipt import DecisionReceipt, ExecutionBoundary
 
 
@@ -94,8 +94,6 @@ def validate_receipt_for_execution(
         decision_type = canonicalize_decision_state(receipt.decision_type)
     except ValueError as exc:
         raise LegitimacyInvariantError("Unknown decision type is not allow") from exc
-    if decision_type not in CANONICAL_DECISION_STATES:
-        raise LegitimacyInvariantError("Unknown decision type is not allow")
     if decision_type not in {"ALLOW", "ALLOW_WITH_CONTROLS"}:
         raise LegitimacyInvariantError(f"Decision {decision_type} does not permit execution")
     if not receipt.policy_version:

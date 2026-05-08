@@ -20,7 +20,7 @@ from acgs_lite.integrations.policy_storage import (
     PolicyNotFoundError,
     PolicyStorage,
 )
-from src.core.shared.di_container import AgentScope, DIContainer
+from core.shared.di_container import AgentScope, DIContainer
 
 # ---------------------------------------------------------------------------
 # Helpers

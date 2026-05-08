@@ -12,7 +12,7 @@ The **OWASP Top 10 for Agentic Applications** defines the critical security risk
 
 | OWASP ID | Risk | ACGS-Lite Mitigation Strategy |
 | :--- | :--- | :--- |
-| **ASI01** | **Agent Goal Hijack** | **The Agentic Firewall**: Validates an agent's internal plan against the Constitution *before* any tool is called. |
+| **ASI01** | **Agent Goal Hijack** | **Governed execution boundary**: Validates a proposed action against the Constitution *before* any tool is called. |
 | **ASI02** | **Tool Misuse** | **Deterministic Rule Engine**: Blocks specific high-risk tool patterns (e.g., `DROP TABLE`) regardless of agent intent. |
 | **ASI03** | **Privilege Abuse** | **MACI Role Separation**: Structural separation of Proposer (Agent) and Validator (Governance) prevents self-escalation. |
 | **ASI04** | **Supply Chain** | **Constitutional Hashing**: Ensures the safety rules haven't been tampered with in the deployment pipeline. |

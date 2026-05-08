@@ -9,6 +9,7 @@ from .contracts import (
     ExecutionReceiptSink,
     ToolCallContext,
 )
+from .langgraph import make_awrap_tool_call, make_wrap_tool_call
 
 __all__ = [
     "AdapterPolicyDecision",
@@ -16,4 +17,6 @@ __all__ = [
     "ExecutionReceipt",
     "ExecutionReceiptSink",
     "ToolCallContext",
+    "make_awrap_tool_call",
+    "make_wrap_tool_call",
 ]

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from acgs_lite.legitimacy.decide import DecisionState as DecisionState
+from acgs_lite.legitimacy.decide import DecisionState
 
 __all__ = [
     "AdapterPolicyDecision",
