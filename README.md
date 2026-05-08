@@ -14,9 +14,41 @@
 
 <img width="1280" height="680" alt="ACGS_Lite" src="https://github.com/user-attachments/assets/0d6deeef-40fe-4e8e-9dc0-537744162dff" />
 
-# **The missing safety layer between your LLM and production.**
+# **Fail-closed legitimacy for agent action.**
 
-**acgs-lite** is the production-ready runtime governance engine for AI agents. It sits **between your agent and execution** — every action is validated against a YAML constitution **before** it runs. Violations are blocked by default (fail-closed). Every decision is recorded in a tamper-evident audit chain. Human operators can intervene at any time.
+**acgs-lite** is a fail-closed legitimacy layer for agent action. It receives a declared goal and proposed method, resolves authority, constraints, policy version, and execution boundary before execution, then returns one governed decision and one replayable receipt. If authority, constraints, policy version, execution boundary, or receipt integrity cannot be proven before execution, ACGS blocks execution.
+
+ACGS makes agent action decisions explicit, authorized, constrained, transformable, deniable, bounded, and replayable before execution.
+
+Non-goals:
+
+- ACGS does not approve raw goals as executable authority.
+- ACGS does not replace human review for decisions that require structured approval.
+- ACGS does not implement the goal interpreter, compliant path planner, replay verifier, case-ledger feedback loop, or cross-org federation in the legitimacy MVP.
+
+For every governed call, ACGS guarantees:
+
+```text
+1. Exactly one decision from the taxonomy below
+2. A replayable receipt emitted before execution
+3. An execution boundary the executor must match
+4. Fail-closed on any missing/unverifiable input
+```
+
+Decision taxonomy:
+
+```text
+ALLOW
+ALLOW_WITH_CONTROLS
+TRANSFORM_REQUIRED
+REPLAN_REQUIRED
+STRUCTURED_REVIEW_REQUIRED
+DENY_OPERATION_WITH_ALTERNATIVE
+DENY_GOAL
+HARD_DENY
+```
+
+The [`examples/phoenix_acgs_governed_agent/`](./examples/phoenix_acgs_governed_agent/) example is the reference implementation of `request -> decision -> receipt -> bounded execution`. Its `governance.decision.*` span attributes are experimental.
 
 **Current status:** Stable core (v2.10.0) • CI-backed test suite.
 
@@ -201,6 +233,13 @@ pip install "acgs-lite[all]"          # All integrations
 
 Copy the prompt below directly into Claude Code, Codex CLI, or any AI coding agent.
 It installs acgs-lite, runs the self-verifying quickstart, and reports pass/fail — no API keys required.
+
+For Claude Code `PreToolUse` governance, use the canonical hook at
+[`integrations/claude_code/acgs-governance-preuse.sh`](./integrations/claude_code/acgs-governance-preuse.sh)
+and the setup guide in [`integrations/claude_code/README.md`](./integrations/claude_code/README.md).
+The hook calls a configurable governance sidecar before `Bash`, `Write`, `Edit`,
+and `MultiEdit` run; the default `/x402/check` URL is an external sidecar
+contract, not a bundled acgs-lite server route.
 
 ### One-shot install + verify prompt
 

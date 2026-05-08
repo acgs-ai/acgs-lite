@@ -34,6 +34,11 @@ from acgs_lite.constitution.refusal_reasoning import RefusalReasoningEngine
 from acgs_lite.constrained_output import attach_response_format
 from acgs_lite.engine import GovernanceEngine
 from acgs_lite.errors import ConstitutionalViolationError, GovernanceError
+from acgs_lite.legitimacy.invariants import (
+    normalize_actual_call,
+    validate_receipt_for_execution,
+)
+from acgs_lite.legitimacy.receipt import DecisionReceipt
 from acgs_lite.maci import MACIEnforcer, MACIRole
 from acgs_lite.provider_capabilities import (
     CapabilityStability,
@@ -630,6 +635,17 @@ class GovernedCallable:
 
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                receipt = cast(
+                    DecisionReceipt | None,
+                    kwargs.pop("decision_receipt", kwargs.pop("acgs_receipt", None)),
+                )
+                human_approval = kwargs.pop("human_approval", None)
+                actual_call = normalize_actual_call(fallback_method=func.__name__, kwargs=kwargs)
+                validate_receipt_for_execution(
+                    receipt,
+                    actual_call=actual_call,
+                    human_approval=human_approval,
+                )
                 for payload in iter_governance_payloads(*args, kwargs):
                     engine.validate(payload, agent_id=agent_id)
                 result = await func(*args, **kwargs)
@@ -643,6 +659,17 @@ class GovernedCallable:
 
             @functools.wraps(func)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                receipt = cast(
+                    DecisionReceipt | None,
+                    kwargs.pop("decision_receipt", kwargs.pop("acgs_receipt", None)),
+                )
+                human_approval = kwargs.pop("human_approval", None)
+                actual_call = normalize_actual_call(fallback_method=func.__name__, kwargs=kwargs)
+                validate_receipt_for_execution(
+                    receipt,
+                    actual_call=actual_call,
+                    human_approval=human_approval,
+                )
                 for payload in iter_governance_payloads(*args, kwargs):
                     engine.validate(payload, agent_id=agent_id)
                 result = func(*args, **kwargs)

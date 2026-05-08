@@ -32,24 +32,18 @@ from acgs_lite.constitution import (
     ActivationRecord,
     AuditPolicy,
     BundleStatus,
-    BundleStore,
     CaseConfig,
     CaseManager,
     CaseRecord,
-    ConcurrentLifecycleError,
     Constitution,
     ConstitutionBuilder,
     ConstitutionBundle,
-    ConstitutionLifecycle,
     GovernanceMemoryPrecedentHit,
     GovernanceMemoryReport,
     GovernanceMemoryRetriever,
     GovernanceMemorySummary,
-    InMemoryBundleStore,
     InMemoryLifecycleAuditSink,
     LifecycleAuditSink,
-    LifecycleError,
-    LifecycleEvidenceError,
     LifecycleEvidenceRecord,
     Rule,
     RuleSnapshot,
@@ -85,6 +79,7 @@ from acgs_lite.errors import (
     ConstitutionalViolationError,
     GovernanceError,
     MACIViolationError,
+    PolicyDeniedError,
 )
 from acgs_lite.events import EventBus, GovernanceEvent, get_event_bus
 from acgs_lite.fail_closed import fail_closed as fail_closed
@@ -103,16 +98,75 @@ from acgs_lite.production import (
 # this to raise ImportError with a helpful install hint instead of crashing
 # the entire `import acgs_lite` at startup.
 _MISSING_OPTIONAL: dict[str, str] = {}
-
-try:
-    from acgs_lite.formal.smt_gate import (
-        NullVerificationGate,
-        VerificationResult,
-        Z3VerificationGate,
-    )
-except ImportError:
-    for _s in ("NullVerificationGate", "VerificationResult", "Z3VerificationGate"):
-        _MISSING_OPTIONAL[_s] = "pip install z3-solver"
+_LAZY_EXPORTS: dict[str, tuple[str, str, str]] = {
+    "NullVerificationGate": (
+        "acgs_lite.formal.smt_gate",
+        "NullVerificationGate",
+        "pip install z3-solver",
+    ),
+    "VerificationResult": (
+        "acgs_lite.formal.smt_gate",
+        "VerificationResult",
+        "pip install z3-solver",
+    ),
+    "Z3VerificationGate": (
+        "acgs_lite.formal.smt_gate",
+        "Z3VerificationGate",
+        "pip install z3-solver",
+    ),
+    "BundleStore": (
+        "acgs_lite.constitution.bundle_store",
+        "BundleStore",
+        "pip install acgs-lite",
+    ),
+    "InMemoryBundleStore": (
+        "acgs_lite.constitution.bundle_store",
+        "InMemoryBundleStore",
+        "pip install acgs-lite",
+    ),
+    "PostgresBundleStore": (
+        "acgs_lite.constitution.postgres_bundle_store",
+        "PostgresBundleStore",
+        "pip install acgs-lite[postgres]",
+    ),
+    "SQLiteBundleStore": (
+        "acgs_lite.constitution.sqlite_bundle_store",
+        "SQLiteBundleStore",
+        "pip install acgs-lite",
+    ),
+    "ConcurrentLifecycleError": (
+        "acgs_lite.constitution.lifecycle_service",
+        "ConcurrentLifecycleError",
+        "pip install acgs-lite",
+    ),
+    "ConstitutionLifecycle": (
+        "acgs_lite.constitution.lifecycle_service",
+        "ConstitutionLifecycle",
+        "pip install acgs-lite",
+    ),
+    "LifecycleError": (
+        "acgs_lite.constitution.lifecycle_service",
+        "LifecycleError",
+        "pip install acgs-lite",
+    ),
+    "LifecycleEvidenceError": (
+        "acgs_lite.constitution.lifecycle_service",
+        "LifecycleEvidenceError",
+        "pip install acgs-lite",
+    ),
+    "Z3_AVAILABLE": ("acgs_lite.z3_verify", "Z3_AVAILABLE", "pip install z3-solver"),
+    "Z3_RISK_THRESHOLD": (
+        "acgs_lite.z3_verify",
+        "Z3_RISK_THRESHOLD",
+        "pip install z3-solver",
+    ),
+    "Z3ConstraintVerifier": (
+        "acgs_lite.z3_verify",
+        "Z3ConstraintVerifier",
+        "pip install z3-solver",
+    ),
+    "Z3VerifyResult": ("acgs_lite.z3_verify", "Z3VerifyResult", "pip install z3-solver"),
+}
 
 try:
     from acgs_lite.lean_verify import (
@@ -132,84 +186,48 @@ except ImportError:
     ):
         _MISSING_OPTIONAL[_s] = "pip install acgs-lite[lean]"
 
-try:
-    from acgs_lite.openshell import (
-        ActionContext,
-        ActionEnvelope,
-        ActionPayloadSummary,
-        ActionRequirements,
-        ActionType,
-        ActorRef,
-        ActorRole,
-        ApprovalReviewRequest,
-        ApprovalReviewResponse,
-        ApprovalSubmission,
-        AuditEvent,
-        AuditEventType,
-        ComplianceResult,
-        ComplianceStatus,
-        DecisionType,
-        ExecutionOutcome,
-        ExternalRef,
-        GovernanceDecision,
-        GovernanceStateBackend,
-        GovernanceStateChecksumError,
-        GovernanceStateError,
-        GovernanceStateMigrationError,
-        GovernanceStateObservabilityHook,
-        GovernanceStateVersionError,
-        InMemoryGovernanceStateBackend,
-        JsonFileGovernanceStateBackend,
-        OperationType,
-        OutcomeStatus,
-        RedisGovernanceStateBackend,
-        ResourceRef,
-        RiskLevel,
-        SQLiteGovernanceStateBackend,
-        create_openshell_governance_app,
-        create_openshell_governance_router,
+_openshell_syms = (
+    "ActionContext",
+    "ActionEnvelope",
+    "ActionPayloadSummary",
+    "ActionRequirements",
+    "ActionType",
+    "ActorRef",
+    "ActorRole",
+    "ApprovalReviewRequest",
+    "ApprovalReviewResponse",
+    "ApprovalSubmission",
+    "AuditEvent",
+    "AuditEventType",
+    "ComplianceResult",
+    "ComplianceStatus",
+    "DecisionType",
+    "ExecutionOutcome",
+    "ExternalRef",
+    "GovernanceDecision",
+    "GovernanceStateBackend",
+    "GovernanceStateChecksumError",
+    "GovernanceStateError",
+    "GovernanceStateMigrationError",
+    "GovernanceStateObservabilityHook",
+    "GovernanceStateVersionError",
+    "InMemoryGovernanceStateBackend",
+    "JsonFileGovernanceStateBackend",
+    "OperationType",
+    "OutcomeStatus",
+    "RedisGovernanceStateBackend",
+    "ResourceRef",
+    "RiskLevel",
+    "SQLiteGovernanceStateBackend",
+    "create_openshell_governance_app",
+    "create_openshell_governance_router",
+)
+for _s in _openshell_syms:
+    _LAZY_EXPORTS[_s] = (
+        "acgs_lite.openshell",
+        _s,
+        "pip install acgs-lite",
     )
-except ImportError:
-    _openshell_syms = (
-        "ActionContext",
-        "ActionEnvelope",
-        "ActionPayloadSummary",
-        "ActionRequirements",
-        "ActionType",
-        "ActorRef",
-        "ActorRole",
-        "ApprovalReviewRequest",
-        "ApprovalReviewResponse",
-        "ApprovalSubmission",
-        "AuditEvent",
-        "AuditEventType",
-        "ComplianceResult",
-        "ComplianceStatus",
-        "DecisionType",
-        "ExecutionOutcome",
-        "ExternalRef",
-        "GovernanceDecision",
-        "GovernanceStateBackend",
-        "GovernanceStateChecksumError",
-        "GovernanceStateError",
-        "GovernanceStateMigrationError",
-        "GovernanceStateObservabilityHook",
-        "GovernanceStateVersionError",
-        "InMemoryGovernanceStateBackend",
-        "JsonFileGovernanceStateBackend",
-        "OperationType",
-        "OutcomeStatus",
-        "RedisGovernanceStateBackend",
-        "ResourceRef",
-        "RiskLevel",
-        "SQLiteGovernanceStateBackend",
-        "create_openshell_governance_app",
-        "create_openshell_governance_router",
-    )
-    for _s in _openshell_syms:
-        _MISSING_OPTIONAL[_s] = (
-            "pip install acgs-lite  # openshell is part of the base package; if missing, check your Python path"
-        )
 from acgs_lite.provenance import ProvenanceNode, ProvenanceRecord
 from acgs_lite.scoring import ConstitutionalImpactScorer, RuleBasedScorer, score_impact
 from acgs_lite.trajectory import (
@@ -221,22 +239,6 @@ from acgs_lite.trajectory import (
     TrajectorySession,
     TrajectoryViolation,
 )
-
-try:
-    from acgs_lite.z3_verify import (
-        Z3_AVAILABLE,
-        Z3_RISK_THRESHOLD,
-        Z3ConstraintVerifier,
-        Z3VerifyResult,
-    )
-except ImportError:
-    for _s in ("Z3_AVAILABLE", "Z3_RISK_THRESHOLD", "Z3ConstraintVerifier", "Z3VerifyResult"):
-        _MISSING_OPTIONAL[_s] = "pip install z3-solver"
-
-# These eager imports are safe without psycopg/sqlite3: postgres_bundle_store
-# imports psycopg only inside _import_psycopg(), and sqlite3 is stdlib.
-from acgs_lite.constitution.postgres_bundle_store import PostgresBundleStore
-from acgs_lite.constitution.sqlite_bundle_store import SQLiteBundleStore
 
 __version__ = VERSION
 
@@ -402,6 +404,7 @@ __all__ = [
     "ConstitutionalViolationError",
     "GovernanceError",
     "MACIViolationError",
+    "PolicyDeniedError",
     # Licensing
     "set_license",
     "LicenseInfo",
@@ -460,6 +463,7 @@ _STABILITY_STABLE: frozenset[str] = frozenset(
         "ConstitutionalViolationError",
         "GovernanceError",
         "MACIViolationError",
+        "PolicyDeniedError",
         # Circuit breaker (Article 14 kill-switch)
         "GovernanceCircuitBreaker",
         "GovernanceHaltError",
@@ -620,6 +624,18 @@ def stability(name: str) -> str:
 
 
 def __getattr__(name: str) -> object:
+    if name in _LAZY_EXPORTS:
+        module_name, attr_name, install_hint = _LAZY_EXPORTS[name]
+        try:
+            from importlib import import_module
+
+            value = getattr(import_module(module_name), attr_name)
+        except ImportError as exc:
+            raise ImportError(
+                f"acgs_lite.{name!r} requires optional dependencies. Install with: {install_hint}"
+            ) from exc
+        globals()[name] = value
+        return value
     if name in _MISSING_OPTIONAL:
         raise ImportError(
             f"acgs_lite.{name!r} requires optional dependencies. "

@@ -80,6 +80,7 @@ from acgs_lite import (
     MACIViolationError,
     OperationType,
     OutcomeStatus,
+    PolicyDeniedError,
     RedisGovernanceStateBackend,
     ResourceRef,
     RiskLevel,
@@ -181,6 +182,7 @@ __all__ = [
     "ConstitutionalViolationError",
     "GovernanceError",
     "MACIViolationError",
+    "PolicyDeniedError",
     # Licensing
     "set_license",
     "LicenseInfo",

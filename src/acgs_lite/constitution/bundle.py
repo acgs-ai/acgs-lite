@@ -169,6 +169,12 @@ class ConstitutionBundle(BaseModel):
                 f"{self.status.value!r} to {target.value!r}"
             )
 
+    def to_adapter_dict(self) -> dict[str, Any]:
+        """Serialize with adapter-facing policy hash vocabulary."""
+        from acgs_lite.legitimacy.receipt import to_receipt_dict
+
+        return to_receipt_dict(self)
+
     def transition_to(
         self,
         target: BundleStatus,
