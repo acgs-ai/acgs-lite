@@ -31,6 +31,7 @@ class TestApiStability:
             "AuditLog",
             "MACIRole",
             "ConstitutionalViolationError",
+            "PolicyDeniedError",
             "GovernanceCircuitBreaker",
         ):
             assert acgs_lite.stability(name) == "stable", name

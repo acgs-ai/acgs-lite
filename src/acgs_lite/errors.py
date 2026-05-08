@@ -50,6 +50,34 @@ class ConstitutionalViolationError(GovernanceError):
         Exception.__init__(self, message)
 
 
+class PolicyDeniedError(ConstitutionalViolationError):
+    """Raised when a policy denies an action through an adapter-facing contract."""
+
+    __slots__ = ("policy_id", "policy_hash")
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        policy_id: str | None = None,
+        rule_id: str | None = None,
+        policy_hash: str | None = None,
+        severity: str = "high",
+        action: str = "",
+        enforcement_action: ViolationAction | None = None,
+    ) -> None:
+        effective_rule_id = rule_id or policy_id or "policy"
+        self.policy_id = policy_id
+        self.policy_hash = policy_hash
+        super().__init__(
+            message,
+            rule_id=effective_rule_id,
+            severity=severity,
+            action=action,
+            enforcement_action=enforcement_action,
+        )
+
+
 class MACIViolationError(GovernanceError):
     """Raised when MACI separation of powers is violated.
 

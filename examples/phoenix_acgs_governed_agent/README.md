@@ -1,11 +1,10 @@
-# Phoenix + ACGS-lite Governed Execution Telemetry
+# Phoenix + ACGS-lite Governed Execution Reference
 
-End-to-end example showing how `acgs-lite` governance decisions
-(allow / deny / review / fail-closed) ride OTLP span attributes into
-[Arize Phoenix](https://github.com/Arize-ai/phoenix). Each
-``GovernedCallable``-wrapped tool call produces one
-``acgs.governed_execution`` span carrying the decision outcome, the
-audit-log receipt id, and the constitution version.
+End-to-end reference implementation of `request -> decision -> receipt -> bounded execution`
+with [Arize Phoenix](https://github.com/Arize-ai/phoenix) telemetry. Each
+``GovernedCallable``-wrapped tool call produces one ``acgs.governed_execution``
+span carrying the decision outcome, receipt id/hash, and constitution version.
+The ``governance.decision.*`` attributes are experimental.
 
 Read the schema first — `GOVERNANCE_ATTRIBUTES.md` documents the exact
 attributes emitted on each span. Then `ARCHITECTURE.md` explains the

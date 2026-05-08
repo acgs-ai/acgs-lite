@@ -40,7 +40,7 @@ class PolicyBoundary:
 
     A ``PolicyBoundary`` defines absolute forbidden zones — actions that can
     never be allowed regardless of what constitutional rules say. This is a
-    safety layer *above* the governance engine: even if a rule explicitly
+    hard control boundary above the governance engine: even if a rule explicitly
     allows an action, a matching boundary will block it.
 
     Use cases:

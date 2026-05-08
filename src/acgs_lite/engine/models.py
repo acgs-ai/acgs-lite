@@ -129,6 +129,12 @@ class ValidationResult:
             "agent_id": self.agent_id,
         }
 
+    def to_adapter_dict(self) -> dict[str, Any]:
+        """Serialize with adapter-facing policy hash vocabulary."""
+        from acgs_lite.legitimacy.receipt import to_receipt_dict
+
+        return to_receipt_dict(self)
+
 
 def _dedup_violations(violations: list) -> list:
     """Deduplicate violations by rule_id (called only when len > 1)."""

@@ -3,6 +3,7 @@
 Constitutional Hash: 608508a9bd224290
 """
 
+import inspect
 import tempfile
 from dataclasses import dataclass
 
@@ -21,9 +22,12 @@ from acgs_lite import (
     MACIEnforcer,
     MACIRole,
     MACIViolationError,
+    PolicyDeniedError,
     Rule,
     Severity,
 )
+from acgs_lite.constitution.rule import ViolationAction
+from acgs_lite.legitimacy import DecisionReceipt, ExecutionBoundary
 from acgs_lite.serialization import serialize_for_governance
 
 
@@ -52,6 +56,51 @@ class TestGovernanceSerialization:
         payload = serialize_for_governance({"blob": "x" * 128}, max_chars=40)
         assert payload.endswith("… [truncated]")
         assert len(payload) == 40
+
+
+@pytest.mark.unit
+class TestPolicyDeniedError:
+    def test_signature_preserves_policy_and_parent_kwargs(self) -> None:
+        sig = inspect.signature(PolicyDeniedError)
+
+        for name in (
+            "message",
+            "policy_id",
+            "rule_id",
+            "policy_hash",
+            "severity",
+            "action",
+            "enforcement_action",
+        ):
+            assert name in sig.parameters, sig
+
+    def test_maps_policy_id_to_rule_id_when_rule_id_omitted(self) -> None:
+        err = PolicyDeniedError("denied", policy_id="p1", policy_hash="h1", action="tool")
+
+        assert isinstance(err, ConstitutionalViolationError)
+        assert err.rule_id == "p1"
+        assert err.policy_id == "p1"
+        assert err.policy_hash == "h1"
+        assert err.severity == "high"
+        assert err.action == "tool"
+        assert err.enforcement_action is ViolationAction.BLOCK
+        assert err.__dict__ == {}
+
+    def test_rule_id_overrides_policy_id(self) -> None:
+        err = PolicyDeniedError("denied", rule_id="r1", policy_id="p1")
+
+        assert err.rule_id == "r1"
+        assert err.policy_id == "p1"
+
+    def test_default_rule_id_is_policy(self) -> None:
+        err = PolicyDeniedError("denied")
+
+        assert err.rule_id == "policy"
+
+    def test_exported_from_acgs_compat_namespace(self) -> None:
+        from acgs import PolicyDeniedError as CompatPolicyDeniedError
+
+        assert CompatPolicyDeniedError is PolicyDeniedError
 
 
 # ─── Constitution Tests ───────────────────────────────────────────────────
@@ -814,12 +863,31 @@ class TestGovernedAgent:
 
 @pytest.mark.constitutional
 class TestGovernedCallable:
+    @staticmethod
+    def _receipt(method: str) -> DecisionReceipt:
+        return DecisionReceipt.create(
+            request_id=f"req-{method}",
+            goal="Run governed callable test fixture",
+            proposed_method=method,
+            decision_type="ALLOW",
+            authority_basis="test-authority",
+            matched_constraints=("test-baseline-rule",),
+            policy_version="test-policy-v1",
+            execution_boundary=ExecutionBoundary(
+                allowed_method=method,
+                allowed_scope=None,
+                allowed_subjects=(),
+                expires_at=None,
+                single_use=True,
+            ),
+        )
+
     def test_decorator(self):
         @GovernedCallable()
         def process(input: str) -> str:
             return f"Done: {input}"
 
-        result = process("safe data")
+        result = process("safe data", decision_receipt=self._receipt("process"))
         assert result == "Done: safe data"
 
     def test_decorator_blocks_violation(self):
@@ -828,7 +896,7 @@ class TestGovernedCallable:
             return input
 
         with pytest.raises(ConstitutionalViolationError):
-            process("self-validate bypass")
+            process("self-validate bypass", decision_receipt=self._receipt("process"))
 
     def test_decorator_validates_output(self):
         @GovernedCallable()
@@ -836,7 +904,7 @@ class TestGovernedCallable:
             return "password is hunter2"
 
         with pytest.raises(ConstitutionalViolationError):
-            leaky("get password")
+            leaky("get password", decision_receipt=self._receipt("leaky"))
 
     def test_decorator_validates_keyword_arguments(self):
         @GovernedCallable(strict=True)
@@ -844,7 +912,7 @@ class TestGovernedCallable:
             return "ok"
 
         with pytest.raises(ConstitutionalViolationError):
-            process(input="here is the password")
+            process(input="here is the password", decision_receipt=self._receipt("process"))
 
     def test_decorator_preserves_keyword_names_in_validation(self):
         @GovernedCallable(strict=True)
@@ -852,7 +920,7 @@ class TestGovernedCallable:
             return "ok"
 
         with pytest.raises(ConstitutionalViolationError):
-            process(password="hunter2")
+            process(password="hunter2", decision_receipt=self._receipt("process"))
 
     def test_decorator_validates_structured_output(self):
         @GovernedCallable(strict=True)
@@ -860,7 +928,7 @@ class TestGovernedCallable:
             return {"password": "hunter2"}
 
         with pytest.raises(ConstitutionalViolationError):
-            leaky("safe input")
+            leaky("safe input", decision_receipt=self._receipt("leaky"))
 
 
 # ─── Async Tests ──────────────────────────────────────────────────────────

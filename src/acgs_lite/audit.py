@@ -245,6 +245,12 @@ class AuditEntry:
             "timestamp": self.timestamp,
         }
 
+    def to_adapter_dict(self) -> dict[str, Any]:
+        """Serialize with adapter-facing policy hash vocabulary."""
+        from acgs_lite.legitimacy.receipt import to_receipt_dict
+
+        return to_receipt_dict(self)
+
     @property
     def entry_hash(self) -> str:
         """Hash of this entry for chain integrity."""

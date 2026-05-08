@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol
 
+from acgs_lite.legitimacy.decide import DecisionState, canonicalize_decision_state
+
 
 class EnforcementAction(Enum):
     """What the PEP does with a decision."""
@@ -51,10 +53,21 @@ class PolicyDecision:
     timestamp: datetime
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def decision_type(self) -> DecisionState:
+        return canonicalize_decision_state(
+            self.outcome,
+            critical=self.severity == "critical",
+            kill_switch=bool(
+                self.metadata.get("kill_switch") or self.metadata.get("circuit_breaker")
+            ),
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "decision_id": self.decision_id,
             "outcome": self.outcome.value,
+            "decision_type": self.decision_type,
             "action_text": self.action_text,
             "matched_rules": list(self.matched_rules),
             "severity": self.severity,

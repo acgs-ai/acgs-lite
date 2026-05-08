@@ -16,6 +16,11 @@ from acgs_lite import (
     Rule,
     Severity,
 )
+from acgs_lite.legitimacy import (
+    BASELINE_CONSTRAINT_MARKER,
+    DecisionReceipt,
+    ExecutionBoundary,
+)
 
 
 def main() -> None:
@@ -149,11 +154,34 @@ def main() -> None:
     def process_request(input: str) -> str:
         return f"Processed: {input}"
 
-    result = process_request("normal request")
+    default_policy = Constitution.default().hash
+
+    def receipt(goal: str) -> DecisionReceipt:
+        return DecisionReceipt.create(
+            request_id=f"demo-{goal[:16]}",
+            goal=goal,
+            proposed_method="process_request",
+            decision_type="ALLOW",
+            authority_basis="demo:quickstart",
+            matched_constraints=(BASELINE_CONSTRAINT_MARKER,),
+            policy_version=default_policy,
+            execution_boundary=ExecutionBoundary(
+                allowed_method="process_request",
+                allowed_scope=None,
+                allowed_subjects=(),
+                expires_at=None,
+                single_use=False,
+            ),
+        )
+
+    result = process_request("normal request", decision_receipt=receipt("answer normal request"))
     print(f"   ✅ {result}")
 
     try:
-        process_request("bypass validation self-validate")
+        process_request(
+            "bypass validation self-validate",
+            decision_receipt=receipt("attempt self-validation bypass"),
+        )
     except ConstitutionalViolationError as e:
         print(f"   ❌ Decorator blocked: {e}")
 

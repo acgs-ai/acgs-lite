@@ -56,10 +56,9 @@ class TestAcgsNamespaceImport:
 
     def test_validationresult_is_canonical_model_type(self) -> None:
         import acgs_lite.engine as engine
-
-        from acgs_lite.engine.models import ValidationResult as ModelValidationResult
         from acgs_lite.engine.audit_runtime import _FastAuditLog as RuntimeFastAuditLog
         from acgs_lite.engine.core import GovernanceEngine as CoreGovernanceEngine
+        from acgs_lite.engine.models import ValidationResult as ModelValidationResult
         from acgs_lite.engine.types import ValidationResult as TypesValidationResult
 
         assert engine.GovernanceEngine is CoreGovernanceEngine
