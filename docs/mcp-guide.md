@@ -90,4 +90,4 @@ acgs status --mcp
 ## Next Steps
 - Learn how to [Deploy to Cloud Run](architecture.md#cloud-run) as a remote MCP server.
 - Review the [2026 Regulatory Compliance](compliance-2026.md) requirements.
-- See [Advanced Safety Patterns](supervisor-models.md).
+- See [Advanced Governance Patterns](supervisor-models.md).

@@ -10,9 +10,9 @@ RUFF        = $(PYTHON) -m ruff
 MYPY        = $(PYTHON) -m mypy
 BUILD       = $(PYTHON) -m build
 TWINE       = $(PYTHON) -m twine
-PACKAGE_DIR = packages/acgs-lite
-SRC_DIR     = src/acgs_lite
-TEST_DIR    = tests
+PACKAGE_DIR := .
+SRC_DIR     = $(PACKAGE_DIR)/src/acgs_lite
+TEST_DIR    = $(PACKAGE_DIR)/tests
 
 # Detect repo root (two levels up from this Makefile)
 REPO_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)

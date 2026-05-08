@@ -52,13 +52,13 @@ Autonomous coding agents (like those powered by MCP) are now writing and deployi
 Preventing an agent from introducing security vulnerabilities or exfiltrating API keys.
 
 ### The ACGS Solution
-1.  **The Agentic Firewall**: Validates every shell command and file write.
+1.  **Governed execution boundary**: Validates shell commands and file writes before execution.
 2.  **No-Secrets Rule**: A rule that blocks any file write containing patterns that look like private keys or AWS secrets.
 3.  **Chain of Command**: MACI roles ensure that the agent can "Propose" a code change, but only a human or a high-trust "Validator" model can "Execute" the deployment.
 
 ---
 
 ## Next Steps
-- See how to implement [Advanced Safety Patterns](supervisor-models.md).
+- See how to implement [Advanced Governance Patterns](supervisor-models.md).
 - View the [OWASP 2026 Mitigation Matrix](owasp-2026.md).
 - Start with the [Quickstart Guide](quickstart.md).

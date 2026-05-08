@@ -1,10 +1,10 @@
-# Why Constitutional AI Governance Matters: Securing Autonomous Agents
+# Why Constitutional AI Governance Matters: Bounding Agent Action
 
-**Meta Description**: Discover why Constitutional AI Governance and the ACGS library are essential for securing autonomous agents, ensuring compliance, and preventing catastrophic AI failures.
+**Meta Description**: Discover how Constitutional AI Governance and the ACGS library make agent action explicit, bounded, and replayable before execution.
 
 ---
 
-Want to know the secret behind enterprise AI deployments that consistently scale without causing security breaches or compliance nightmares? It's not luck—it's **Constitutional AI Governance**.
+Enterprise AI deployments need more than prompt text when agents can call tools, query databases, or execute code. They need **Constitutional AI Governance**: a deterministic boundary that checks proposed action before side effects run.
 
 As organizations move from LLM chatbots to fully autonomous AI agents that can use tools, query databases, and execute code, the risk surface expands exponentially. Traditional application security isn't enough. Securing an agent requires embedding ethical principles, safety constraints, and behavioral guidelines directly into the autonomous system.
 
@@ -13,8 +13,6 @@ In this guide, you'll learn:
 - What Constitutional AI Governance is and how it works
 - How the MACI architecture prevents "shadow AI" and self-validation
 - The role of the ACGS library in enterprise compliance
-
-Let's dive into the strategies that will transform your AI security posture.
 
 ## The Problem: Why Traditional Security Fails for Agents
 
@@ -30,18 +28,18 @@ Unlike deterministic software, LLMs are probabilistic. They can invent new ways 
 
 ## The Solution: Constitutional AI Governance
 
-Constitutional AI governance is an emerging field focused on defining a "safe zone" for agentic operations. 
+Constitutional AI governance defines an execution boundary for agentic operations.
 
 At its core is **The Constitution**—a foundational document (like `rules.yaml`) that defines the agent's values, identity, and hard constraints. Instead of hoping the prompt engineered instructions hold up, a separate, deterministic system evaluates the agent's proposed actions against this Constitution.
 
-### The "Agentic Firewall"
+### The Legitimacy Boundary
 
-The Agentic Firewall is a protocol-layer defense. It interposes between the agent's cognitive layer (the LLM) and its execution layer (the environment/tools).
+The legitimacy boundary sits between the agent's cognitive layer (the LLM) and its execution layer (the environment/tools).
 
 1. **Agent Proposes**: "I will run `DROP TABLE users;` to clear the cache."
-2. **Firewall Intercepts**: Checks the action against the Constitution.
+2. **Boundary Intercepts**: Checks the action against the Constitution.
 3. **Engine Evaluates**: Rule `no-destructive-db-ops` is triggered.
-4. **Firewall Blocks**: The action is denied, the agent is notified of the violation, and the event is cryptographically logged.
+4. **Boundary Blocks**: The action is denied, the agent is notified of the violation, and the event is cryptographically logged.
 
 ## MACI: The Separation of Powers for AI
 
@@ -73,13 +71,13 @@ Validation adds overhead that is workload- and rule-set-dependent (deterministic
 Yes. ACGS provides native wrappers (`GovernedAgent`) that drop directly into existing LangChain, AutoGen, CrewAI, and raw OpenAI/Anthropic workflows. You don't need to rewrite your agent's logic.
 
 ### How does this help with the EU AI Act?
-The EU AI Act requires risk classification, human oversight, and post-market monitoring. ACGS automatically maps its runtime constraints to these requirements, providing 5/9 auto-coverage out-of-the-box and generating the artifacts needed for compliance reporting.
+The EU AI Act requires risk classification, human oversight, and post-market monitoring. ACGS can map runtime constraints to these requirements and generate artifacts that support compliance reporting.
 
 ## Conclusion
 
-Implementing Constitutional AI Governance with ACGS will help your organization deploy autonomous agents more safely, more securely, and with clearer compliance evidence. Stop hoping your prompts are secure, and start enforcing deterministic boundaries.
+Implementing Constitutional AI Governance with ACGS helps your organization make autonomous-agent actions explicit, bounded, and auditable. Stop relying on prompt intent alone, and start enforcing deterministic boundaries.
 
-**Ready to secure your agents?** Check out the [ACGS Quickstart](quickstart.md) to implement your first Agentic Firewall in under 5 lines of code.
+**Ready to bound agent action?** Check out the [ACGS Quickstart](quickstart.md) to implement your first governed execution path in under 5 lines of code.
 
 ---
 

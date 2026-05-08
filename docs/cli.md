@@ -64,7 +64,7 @@ The integration test auto-runs only when that variable is set to `1`.
 ## 📈 Observability & Telemetry
 
 ### `acgs observe`
-Export real-time governance telemetry. Useful for local debugging of "Agentic Firewall" decisions.
+Export real-time governance telemetry. Useful for local debugging of governed execution decisions.
 ```bash
 acgs observe "Analyze the financial report" --prometheus
 ```

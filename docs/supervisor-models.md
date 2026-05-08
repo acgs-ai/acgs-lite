@@ -1,4 +1,4 @@
-# Advanced Safety Patterns: Verification Kernels & Supervisor Models
+# Advanced Governance Patterns: Verification Kernels & Supervisor Models
 
 **Meta Description**: Explore advanced AI safety architectures like Verification Kernels and Supervisor Models using ACGS-Lite to ensure robust governance for autonomous agents.
 

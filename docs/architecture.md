@@ -1,4 +1,4 @@
-# Architecture: The Agentic Firewall Lifecycle
+# Architecture: Governed Execution Lifecycle
 
 **Meta Description**: Deep dive into the ACGS-Lite architecture. Learn about the Governance Engine, the validation lifecycle, and how MACI roles enforce separation of powers.
 
@@ -33,7 +33,7 @@ The **Constitution** is an immutable set of `Rule` objects. Every rule has an `i
 
 ### 2. The Governance Engine
 The `GovernanceEngine` is the deterministic "Judge." It evaluates text (input or output) against the Constitution and returns a `ValidationResult`.
-*   **Fail-Closed Design**: If the engine encounters an internal error (e.g., a malformed regex or memory issue), it defaults to `valid=False`. Safety is never sacrificed for availability.
+*   **Fail-Closed Design**: If the engine encounters an internal error (e.g., a malformed regex or memory issue), it defaults to `valid=False`. Missing or unverifiable governance proof never becomes execution authority.
 
 ### 3. Governed Wrappers
 The library provides `GovernedAgent`, `GovernedCallable`, and framework-specific adapters (OpenAI, Anthropic, etc.). These wrappers intercept calls and manage the validation lifecycle automatically.
@@ -62,7 +62,7 @@ In mission-critical systems, a single agent should not have the power to both pr
 | **Executor** | Performs the approved task | The `GovernedAgent` wrapper |
 | **Observer** | Records the history | The `AuditLog` backend |
 
-By strictly separating these roles, ACGS-Lite ensures that even if a Proposer (the agent) is compromised via prompt injection, it physically cannot bypass the Validator (the engine).
+By separating these roles, ACGS-Lite prevents a Proposer (the agent) from approving its own high-risk action through the governed execution path.
 
 ---
 
@@ -75,7 +75,7 @@ To prevent "recursive failure loops" where an agent repeatedly tries to violate 
 For financial or safety-critical logic, ACGS-Lite supports the **Z3 SMT Solver**. This allows you to define mathematical constraints (e.g., `balance >= withdrawal_amount`) that are proven safe before execution.
 
 ### Leanstral Proof Certificates
-For high-assurance environments, the `LeanstralVerifier` can generate Lean 4 proof certificates using Mistral models, providing a machine-verifiable proof of safety for every governance decision.
+For high-assurance environments, the `LeanstralVerifier` can generate Lean 4 proof certificates using Mistral models, providing machine-verifiable evidence for selected governance decisions.
 
 ## Cloud Run
 
