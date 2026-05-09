@@ -52,6 +52,7 @@ autogen = ["autogen-core>=0.4", "autogen-agentchat>=0.4"]
 mcp = ["mcp>=1.0", "structlog>=21.0"]
 crewai = ["crewai>=0.30"]
 autonoma = ["pyjwt>=2.0", "structlog>=21.0", "fastapi>=0.100"]
+github = ["httpx>=0.27"]
 server = ["fastapi>=0.100", "uvicorn>=0.24"]
 gitlab = ["httpx>=0.27", "starlette>=0.37"]
 google-cloud = ["google-cloud-logging>=3.0"]
@@ -126,6 +127,7 @@ markers = [
     "compliance: Regulatory framework tests",
     "constitutional: Governance engine validation tests",
     "benchmark: Performance tests",
+    "flaky: Unstable or timing-sensitive tests",
     "red_team: Adversarial bypass and exhaustion scenarios",
     "e2e: End-to-end governance scenarios requiring stable fixture baselines",
 ]

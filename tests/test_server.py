@@ -92,6 +92,39 @@ class TestGovernanceServer:
         assert data["valid"] is False
         assert any(v["rule_id"] == "S-001" for v in data["violations"])
 
+    def test_receipts_endpoint_returns_check_mapping(self, tmp_path: Any) -> None:
+        constitution = Constitution.from_rules(
+            [
+                Rule(
+                    id="S-002",
+                    text="No forbidden wording",
+                    severity=Severity.CRITICAL,
+                    keywords=["forbidden"],
+                )
+            ]
+        )
+        app = self._make_app(tmp_path, constitution)
+        client = TestClient(app)
+
+        response = client.post(
+            "/receipts",
+            json={
+                "repository": "acme/governance",
+                "head_sha": "abc123def456",
+                "head_ref": "merge-queue-branch",
+                "base_ref": "main",
+                "action": "safe merge queue gate",
+                "context": {"event_name": "merge_group"},
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["passed"] is True
+        assert body["check_conclusion"] in {"success", "neutral"}
+        assert body["receipt"]["repository"] == "acme/governance"
+        assert body["check"]["name"] == "acgs/merge-group"
+
     def test_stats_endpoint_reports_validation_count(self, tmp_path: Any) -> None:
         app = self._make_app(tmp_path)
         validate = self._route_endpoint(app, "/validate")

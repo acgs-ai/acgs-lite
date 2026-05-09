@@ -23,6 +23,10 @@ from acgs_lite.constitution import Constitution
 from acgs_lite.engine import GovernanceEngine
 from acgs_lite.events import GovernanceEvent, get_event_bus
 from acgs_lite.federation import federation_router
+from acgs_lite.integrations.github_merge_queue import (
+    MergeGroupReceiptRequest,
+    build_receipt_outcome,
+)
 from acgs_lite.integrations.openshell_governance import (
     GovernanceStateBackend,
     GovernanceStateObservabilityHook,
@@ -247,6 +251,48 @@ def create_governance_app(
             context=context,
         )
         return result.to_dict()
+
+    @app.post("/receipts", dependencies=auth_deps)
+    def create_receipt(payload: dict[str, Any]) -> dict[str, Any]:
+        repository = payload.get("repository", "")
+        head_sha = payload.get("head_sha", "")
+        head_ref = payload.get("head_ref", "")
+        base_ref = payload.get("base_ref", "")
+        action = cast(str, payload.get("action", ""))
+        check_name = cast(str, payload.get("check_name", "acgs/merge-group"))
+        agent_id = cast(str, payload.get("agent_id", "github-merge-queue"))
+        source = cast(str, payload.get("source", "github.merge_group"))
+
+        if not all(isinstance(value, str) and value.strip() for value in (repository, head_sha, head_ref, base_ref)):
+            raise HTTPException(
+                status_code=422,
+                detail="'repository', 'head_sha', 'head_ref', and 'base_ref' must be non-empty strings",
+            )
+        if not action.strip():
+            raise HTTPException(status_code=422, detail="'action' must be a non-empty string")
+
+        context = payload.get("context", {})
+        if not isinstance(context, dict):
+            raise HTTPException(status_code=422, detail="'context' must be an object")
+
+        request = MergeGroupReceiptRequest(
+            repository=repository,
+            head_sha=head_sha,
+            head_ref=head_ref,
+            base_ref=base_ref,
+            action=action,
+            check_name=check_name,
+            agent_id=agent_id,
+            source=source,
+            context=context,
+        )
+        validation = engine.validate(action, agent_id=agent_id, context=context)
+        outcome = build_receipt_outcome(
+            request=request,
+            validation=validation,
+            constitutional_hash=gov_constitution.hash,
+        )
+        return outcome.to_dict()
 
     # --- Rules CRUD ---
 

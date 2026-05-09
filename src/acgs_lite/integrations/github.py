@@ -34,6 +34,7 @@ from typing import Any
 from acgs_lite.audit import AuditEntry, AuditLog
 from acgs_lite.constitution import Constitution
 from acgs_lite.engine import GovernanceEngine, ValidationResult
+from acgs_lite.integrations.github_merge_queue import GitHubMergeQueueAdapter
 from acgs_lite.maci import MACIEnforcer, MACIRole
 
 logger = logging.getLogger(__name__)
@@ -331,9 +332,11 @@ class GitHubWebhookHandler:
         *,
         webhook_secret: str,
         bot: GitHubGovernanceBot,
+        merge_queue_adapter: GitHubMergeQueueAdapter | None = None,
     ) -> None:
         self._secret = webhook_secret.encode()
         self._bot = bot
+        self._merge_queue_adapter = merge_queue_adapter
 
     def verify_signature(self, payload: bytes, signature: str) -> bool:
         """Verify the GitHub webhook HMAC-SHA256 signature.
@@ -392,6 +395,8 @@ class GitHubWebhookHandler:
         """Route a webhook event to the appropriate handler."""
         if event_type == "pull_request":
             return await self._handle_pull_request(body)
+        if event_type == "merge_group":
+            return await self._handle_merge_group(body)
 
         return {
             "event": event_type,
@@ -420,6 +425,23 @@ class GitHubWebhookHandler:
             "governance_passed": report.passed,
             "violations": len(report.violations),
             "risk_score": report.risk_score,
+        }
+
+    async def _handle_merge_group(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Handle merge_group events (merge queue checks_requested)."""
+        action = body.get("action", "")
+        if action != "checks_requested" or self._merge_queue_adapter is None:
+            return {
+                "event": "merge_group",
+                "action": action,
+                "status": "skipped",
+            }
+
+        outcome = await self._merge_queue_adapter.evaluate_merge_group(body)
+        return {
+            "event": "merge_group",
+            "action": action,
+            **outcome.to_dict(),
         }
 
 
@@ -745,4 +767,18 @@ def create_github_actions_config(
         "\n"
         "          asyncio.run(main())\n"
         '          "\n'
+    )
+
+
+def create_merge_group_github_actions_config(
+    *, receipts_url_env: str = "ACGS_RECEIPTS_URL", api_key_env: str = "ACGS_API_KEY"
+) -> str:
+    """Generate the merge-group governance workflow template."""
+    from acgs_lite.integrations.github_merge_queue import (
+        create_merge_group_github_actions_config as _create_merge_group_github_actions_config,
+    )
+
+    return _create_merge_group_github_actions_config(
+        receipts_url_env=receipts_url_env,
+        api_key_env=api_key_env,
     )
