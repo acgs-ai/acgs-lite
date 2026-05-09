@@ -74,3 +74,6 @@ examples/compliance_reports/reports/
 
 # Root-level generated PDFs (eu_ai_act_*.pdf, text.pdf — assessment outputs)
 /*.pdf
+
+.dev.vars*
+!.dev.vars.example
