@@ -49,6 +49,7 @@ rust/target/
 
 # Claude
 .claude/
+.claude.local.md
 
 # MkDocs
 site/

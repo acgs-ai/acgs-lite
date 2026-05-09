@@ -1,0 +1,35 @@
+name: claude-md-lint
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/CLAUDE.md"
+      - "AGENTS.md"
+      - "docs/**/*.md"
+      - "Makefile"
+      - "scripts/check_claude_md.py"
+      - "scripts/claude_md_lint_allowlist.txt"
+      - ".github/workflows/claude-md-lint.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Lint Claude/agent docs
+        run: |
+          python scripts/check_claude_md.py \
+            CLAUDE.md \
+            AGENTS.md \
+            docs/AGENT_SKILL_AUDIT.md

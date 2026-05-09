@@ -1,6 +1,14 @@
 # Agent & Skill Audit
 
-Audit date: 2026-04-24  
+> **Historical document — do not treat as current.** The hooks, rules, and
+> settings tables below describe the state on the audit date. Those files were
+> removed from version control by commit `219f493d chore: remove dev dot-files
+> from repo tracking`; today the only tracked entry under `.claude/` is
+> `evals/`. Local hooks and rules now live in user-home (`~/.claude/`) and are
+> auto-loaded by Claude Code. Kept here as a record of what the layout looked
+> like at audit time.
+
+Audit date: 2026-04-24
 Scope: `.claude/` directory — settings, hooks, commands, rules
 
 ---
@@ -22,17 +30,9 @@ No `.claude/agents/` directory. Agent dispatch happens via the parent monorepo.
 
 ## Slash Commands
 
-### `.claude/commands/test-and-verify.sh`
-
-| Field | Value |
-|-------|-------|
-| Trigger | `bash .claude/commands/test-and-verify.sh [--quick]` |
-| Purpose | Run lint → typecheck → tests → build in sequence |
-| Input | Optional `--quick` flag (skips tests and build) |
-| Output | Exit 0 on all pass, exit 1 on any failure with summary |
-| Status | **Kept** |
-
-No other slash commands.
+No `.claude/commands/` directory in this repo. Verification runs through the
+Makefile target `make check` (`lint typecheck test`). No project-local slash
+commands.
 
 ---
 

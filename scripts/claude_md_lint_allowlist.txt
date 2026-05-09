@@ -1,0 +1,17 @@
+# Allowlist for scripts/check_claude_md.py
+# One entry per line. Lines starting with # are comments.
+# Add legitimate placeholder paths or external/historical references that the
+# linter would otherwise flag as broken.
+
+# docs/AGENT_SKILL_AUDIT.md is a 2026-04-24 historical audit; the .claude/
+# paths below were removed from tracking in commit 219f493d. Banner at top of
+# the doc explains. Kept as record; allowlist prevents the lint from blocking.
+.claude/skills/
+.claude/agents/
+.claude/commands/
+.claude/hooks/pre_tool_use.py
+.claude/hooks/post_tool_use.py
+.claude/hooks/stop.py
+.claude/rules/
+.claude/rules/skill-routing.md
+.claude/settings.json

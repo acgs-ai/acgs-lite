@@ -1,7 +1,7 @@
 # ACGS-Lite
 
-For repo-wide rules, see the parent repo guide at `../../CLAUDE.md` and `.claude/rules/`.
-Claude Code auto-loads parent `CLAUDE.md` files; this file should stay package-specific.
+This package uses repo-wide rules from the user-home guide at `~/CLAUDE.md` and
+`~/.claude/rules/` (auto-loaded by Claude Code). Keep this file package-specific.
 AGENTS.md serves Codex/OMX.
 
 ## Project Overview
@@ -27,8 +27,8 @@ AI governance library for constitutional rule enforcement, lifecycle management,
 
 ## Repo Boundary
 
-- `packages/acgs-lite` is a nested git repo inside the parent ACGS monorepo.
-- Before staging, committing, or pushing, check git state both here and in the parent repo.
+- This `acgs-lite/` repo is nested inside the `govern-zone/` parent Git repo.
+- Before staging, committing, or pushing, check `git status` both here and in the parent repo.
 
 ---
 
@@ -51,9 +51,8 @@ AI governance library for constitutional rule enforcement, lifecycle management,
 
 ```bash
 # Verify (required before marking complete)
-bash .claude/commands/test-and-verify.sh
-# or step by step:
-make lint && make typecheck && make test && make build
+make check          # lint + typecheck + test
+make build          # build wheel + sdist into dist/
 
 # Single test
 python -m pytest tests/test_lifecycle_router.py -v --import-mode=importlib
@@ -67,15 +66,9 @@ ruff format .
 
 ---
 
-## Repo Boundary
-
-`packages/acgs-lite` is a nested git repo inside the parent ACGS monorepo.
-Before staging, committing, or pushing, check git state both here and in the parent repo.
-
----
-
 ## Architecture & Conventions
 
+- See `AGENTS.md` for the directory tree and entry-point map; this file stays package-specific.
 - Keep integrations optional through extras and lazy imports.
 - Keep Python fallbacks when optional Rust or third-party acceleration exists.
 - CLI command wiring lives in `src/acgs_lite/commands/`; `acgs arckit` is routed through that surface.
@@ -134,13 +127,6 @@ Update this section whenever a mistake is made so it never happens again.
 ## Skill Routing
 
 Package-local workflow routing should stay minimal here.
-Prefer the parent repo `CLAUDE.md` and `.claude/rules/` as the authoritative routing source so package guidance does not drift from installed skills.
+Prefer the user-home guide at `~/CLAUDE.md` and `~/.claude/rules/` as the authoritative routing source so package guidance does not drift from installed skills.
 
-## GBrain Configuration (configured by /setup-gbrain)
-- Engine: pglite
-- Config file: ~/.gbrain/config.json (mode 0600)
-- Brain database: ~/.gbrain/brain.pglite (123 pages imported on init)
-- Setup date: 2026-04-30
-- MCP registered: yes (user scope, `/home/martin/.bun/bin/gbrain serve`)
-- Memory sync: off (gstack-brain-sync declined — local-only)
-- Current repo policy: read-write (origin: github.com/dislovelhl/acgs-lite)
+Per-machine state (e.g. GBrain config) lives in `.claude.local.md` (gitignored).
