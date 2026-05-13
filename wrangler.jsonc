@@ -2,11 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "acgs-governance-proxy",
   "compatibility_date": "2026-05-08",
+  "main": "worker.js",
   "observability": {
     "enabled": true
   },
   "assets": {
-    "directory": "site"
+    "directory": "./site",
+    "binding": "ASSETS"
   },
   "compatibility_flags": [
     "nodejs_compat"
