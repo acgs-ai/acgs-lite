@@ -1,8 +1,18 @@
 # Next Milestones for `acgs-lite`
 
-Last updated: 2026-04-24
+Last updated: 2026-05-16
 
 This note keeps the near-term roadmap visible and concrete. It is intentionally short.
+
+## v2.10.1 — shipped 2026-05-16
+
+All planned items are complete.
+
+- [x] EU AI Act deadline wording corrected to "main high-risk obligations: August 2, 2026" across CLI, templates, compliance module, PDF/Markdown reports, and docs
+- [x] MCP server `validate(strict=False)` contract documented; concurrent callers share engine safely
+- [x] Performance figures replaced with workload-dependent language (README, architecture docstrings, integration dashboard)
+- [x] `docs/why-governance.md` MACI guarantee language tightened to reflect structural enforcement
+- [x] `test_server_api_key_auth` env bleed fixed via `monkeypatch.delenv`
 
 ## v2.10.0 — shipped 2026-04-24
 

@@ -50,7 +50,7 @@ HARD_DENY
 
 The [`examples/phoenix_acgs_governed_agent/`](./examples/phoenix_acgs_governed_agent/) example is the reference implementation of `request -> decision -> receipt -> bounded execution`. Its `governance.decision.*` span attributes are experimental.
 
-**Current status:** Stable core (v2.10.0) • CI-backed test suite.
+**Current status:** Stable core (v2.10.1) • CI-backed test suite.
 
 **Star this repo** if you want more open-source infrastructure for governed, production-safe agents. Early stars materially help discovery.
 
@@ -464,7 +464,7 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 
 ---
 
-## ✅ What is production-hardened today (v2.10.0)
+## ✅ What is production-hardened today (v2.10.1)
 
 | Layer | Status | What you get |
 |-------|--------|--------------|
