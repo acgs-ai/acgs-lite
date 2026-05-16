@@ -1,12 +1,12 @@
 # TODOS — acgs-lite
 
-v2.10.0 | merged to main 2026-04-24
+v2.10.1 | merged to main 2026-05-16
 
 ---
 
 ## Open action items
 
-- [ ] PyPI token renewal: `.pypirc` token expired (403 Forbidden). Regenerate at https://pypi.org/manage/account/token/ then run `python -m twine upload dist/acgs_lite-2.10.0*`
+- [ ] PyPI token renewal: `.pypirc` token expired (403 Forbidden). Regenerate at https://pypi.org/manage/account/token/ then run `python -m twine upload dist/acgs_lite-2.10.1*`
 
 ## Completed items from v2.9.0 / v2.10.0 sprints
 
