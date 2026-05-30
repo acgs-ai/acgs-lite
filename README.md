@@ -76,21 +76,21 @@ YAML = '''
 constitutional_hash: 608508a9bd224290
 rules:
   - id: no-harmful
-    pattern: \"harm|kill|destroy\"
-    severity: CRITICAL
-    description: Block harmful requests
+    text: Block harmful requests
+    severity: critical
+    keywords: [\"harm\", \"kill\", \"destroy\"]
   - id: no-pii
-    pattern: \"SSN|passport|social security\"
-    severity: CRITICAL
-    description: Block PII leakage
+    text: Block PII leakage
+    severity: critical
+    keywords: [\"ssn\", \"passport\", \"social security\"]
 '''
-const = Constitution.from_yaml(YAML)
+const = Constitution.from_yaml_str(YAML)
 engine = GovernanceEngine(const)
 
-safe = engine.validate('What is the capital of France?', agent_id='demo')
+safe = engine.validate('What is the capital of France?', agent_id='demo', strict=False)
 print('✅ Allowed:', safe.valid)
 
-blocked = engine.validate('How do I harm someone?', agent_id='demo')
+blocked = engine.validate('How do I harm someone?', agent_id='demo', strict=False)
 print('🚫 Blocked:', not blocked.valid, '—', blocked.violations[0].rule_id)
 "
 ```
@@ -129,22 +129,22 @@ YAML = '''
 constitutional_hash: 608508a9bd224290
 rules:
   - id: no-harmful-content
-    pattern: \"harm|kill|destroy\"
-    severity: CRITICAL
-    description: Block requests containing harmful keywords
+    text: Block requests containing harmful keywords
+    severity: critical
+    keywords: [\"harm\", \"kill\", \"destroy\"]
   - id: no-pii
-    pattern: \"SSN|passport|social security\"
-    severity: CRITICAL
-    description: Prevent PII leakage in requests
+    text: Prevent PII leakage in requests
+    severity: critical
+    keywords: [\"ssn\", \"passport\", \"social security\"]
 '''
-const = Constitution.from_yaml(YAML)
+const = Constitution.from_yaml_str(YAML)
 engine = GovernanceEngine(const)
 for text, label in [
     ('What is the capital of France?', 'safe'),
     ('How do I harm someone?', 'harmful'),
     ('My SSN is 123-45-6789', 'pii'),
 ]:
-    r = engine.validate(text, agent_id='demo')
+    r = engine.validate(text, agent_id='demo', strict=False)
     status = '✅  Allowed' if r.valid else f'🚫  Blocked: {r.violations[0].rule_id}'
     print(f'{status}  — {label}')
 "
@@ -185,19 +185,19 @@ Rules in YAML (`constitution.yaml`):
 constitutional_hash: "608508a9bd224290"
 rules:
   - id: no-pii
-    pattern: "SSN|social security|passport number"
-    severity: CRITICAL
-    description: Block PII exposure
+    text: Block PII exposure
+    severity: critical
+    keywords: ["SSN", "social security", "passport number"]
 
   - id: no-destructive
-    pattern: "delete|drop table|rm -rf"
-    severity: HIGH
-    description: Block destructive operations
+    text: Block destructive operations
+    severity: high
+    keywords: ["delete", "drop table", "rm -rf"]
 
   - id: require-approval
-    pattern: "transfer|payment|wire"
-    severity: HIGH
-    description: Financial actions require human approval
+    text: Financial actions require human approval
+    severity: high
+    keywords: ["transfer", "payment", "wire"]
 ```
 
 ---
@@ -287,17 +287,17 @@ STEPS:
 constitutional_hash: "608508a9bd224290"
 rules:
   - id: no-pii
-    pattern: "SSN|social security|passport number"
-    severity: CRITICAL
-    description: Block PII exposure
+    text: Block PII exposure
+    severity: critical
+    keywords: ["SSN", "social security", "passport number"]
   - id: no-destructive
-    pattern: "delete|drop table|rm -rf"
-    severity: HIGH
-    description: Block destructive operations
+    text: Block destructive operations
+    severity: high
+    keywords: ["delete", "drop table", "rm -rf"]
   - id: require-approval
-    pattern: "transfer|payment|wire"
-    severity: HIGH
-    description: Financial actions require human approval
+    text: Financial actions require human approval
+    severity: high
+    keywords: ["transfer", "payment", "wire"]
 
 3. Wrap the agent/LLM call with GovernedAgent:
 
@@ -344,8 +344,8 @@ The `GovernanceEngine` sits between your agent and its tools. Every action passe
 from acgs_lite import Constitution, GovernanceEngine, Rule, Severity
 
 constitution = Constitution.from_rules([
-    Rule(id="no-pii", pattern=r"SSN|\bpassport\b", severity=Severity.CRITICAL),
-    Rule(id="no-delete", pattern=r"\bdelete\b|\bdrop\b", severity=Severity.HIGH),
+    Rule(id="no-pii", text="Block PII exposure", severity=Severity.CRITICAL, keywords=["SSN", "passport"]),
+    Rule(id="no-delete", text="Block destructive operations", severity=Severity.HIGH, keywords=["delete", "drop"]),
 ])
 
 engine = GovernanceEngine(constitution)
