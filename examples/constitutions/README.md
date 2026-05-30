@@ -18,7 +18,7 @@
   * **How to load:**
     ```python
     from acgs_lite import Constitution
-    constitution = Constitution.from_yaml("constitutions/content_moderation.yaml")
+    constitution = Constitution.from_yaml("examples/constitutions/content_moderation.yaml")
     ```
 
 * **Customer Service Constitution (`customer_service.yaml`)**
