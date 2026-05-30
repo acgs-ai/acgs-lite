@@ -45,7 +45,7 @@
   * **How to load:**
     ```python
     from acgs_lite import Constitution
-    constitution = Constitution.from_yaml("constitutions/hiring.yaml")
+    constitution = Constitution.from_yaml("examples/constitutions/hiring.yaml")
     ```
 
 * **Lending & Credit Constitution (`lending.yaml`)**
