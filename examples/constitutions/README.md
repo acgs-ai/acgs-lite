@@ -36,7 +36,7 @@
   * **How to load:**
     ```python
     from acgs_lite import Constitution
-    constitution = Constitution.from_yaml("constitutions/healthcare.yaml")
+    constitution = Constitution.from_yaml("examples/constitutions/healthcare.yaml")
     ```
 
 * **Hiring & Recruitment Constitution (`hiring.yaml`)**
