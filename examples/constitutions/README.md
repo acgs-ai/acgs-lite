@@ -54,5 +54,5 @@
   * **How to load:**
     ```python
     from acgs_lite import Constitution
-    constitution = Constitution.from_yaml("constitutions/lending.yaml")
+    constitution = Constitution.from_yaml("examples/constitutions/lending.yaml")
     ```
