@@ -401,7 +401,7 @@ engine = GovernanceEngine(constitution, audit_log=log)
 
 engine.validate("send email to user@example.com", agent_id="mailer")
 
-for entry in log.entries():
+for entry in log.entries:
     print(entry.id, entry.valid, entry.constitutional_hash)
 
 # Verify chain integrity
