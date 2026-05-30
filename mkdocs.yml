@@ -100,14 +100,6 @@ nav:
       - MCP Notes: mcp.md
       - Telegram Webhook: telegram-webhook.md
       - Upgrade to v2.10: upgrade-v2.10.md
-      - Agent Skill Audit: AGENT_SKILL_AUDIT.md
-      - Runtime Optimization Report: RUNTIME_OPTIMIZATION_REPORT.md
-      - External Distribution Submissions: external-distribution-submissions.md
-      - Launch Copy Drafts: launch-copy-drafts.md
-      - Final Launch Copy: final-launch-copy.md
-      - Hero Demo Capture Plan: hero-demo-capture-plan.md
-      - Next Milestones: next-milestones.md
-      - OSS Growth Playbook: oss-growth-playbook.md
 
 markdown_extensions:
   - pymdownx.highlight:
