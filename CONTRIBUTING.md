@@ -6,6 +6,27 @@
 
 Thank you for your interest in contributing to ACGS-Lite! We are building the foundational infrastructure for safe, autonomous AI, and we welcome contributions from developers, security researchers, and policy experts.
 
+## 🚦 New here? Start in 15 minutes
+
+1. Find a [`good first issue`](https://github.com/dislovelhl/acgs-lite/labels/good%20first%20issue) — each is scoped to be completable by a newcomer in under a day, with full context in the issue body.
+2. Comment on it to claim it (no need to ask permission for `good first issue`s — just say you're on it).
+3. Set up your environment (below), make the change with a test, open a PR.
+4. Have a question first? Open a [Discussion](https://github.com/dislovelhl/acgs-lite/discussions) — no question is too small.
+
+## 🤝 Our commitment to you
+
+We take first contributions seriously. When you open your first issue or PR:
+
+- We aim to give a **first response within 2 business days** — even if it's just "thanks, reading this, will reply properly by <date>."
+- Every PR gets constructive, specific feedback. We won't ignore your work or demand sweeping changes without explanation.
+- Small, well-scoped PRs are welcome and reviewed fastest. You do not need to solve everything in one PR.
+
+**Minimum viable maintenance (honest expectations):** this is a small project. We prioritize security reports, correctness bugs in stable components, and first-time-contributor PRs. Large feature proposals are best raised as a Discussion *before* you write code, so we can align on scope and you don't waste effort.
+
+## 🪜 The contribution ladder
+
+Contribution is a ladder you climb through sustained quality work: **contributor → reviewer → maintainer**. Full role definitions, how promotions happen, and how decisions are made are in [`GOVERNANCE.md`](GOVERNANCE.md). The short version: open good PRs, help review others' work, and trust accrues.
+
 ## 🏗️ What to Contribute
 
 We are particularly looking for contributions in these areas:
