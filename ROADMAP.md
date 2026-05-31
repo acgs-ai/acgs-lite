@@ -33,6 +33,8 @@ and [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to get started.
 
 ## Proposing roadmap changes
 
-Have an idea for a direction not listed here? Open a
+Have an idea? Chat with us in real time on **Discord** (invite: `<INVITE_URL>` — placeholder, see
+`planning/growth-execution-plan.md`), or — for anything that needs a durable record — open a
 [Discussion](https://github.com/dislovelhl/acgs-lite/discussions) in the **Ideas** category. Significant
-direction changes follow the decision process in [`GOVERNANCE.md`](GOVERNANCE.md).
+direction changes are decided in Discussions/Issues per [`GOVERNANCE.md`](GOVERNANCE.md); Discord is for
+conversation, not the system of record.

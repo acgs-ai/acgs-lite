@@ -1,0 +1,29 @@
+# Pre-commit Hook configuration for ACGS-Lite Constitutional AI
+# Save this inside your project's .pre-commit-config.yaml to run local security and syntax linting before commits.
+
+repos:
+  - repo: local
+    hooks:
+      - id: acgs-lint
+        name: ACGS Constitution Lint
+        # `acgs lint` takes the rules file as a positional argument. Adjust the
+        # path below to match your project (default: rules.yaml).
+        entry: acgs lint constitution.yaml
+        language: python
+        additional_dependencies: ['acgs-lite[all]']
+        files: '.*constitution\.yaml|.*rules\.yaml'
+        types: [yaml]
+        pass_filenames: false
+        description: "Lint agent governance rules to check severity levels and keyword structure."
+
+      - id: acgs-test
+        name: ACGS Governance Test
+        # `acgs test` reads fixtures (tests.yaml) and rules via --rules. Adjust
+        # the path below to match your project (default: rules.yaml).
+        entry: acgs test --rules constitution.yaml
+        language: python
+        additional_dependencies: ['acgs-lite[all]']
+        files: '.*constitution\.yaml|.*rules\.yaml'
+        types: [yaml]
+        pass_filenames: false
+        description: "Validate governance rule changes against test case assertions."

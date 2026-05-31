@@ -8,8 +8,10 @@ Status: proposed plan
 > - [`next-milestones.md`](./next-milestones.md) — **product** roadmap (releases, API stability)
 > - **This doc** — **community**: contributors, retention, governance, channels, venues, DevRel.
 >
-> Stars are a *trust amplifier*; this doc treats them as a leading indicator, not the goal. The goal is a
-> self-sustaining community of users and contributors that outlives any single maintainer.
+> Stars are a *trust amplifier* and — per the 2026-05-31 [`growth-execution-plan.md`](./growth-execution-plan.md)
+> override — a deliberate near-term discovery **emphasis**, wired to conversion and capped so they never displace
+> the north star. The north star remains a self-sustaining community of users and contributors that outlives any
+> single maintainer (bus factor ≥ 2, then ≥ 3).
 
 ---
 
@@ -45,8 +47,11 @@ is ultimately about reducing that number.
 **before execution**, enforces separation of powers with MACI, and leaves a tamper-evident audit trail."*
 
 **What kind of community** — a **developer-infrastructure** community, not a research forum. That choice
-dictates everything downstream: GitHub-Discussions-first (not Discord), small contribution units
-(rules/validators/integrations, not core-framework PRs), and evidence-driven content ("what got blocked").
+dictates small contribution units (rules/validators/integrations, not core-framework PRs) and evidence-driven
+content ("what got blocked"). **Channel timing is overridden** by the 2026-05-31
+[`growth-execution-plan.md`](./growth-execution-plan.md): **Discord-first** for real-time chat (launched with a
+guaranteed weekly ritual + 2–3 day-one moderators), with **GitHub Discussions retained** as the searchable
+system of record for governance and roadmap decisions.
 
 **Underserved positioning the evidence surfaced (use it):** none of the comparable projects
 (NeMo Guardrails, Guardrails AI, Llama Guard, Garak, Inspect) own the intersection of **runtime
@@ -105,7 +110,7 @@ lands on a project with no Discussions, no good-first-issues, and no contributio
 **Gate to enter:** ≥ 1 reviewer besides founder AND a recurring community ritual exists.
 **Focus:** distributed ownership, governance maturity, and (only now) real-time chat.
 
-- **Launch Discord only now** — and only with a confirmed **weekly recurring ritual** (office hours, or a monthly "governance scenario of the month" challenge) to prevent the ghost-town spiral. Threshold from the evidence: 150–300 active users *or* a guaranteed weekly event. Appoint 2–3 active members as moderators on day one.
+- **Discord is launched in Stage 0** per the 2026-05-31 [`growth-execution-plan.md`](./growth-execution-plan.md) override — **not** gated on active-user count, but gated on the **same** de-risking mechanism: a confirmed **weekly recurring ritual** ("governance scenario of the week" / office hours) **and 2–3 day-one moderators**. If the ritual cannot be staffed weekly, the server is not opened. *(Original Stage-3 threshold, kept for context: 150–300 active users or a guaranteed weekly event.)*
 - Conference presence: submit talks to **DEF CON AI Village, RSA (MLSecOps track), PyCon/EuroPython, AI safety summits**.
 - Delegate **subsystem ownership** (integrations, compliance mappings, Rust extension) to named maintainers — bus factor ≥ 3 is the target.
 - Mature governance toward a meritocratic model (CNCF/Apache-style); consider Linux Foundation **AI Alliance** alignment given the governance positioning.
@@ -123,11 +128,12 @@ lands on a project with no Discussions, no good-first-issues, and no contributio
 | **GitHub Issues (good-first-issues)** | **Stage 0** | Primary user→contributor conversion mechanism for infra projects. |
 | Newsletter / changelog cadence | Stage 1 | Weekly visible activity beats monthly blogs for community signal. |
 | **Slack (invite-only)** | Stage 2, optional | The Inspect AI model — power users/contributors first; scales for async technical depth before opening broadly. |
-| **Discord** | **Stage 3 only** | Below 150–300 active users (or a guaranteed weekly event), a ghost-town Discord *actively harms* credibility. Discord's own OSS directory needs 1,000 members / 1,000 stars. |
+| **Discord** | **Stage 0 (now), conditional** | Launch **only with** a guaranteed weekly ritual + 2–3 day-one moderators (2026-05-31 override). The failure mode is an *unstaffed* Discord, not an early one. Governance/decisions stay in GitHub Discussions. |
 | Discourse | Not planned (500+ users) | High moderation overhead; only when Discussions search becomes a real bottleneck. |
 
-**Hard rule:** do not launch Discord before Stage 3. This is the most common, most credibility-damaging
-failure mode for projects this size.
+**Hard rule (revised 2026-05-31):** do not launch an *unstaffed* Discord. Launching Discord early is fine and
+intended; launching one with no weekly ritual and no day-one moderators is the credibility-damaging failure
+mode to avoid.
 
 ---
 
@@ -187,17 +193,19 @@ Track these monthly. **Bold = north star.**
 | External contributors | 3–5 (6mo) → repeat contributors (18mo) | Contributor funnel |
 | First-contribution → second-contribution rate | rising | Empirical OSS research |
 | Discussion threads / monthly active participants | growing | Engagement |
-| Stars · PyPI installs · referral traffic | leading indicators only | Discovery |
+| Stars · PyPI installs · referral traffic | **primary near-term discovery emphasis** (2026-05-31 override), wired to conversion; auto-deprioritized at bus factor ≥ 2 | Discovery |
 
-Stars and installs are *inputs to trust*, not the scoreboard. A project with 50 engaged users filing
-detailed issues is healthier than one with 5,000 stars and zero contributors.
+Stars are a *sequenced discovery input*, not the final scoreboard: the **protected north-star pair** remains
+bus factor (→ ≥ 2, then ≥ 3) and time-to-first-response (≤ 48h). A spike that doesn't convert to contributors
+within 8–12 weeks triggers reallocation to onboarding. (A project with 50 engaged users filing detailed issues
+is still healthier than one with 5,000 stars and zero contributors.)
 
 ---
 
 ## 9. Anti-patterns to avoid (each cost a comparable project dearly)
 
-- **Premature Discord** → ghost-town spiral; harms credibility. *Defer to Stage 3.*
-- **Star-chasing over user depth** → vanity metric that misleads governance decisions.
+- **Unstaffed Discord** → ghost-town spiral; harms credibility. *Launch only with a weekly ritual + day-one moderators.*
+- **Inorganic / dead-end star-chasing** → stars are a discovery **input** wired to conversion (a good-first-issue + demo ship with each push) and capped at ≤ 20% of OSS hours; never bought/exchanged/incentivized, and auto-deprioritized if contributors don't follow within 8–12 weeks.
 - **Ignoring / harshly criticizing first contributors** → documented #1 reason contributors don't return. *48h warm response, always.*
 - **No written governance from day one** → bottlenecks and founder burnout as the project scales. *Ship GOVERNANCE.md in Stage 0.*
 - **Solo-maintainer burnout** → 44% of departing maintainers cite burnout. *Define minimum-viable-maintenance; delegate early.*

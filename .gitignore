@@ -77,3 +77,6 @@ examples/compliance_reports/reports/
 
 .dev.vars*
 !.dev.vars.example
+
+# Compound-engineering: per-user local config (the .example is committed as the template)
+.compound-engineering/config.local.yaml
