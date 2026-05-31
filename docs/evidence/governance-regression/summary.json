@@ -1,0 +1,28 @@
+{
+  "bypasses": 0,
+  "cases": 6,
+  "denied_cases_with_side_effects": 0,
+  "expected_trigger_classes": [
+    "audit_evidence_unverifiability",
+    "authorization_failure",
+    "constitution_hash_mismatch",
+    "receipt_integrity_failure",
+    "stale_policy"
+  ],
+  "generated_artifact": true,
+  "generated_by": {
+    "generated_at": "2026-05-31T21:17:42.319147+00:00",
+    "platform": "Linux-6.17.0-29-generic-x86_64-with-glibc2.42",
+    "python": "3.11.15",
+    "script": "scripts/run_governance_regression.py"
+  },
+  "not_hand_written_claim": true,
+  "trigger_class_count": 5,
+  "trigger_classes_covered": [
+    "audit_evidence_unverifiability",
+    "authorization_failure",
+    "constitution_hash_mismatch",
+    "receipt_integrity_failure",
+    "stale_policy"
+  ]
+}
