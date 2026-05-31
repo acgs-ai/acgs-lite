@@ -922,6 +922,52 @@ class TestCustomValidatorsSlowPath:
         # Should have critical violations; custom validator may or may not be skipped
         assert len(result.violations) > 0
 
+    def test_custom_validator_findings_reach_audit_on_critical_string_rule(self):
+        """M7: a CRITICAL string-rule match must not short-circuit before custom
+        validators run and the audit entry is written.
+
+        Regression for the strict hot path. Previously the matcher raised on the
+        CRITICAL keyword the instant it fired, skipping the custom-validator block
+        *and* the audit write entirely — leaving no forensic record of either the
+        string rule or the structural finding. The fix defers the raise
+        (collect -> audit -> raise) whenever custom validators are registered, so
+        the action is still blocked but both findings are recorded.
+        """
+        calls = {"n": 0}
+
+        def counting_validator(action: str, ctx: dict) -> list[Violation]:
+            calls["n"] += 1
+            return [
+                Violation("AST-FINDING", "structural risk", Severity.CRITICAL, action[:50], "code")
+            ]
+
+        rule = Rule(
+            id="STR-CRIT",
+            text="No secret key",
+            severity=Severity.CRITICAL,
+            keywords=["secret key"],
+            category="security",
+        )
+        const = Constitution.from_rules([rule], name="m7")
+        audit = AuditLog()
+        engine = GovernanceEngine(
+            const, audit_log=audit, strict=True, custom_validators=[counting_validator]
+        )
+
+        # Enforcement is unchanged: a CRITICAL violation still raises under strict.
+        with pytest.raises(ConstitutionalViolationError):
+            engine.validate("please expose the secret key now")
+
+        # The custom validator ran despite the CRITICAL string match...
+        assert calls["n"] == 1
+        # ...and the audit trail records BOTH findings, not just the string rule.
+        val_entries = [e for e in audit.query() if e.type == "validation"]
+        assert val_entries, "no validation audit entry was written before the raise"
+        recorded = set(val_entries[-1].violations)
+        assert "STR-CRIT" in recorded
+        assert "AST-FINDING" in recorded
+        assert audit.verify_chain()
+
 
 # ===================================================================
 # ValidationResult properties
