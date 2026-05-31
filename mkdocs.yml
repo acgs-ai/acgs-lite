@@ -1,6 +1,7 @@
 site_name: ACGS -- Constitutional AI Governance
 site_description: Constitutional governance infrastructure for AI agents
 site_url: https://acgs.ai/docs
+site_dir: site/docs
 repo_url: https://github.com/dislovelhl/acgs-lite
 repo_name: dislovelhl/acgs-lite
 edit_uri: edit/main/docs/
@@ -103,6 +104,8 @@ nav:
       - MCP Notes: mcp.md
       - Telegram Webhook: telegram-webhook.md
       - Upgrade to v2.10: upgrade-v2.10.md
+  - Research:
+      - smolagents adaptation: research/smolagents-adaptation.md
 
 markdown_extensions:
   - pymdownx.highlight:
