@@ -137,12 +137,21 @@ class ValidationResult:
 
 
 def _dedup_violations(violations: list) -> list:
-    """Deduplicate violations by rule_id (called only when len > 1)."""
-    seen: set[str] = set()
+    """Deduplicate violations by (rule_id, matched_content) (called when len > 1).
+
+    Keying on rule_id alone collapsed *distinct* findings that share a rule_id —
+    two ``CODE-DANGEROUS-CALL``s for different calls, or two structural findings at
+    different code sites — into one before the audit write, degrading the forensic
+    record (M7). String-rule violations from a single action all carry the same
+    ``matched_content`` (the action text), so they still collapse to one; only
+    genuinely distinct findings are now preserved.
+    """
+    seen: set[tuple[str, str]] = set()
     result = []
     for v in violations:
-        if v.rule_id not in seen:
-            seen.add(v.rule_id)
+        key = (v.rule_id, v.matched_content)
+        if key not in seen:
+            seen.add(key)
             result.append(v)
     return result
 

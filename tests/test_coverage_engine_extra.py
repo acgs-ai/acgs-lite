@@ -896,7 +896,14 @@ class TestCustomValidatorsSlowPath:
         assert len(custom_vs) == 1
 
     def test_custom_validator_exception_on_python_path(self):
-        """Custom validator exception caught on Python path."""
+        """A crashing custom validator fails CLOSED on the Python path.
+
+        A validator that raises did not clear the action, so the engine records a
+        HIGH (blocking) CUSTOM-ERROR rather than a non-blocking MEDIUM warning —
+        otherwise a crashing security validator (e.g. the AST analyzer) would let
+        the action proceed ungoverned. Consistent with the runtime-rule-filtering
+        path, which already blocks.
+        """
 
         def bad_validator(action: str, ctx: dict) -> list[Violation]:
             raise ValueError("boom")
@@ -904,10 +911,49 @@ class TestCustomValidatorsSlowPath:
         engine = _make_engine(strict=False, custom_validators=[bad_validator])
         _disable_rust_on_engine(engine)
         result = engine.validate("normal action")
-        # CUSTOM-ERROR uses MEDIUM severity (infrastructure error: warn, not block)
-        error_ws = [v for v in result.warnings if v.rule_id == "CUSTOM-ERROR"]
-        assert len(error_ws) == 1
-        assert "boom" in error_ws[0].rule_text
+        # Fail-closed: a blocking HIGH violation, not a non-blocking warning.
+        error_vs = [v for v in result.violations if v.rule_id == "CUSTOM-ERROR"]
+        assert len(error_vs) == 1
+        assert error_vs[0].severity is Severity.HIGH
+        assert "boom" in error_vs[0].rule_text
+        assert result.valid is False
+        # Under strict, the same crash raises rather than passing the action.
+        strict_engine = _make_engine(strict=True, custom_validators=[bad_validator])
+        _disable_rust_on_engine(strict_engine)
+        with pytest.raises(ConstitutionalViolationError):
+            strict_engine.validate("normal action")
+
+    def test_distinct_findings_with_same_rule_id_both_reach_audit(self):
+        """#4: dedup must not collapse distinct findings that share a rule_id.
+
+        The AST analyzer can flag two different sites under one rule_id (e.g. two
+        CODE-DANGEROUS-CALLs). Keying dedup on rule_id alone merged them to one
+        before the audit write, degrading the forensic record; keying on
+        (rule_id, matched_content) preserves both while still collapsing true
+        duplicates.
+        """
+
+        def multi_finding_validator(action: str, ctx: dict) -> list[Violation]:
+            return [
+                Violation("AST-RISK", "first risky site", Severity.HIGH, "site_one", "code"),
+                Violation("AST-RISK", "second risky site", Severity.HIGH, "site_two", "code"),
+                Violation("AST-RISK", "first risky site again", Severity.HIGH, "site_one", "code"),
+            ]
+
+        audit = AuditLog()
+        engine = _make_engine(
+            audit_log=audit, strict=False, custom_validators=[multi_finding_validator]
+        )
+        _disable_rust_on_engine(engine)
+        result = engine.validate("trigger custom validator")
+        # The two DISTINCT sites survive; the exact-duplicate third is collapsed.
+        risk = [v for v in result.violations if v.rule_id == "AST-RISK"]
+        assert {v.matched_content for v in risk} == {"site_one", "site_two"}
+        assert len(risk) == 2
+        # Both distinct findings are recorded in the audit entry, chain intact.
+        entries = [e for e in audit.query() if e.type == "validation"]
+        assert entries[-1].violations.count("AST-RISK") == 2
+        assert audit.verify_chain()
 
     def test_custom_validators_skipped_after_critical(self):
         """Custom validators are skipped when critical violations already found."""

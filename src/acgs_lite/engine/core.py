@@ -1151,7 +1151,13 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                         Violation(
                             "CUSTOM-ERROR",
                             f"Custom validator failed: {e}",
-                            Severity.MEDIUM,  # infrastructure error: warn, do not block
+                            # Fail-closed: a validator that crashes did not clear the
+                            # action, so under strict it must block (HIGH), not warn.
+                            # A security validator (e.g. the AST analyzer) silently
+                            # downgraded to a non-blocking MEDIUM here let the action
+                            # proceed ungoverned — a fail-open bypass, and inconsistent
+                            # with the runtime-rule-filtering path which already blocks.
+                            Severity.HIGH,
                             action_200,
                             "validator-error",
                         )
