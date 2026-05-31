@@ -1,0 +1,50 @@
+# DSPy governance constitution
+# Load with: Constitution.from_yaml("constitution.yaml")
+#
+# Small, well-commented policy used by the DSPy example. Rules combine
+# keyword matching (substring) and regex patterns. Severity decides whether a
+# match BLOCKS (critical/high) or merely WARNS (medium/low).
+#
+# constitutional_hash is a convention, not a parsed field: the loader derives
+# the authoritative hash from the rule set (Constitution.hash). Pin the derived
+# value in CI so the policy cannot silently change. CK-003.
+constitutional_hash: "608508a9bd224290"
+
+name: "dspy-content-policy"
+version: "1.0"
+description: |
+  Minimal constitution for the governed DSPy example. Blocks PII and
+  obviously harmful requests on the way into the DSPy module.
+
+rules:
+  # Critical → blocks. Keyword + pattern coverage for harmful intent.
+  - id: "no-harmful-content"
+    text: "Block requests asking for hacking, exploits, or malware"
+    severity: critical
+    category: safety
+    keywords:
+      - hack
+      - exploit
+      - malware
+    patterns:
+      - "(?i)\\b(hack|exploit|malware)\\b"
+
+  # High → blocks. SSN-style PII must never reach the model.
+  - id: "no-pii"
+    text: "Prevent US SSN patterns from reaching the model"
+    severity: high
+    category: data-protection
+    keywords:
+      - ssn
+      - social security
+    patterns:
+      - "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+
+  # Medium → warns only (non-blocking). Useful to demonstrate that not every
+  # rule halts execution; some just annotate the audit trail.
+  - id: "length-warning"
+    text: "Warn on unusually long inputs (possible prompt injection)"
+    severity: medium
+    category: operations
+    patterns:
+      - "(?s).{2000,}"

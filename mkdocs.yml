@@ -80,6 +80,7 @@ nav:
   - Quickstart: quickstart.md
   - Architecture: architecture.md
   - Integrations: integrations.md
+  - Integration Decision Guide: integration-decision-guide.md
   - Guides:
       - Govern a LangChain Agent: guides/langchain.md
       - What Gets Blocked (Walkthrough): blog/what-got-blocked.md

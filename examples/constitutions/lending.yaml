@@ -19,7 +19,7 @@ description: |
 rules:
   # -- Fair Lending & ECOA ----------------------------------------------------
   - id: LEND-001
-    name: Prohibited basis exclusion
+    text: Prohibited basis exclusion
     description: >
       The system must not use race, color, religion, national origin, sex,
       marital status, age, receipt of public assistance, or good-faith exercise
@@ -39,7 +39,7 @@ rules:
     action: BLOCK
 
   - id: LEND-002
-    name: Redlining prevention
+    text: Redlining prevention
     description: >
       The system must not use geographic location in a manner that results in
       the denial or discouragement of credit applications from predominantly
@@ -58,7 +58,7 @@ rules:
     action: BLOCK
 
   - id: LEND-003
-    name: Disparate impact testing
+    text: Disparate impact testing
     description: >
       All credit scoring models must undergo regular disparate impact testing
       across protected classes. If denial rates for any protected group exceed
@@ -77,7 +77,7 @@ rules:
 
   # -- Adverse Action & FCRA --------------------------------------------------
   - id: LEND-004
-    name: Adverse action notice with specific reasons
+    text: Adverse action notice with specific reasons
     description: >
       When the system contributes to a denial, counteroffer, or other adverse
       action, the lender must provide the applicant with a notice containing
@@ -96,7 +96,7 @@ rules:
     action: BLOCK
 
   - id: LEND-005
-    name: Credit bureau data accuracy obligation
+    text: Credit bureau data accuracy obligation
     description: >
       The system must use credit bureau data only from permissible purposes
       under FCRA Section 604 and must have procedures to handle consumer
@@ -115,7 +115,7 @@ rules:
 
   # -- Truth in Lending (TILA) ------------------------------------------------
   - id: LEND-006
-    name: APR and fee disclosure
+    text: APR and fee disclosure
     description: >
       When the system generates or recommends loan terms, the annual percentage
       rate (APR), finance charges, total of payments, and total interest cost
@@ -134,7 +134,7 @@ rules:
     action: FLAG
 
   - id: LEND-007
-    name: Ability to repay verification
+    text: Ability to repay verification
     description: >
       The system must verify the borrower's ability to repay before recommending
       loan approval. For residential mortgages, this includes verification of
@@ -154,7 +154,7 @@ rules:
 
   # -- Debt Collection (FDCPA) ------------------------------------------------
   - id: LEND-008
-    name: Debt collection communication restrictions
+    text: Debt collection communication restrictions
     description: >
       AI-generated collection communications must comply with FDCPA timing and
       content requirements. No contact before 8:00 AM or after 9:00 PM in the
@@ -173,7 +173,7 @@ rules:
     action: FLAG
 
   - id: LEND-009
-    name: Harassment and deception prohibition
+    text: Harassment and deception prohibition
     description: >
       The AI system must not generate communications that harass, oppress, or
       abuse any person in connection with debt collection. This includes threats
@@ -194,7 +194,7 @@ rules:
 
   # -- Model Governance -------------------------------------------------------
   - id: LEND-010
-    name: Model risk management documentation
+    text: Model risk management documentation
     description: >
       All AI credit models must be documented per OCC Bulletin 2011-12 (SR 11-7)
       model risk management guidance. Documentation must include model purpose,
@@ -213,7 +213,7 @@ rules:
     action: FLAG
 
   - id: LEND-011
-    name: Alternative data transparency
+    text: Alternative data transparency
     description: >
       When alternative data sources (utility payments, rent history, bank
       transaction data, social media) are used in credit decisioning, the system

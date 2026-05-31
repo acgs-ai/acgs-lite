@@ -1,0 +1,307 @@
+# Recruiting & Sourcing Constitution --- acgs-lite
+# Governance rules for AI-assisted candidate SOURCING, OUTREACH, and SCREENING.
+#
+# This template is deliberately distinct from `hiring.yaml`. Where `hiring.yaml`
+# governs *final employment decisions* (interview scoring, adverse action,
+# rejection), this constitution governs the *top of the funnel*: how an AI agent
+# discovers, searches for, contacts, and pre-screens candidates BEFORE any human
+# hiring decision is made. Sourcing is its own EU AI Act Annex III high-risk
+# employment use case (recruitment / advertising of vacancies, screening and
+# filtering of applications) and carries discrimination, privacy, and consumer
+# risks that are easy to introduce at the sourcing stage.
+#
+# Pair this with `hiring.yaml` when an agent both sources and decides; use this
+# one alone for sourcing-only tools (Boolean search builders, talent-pool
+# outreach bots, resume-database miners, LinkedIn/X-style scrapers).
+#
+# Usage:
+#   from acgs_lite import Constitution
+#   constitution = Constitution.from_yaml("examples/constitutions/recruiting.yaml")
+#
+# Severity semantics (see src/acgs_lite/constitution/rule.py):
+#   critical -> BLOCK (no override)   high -> BLOCK (override w/ justification)
+#   medium   -> WARN  (allows)        low  -> informational
+
+# Top-level constitutional hash for this bundle (derived/verified at load time).
+constitutional_hash: 608508a9bd224290
+
+name: recruiting-governance
+version: "1.0"
+description: |
+  Constitutional rules governing AI systems used to SOURCE, search for, attract,
+  and pre-screen candidates: Boolean/keyword search builders, talent-pool mining,
+  automated outreach and messaging, resume-database queries, and shortlist
+  generation. Designed to prevent discriminatory sourcing and targeting, protect
+  candidate PII harvested during sourcing, keep compensation messaging lawful,
+  and constrain reference/background checks to the post-consent stage. Aligned
+  with EU AI Act Annex III(4) (employment), Title VII, the ADEA, the ADA, GDPR
+  Art. 6/9, the EEOC's guidance on targeted job advertising, and the FCRA.
+
+rules:
+  # -- Non-Discriminatory Sourcing --------------------------------------------
+  - id: REC-001
+    text: >
+      Candidate sourcing, search, and shortlisting must not select, exclude,
+      target, or rank candidates on the basis of a protected characteristic
+      (race, color, ethnicity, national origin, sex, gender identity, sexual
+      orientation, religion, age, disability, pregnancy, marital status,
+      genetic information, or veteran status). This includes building search
+      queries or audience targeting that "only source", "exclude", or "filter
+      out" candidates by any such attribute. Disparate-treatment sourcing
+      violates Title VII, the ADEA, and EU AI Act Annex III(4).
+    severity: critical
+    category: anti-discrimination
+    subcategory: protected-class-sourcing
+    # These keyword fragments are intentionally chosen to catch the most common
+    # discriminatory-sourcing phrasings. Matching is case-insensitive substring
+    # (see matcher.py), so short, high-signal fragments are preferred.
+    keywords:
+      - "only source male"
+      - "only source female"
+      - "only male candidates"
+      - "only female candidates"
+      - "exclude applicants of"
+      - "exclude candidates by"
+      - "exclude older"
+      - "exclude younger"
+      - "no women"
+      - "no men"
+      - "men only"
+      - "women only"
+      - "whites only"
+      - "natives only"
+      - "no disabled"
+      - "no pregnant"
+      - "preferred race"
+      - "preferred ethnicity"
+      - "of that ethnicity"
+      - "candidates under 30"
+      - "candidates over 40"
+      - "young candidates only"
+      - "recent grads only"
+      - "digital native"
+    patterns:
+      # "under/over <age>" age-targeting in a sourcing instruction.
+      - '(?i)(under|over|younger than|older than)\s*\d{2}'
+      # "exclude/avoid/filter out ... <protected attribute>"
+      - '(?i)(exclude|avoid|skip|filter\s*out)\b.*\b(race|ethnic|religio|gender|disab|pregnan|age)'
+
+  - id: REC-002
+    text: >
+      Job advertising and outreach audiences must not be targeted in a way that
+      restricts which protected groups are eligible to see or receive a vacancy.
+      Demographic ad targeting, look-alike audiences built from a non-diverse
+      seed, or platform "special ad category" bypasses that narrow reach by sex,
+      age, or proxies thereof are prohibited. Per EEOC guidance on targeted
+      recruitment advertising and the EU AI Act employment provisions.
+    severity: high
+    category: anti-discrimination
+    subcategory: targeted-advertising
+    keywords:
+      - "demographic targeting"
+      - "age range targeting"
+      - "gender targeting"
+      - "lookalike audience"
+      - "look-alike audience"
+      - "special ad category"
+      - "audience exclusion"
+      - "narrow the audience"
+      - "target only"
+    patterns:
+      - '(?i)target(ing)?\s+(by|on)\s+(age|gender|sex|race|ethnicity|religion)'
+
+  - id: REC-003
+    text: >
+      Sourcing models and search filters must not rely on proxies for protected
+      characteristics, including name-based ethnicity or gender inference,
+      profile photos, graduation year as an age proxy, zip/postal code as a race
+      proxy, native-language inference, or "culture fit" heuristics. Any sourcing
+      signal correlated with a protected attribute must be removed or flagged for
+      bias review before it drives selection.
+    severity: high
+    category: anti-discrimination
+    subcategory: proxy-variables
+    keywords:
+      - "name-based"
+      - "infer gender"
+      - "infer ethnicity"
+      - "guess gender"
+      - "profile photo"
+      - "headshot"
+      - "graduation year"
+      - "zip code"
+      - "postal code"
+      - "native speaker"
+      - "culture fit"
+      - "culture add"
+
+  # -- Candidate PII Protection -----------------------------------------------
+  - id: REC-004
+    text: >
+      Candidate personal data harvested during sourcing (email, phone, home
+      address, government IDs, dates of birth, social-media handles, photos) must
+      be minimized, redacted in shared artifacts, and processed only with a
+      lawful basis. The agent must not store, export, or paste raw candidate PII
+      into prompts, logs, or shortlists without redaction. Per GDPR Art. 5/6 data
+      minimization and Art. 9 special-category protections.
+    severity: critical
+    category: data-protection
+    subcategory: candidate-pii
+    keywords:
+      - "social security"
+      - "ssn"
+      - "passport number"
+      - "national id"
+      - "date of birth"
+      - "home address"
+      - "personal email"
+      - "personal phone"
+      - "scrape contact"
+      - "export contacts"
+      - "harvest emails"
+    patterns:
+      - '\b\d{3}-\d{2}-\d{4}\b'                       # US SSN
+      - '\b[\w.+-]+@[\w-]+\.[\w.-]+\b'                # email address
+      - '\b(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b'  # phone
+
+  - id: REC-005
+    text: >
+      Sourced candidate records must carry a provenance and consent note: where
+      the data came from and whether the candidate has been notified that an
+      automated tool is contacting or assessing them. Silent scraping of private
+      profiles or behind-login data, or contacting candidates who have opted out
+      of recruiter outreach, is prohibited.
+    severity: high
+    category: data-protection
+    subcategory: provenance-consent
+    keywords:
+      - "scrape private profile"
+      - "behind login"
+      - "ignore opt-out"
+      - "ignore opt out"
+      - "contact do-not-contact"
+      - "bypass unsubscribe"
+      - "no consent"
+      - "without notifying"
+
+  # -- Compensation & Outreach Guardrails -------------------------------------
+  - id: REC-006
+    text: >
+      Outreach and screening must not ask for, infer, or use a candidate's
+      salary history to set compensation, and any compensation figure shared in
+      outreach must reflect the posting's good-faith pay range. Per state/local
+      salary-history bans and pay-transparency laws (e.g., CA SB 1162, CO Equal
+      Pay for Equal Work Act, NY pay-transparency law). Lowballing or quoting a
+      different range based on candidate demographics is prohibited.
+    severity: high
+    category: compensation
+    subcategory: salary-guardrails
+    keywords:
+      - "salary history"
+      - "current salary"
+      - "last salary"
+      - "previous compensation"
+      - "what do you currently make"
+      - "lowball"
+      - "below the posted range"
+      - "different range for"
+
+  - id: REC-007
+    text: >
+      Automated outreach must be truthful and non-deceptive. The agent must not
+      misrepresent the role, the company, compensation, or remote status, nor
+      impersonate a named human recruiter without disclosure, nor send bulk
+      messages that omit a required AI-use or unsubscribe disclosure. Deceptive
+      recruiting outreach implicates the FTC Act and CAN-SPAM.
+    severity: medium
+    category: outreach
+    subcategory: truthful-messaging
+    keywords:
+      - "misrepresent the role"
+      - "fake recruiter"
+      - "impersonate recruiter"
+      - "guaranteed job"
+      - "no disclosure"
+      - "omit unsubscribe"
+      - "spoof sender"
+
+  # -- Reference & Background-Check Constraints --------------------------------
+  - id: REC-008
+    text: >
+      Reference checks, background checks, and credit/criminal-history lookups
+      are post-offer or post-consent activities and must not be performed during
+      sourcing or pre-screening. The agent must not run a background or credit
+      check, query criminal records, or contact a candidate's current employer
+      without the candidate's prior written authorization. Premature checks
+      violate the FCRA (15 USC 1681b) and "ban-the-box" / fair-chance laws.
+    severity: critical
+    category: background-checks
+    subcategory: premature-screening
+    keywords:
+      - "run background check"
+      - "background check without"
+      - "credit check"
+      - "criminal record"
+      - "criminal history"
+      - "contact current employer"
+      - "call their boss"
+      - "without consent"
+      - "without authorization"
+      - "skip consent"
+
+  - id: REC-009
+    text: >
+      Background and reference screening must be job-related and consistent with
+      business necessity. Blanket exclusions based on arrest records, prior
+      convictions unrelated to the role, credit history, or social-media content
+      reflecting protected activity are prohibited. Individualized assessment is
+      required per EEOC arrest/conviction guidance.
+    severity: high
+    category: background-checks
+    subcategory: job-relatedness
+    keywords:
+      - "blanket exclusion"
+      - "auto-reject arrest"
+      - "any conviction"
+      - "social media screening"
+      - "reject based on credit"
+      - "disqualify by record"
+
+  # -- Audit & Human Oversight ------------------------------------------------
+  - id: REC-010
+    text: >
+      Every sourcing search, audience-targeting decision, outreach send, and
+      shortlist must produce an audit-trail entry capturing the query, filters,
+      data sources, and rationale, so disparate-impact at the sourcing stage can
+      be reviewed by a human. The agent must not disable logging or sourcing
+      analytics. Supports EU AI Act record-keeping (Art. 12) and human-oversight
+      (Art. 14) obligations.
+    severity: medium
+    category: audit
+    subcategory: sourcing-trail
+    keywords:
+      - "disable logging"
+      - "skip audit"
+      - "no-audit"
+      - "delete sourcing logs"
+      - "hide query"
+      - "untracked outreach"
+
+metadata:
+  author: ACGS Team
+  domain: recruiting
+  jurisdiction: US (federal/state), EU
+  regulations:
+    - "EU AI Act Annex III(4) (high-risk employment / recruitment)"
+    - "Title VII of the Civil Rights Act of 1964"
+    - "Age Discrimination in Employment Act (ADEA)"
+    - "Americans with Disabilities Act (ADA)"
+    - "EEOC Guidance on Targeted Recruitment Advertising"
+    - "Fair Credit Reporting Act (FCRA)"
+    - "GDPR (Articles 5, 6, 9)"
+    - "State salary-history bans & pay-transparency laws (CA SB 1162, CO EPEWA, NY)"
+    - "CAN-SPAM Act"
+  license: AGPL-3.0-or-later
+  last_updated: "2026-05-31"
+
+# Constitutional Hash: 608508a9bd224290

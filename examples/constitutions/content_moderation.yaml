@@ -18,7 +18,7 @@ description: |
 rules:
   # -- CSAM & Child Safety ----------------------------------------------------
   - id: CMOD-001
-    name: CSAM detection and mandatory reporting
+    text: CSAM detection and mandatory reporting
     description: >
       The system must immediately block and quarantine any content identified
       as child sexual abuse material (CSAM). Confirmed detections must be
@@ -40,7 +40,7 @@ rules:
     action: BLOCK
 
   - id: CMOD-002
-    name: Child grooming pattern detection
+    text: Child grooming pattern detection
     description: >
       The system must flag conversational patterns indicative of child grooming
       behavior, including age-inappropriate solicitation, isolation tactics,
@@ -60,7 +60,7 @@ rules:
 
   # -- Hate Speech & Violent Extremism ----------------------------------------
   - id: CMOD-003
-    name: Hate speech detection and enforcement
+    text: Hate speech detection and enforcement
     description: >
       Content that attacks, dehumanizes, or incites violence against individuals
       or groups based on protected characteristics (race, ethnicity, religion,
@@ -81,7 +81,7 @@ rules:
     action: BLOCK
 
   - id: CMOD-004
-    name: Violent extremism and terrorism content
+    text: Violent extremism and terrorism content
     description: >
       Content that promotes, recruits for, or provides operational support to
       designated terrorist organizations or violent extremist movements must be
@@ -103,7 +103,7 @@ rules:
 
   # -- Misinformation ---------------------------------------------------------
   - id: CMOD-005
-    name: Health misinformation flagging
+    text: Health misinformation flagging
     description: >
       Content containing health claims that contradict consensus from
       authoritative health bodies (WHO, CDC, EMA) on topics with significant
@@ -125,7 +125,7 @@ rules:
     action: FLAG
 
   - id: CMOD-006
-    name: Election integrity protection
+    text: Election integrity protection
     description: >
       During designated election periods, content containing demonstrably false
       information about voting procedures (wrong dates, wrong polling locations,
@@ -148,7 +148,7 @@ rules:
 
   # -- Due Process & Appeals --------------------------------------------------
   - id: CMOD-007
-    name: Appeal process availability
+    text: Appeal process availability
     description: >
       Every automated enforcement action (content removal, account suspension,
       reach restriction) must include a clear mechanism for the affected user
@@ -168,7 +168,7 @@ rules:
     action: FLAG
 
   - id: CMOD-008
-    name: Over-censorship prevention
+    text: Over-censorship prevention
     description: >
       The system must monitor its false positive rate (legitimate content
       incorrectly removed) and maintain it below a defined threshold per
@@ -190,7 +190,7 @@ rules:
 
   # -- Transparency -----------------------------------------------------------
   - id: CMOD-009
-    name: Transparency reporting
+    text: Transparency reporting
     description: >
       The system must generate periodic transparency reports disclosing: total
       content reviewed, automated vs. human decisions, enforcement actions by
@@ -209,7 +209,7 @@ rules:
     action: LOG
 
   - id: CMOD-010
-    name: Automated decision disclosure
+    text: Automated decision disclosure
     description: >
       Users must be informed when content moderation decisions affecting their
       content or account were made by an automated system. The notification

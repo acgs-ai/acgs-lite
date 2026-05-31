@@ -647,6 +647,7 @@ acgs resume --agent-id agent-01
 | [Quickstart](https://acgs.ai/docs/quickstart) | Up and running in 5 minutes |
 | [Architecture](https://acgs.ai/docs/architecture) | Engine internals, MACI deep dive |
 | [Integrations](https://acgs.ai/docs/integrations) | OpenAI, Anthropic, LangChain, MCP, A2A |
+| [Integration Decision Guide](./docs/integration-decision-guide.md) | Which adapter when: native vs. framework, streaming, async, MCP vs. in-process |
 | [Compliance](https://acgs.ai/docs/compliance-2026) | 18-framework regulatory mapping |
 | [CLI Reference](https://acgs.ai/docs/cli) | Full command reference |
 | [Why Governance?](https://acgs.ai/docs/why-governance) | The case for deterministic guardrails |

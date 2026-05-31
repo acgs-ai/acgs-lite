@@ -14,6 +14,8 @@ Constitutional Hash: 608508a9bd224290
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 import pytest
 
 from acgs_lite.audit import AuditLog
@@ -967,6 +969,103 @@ class TestCustomValidatorsSlowPath:
         assert "STR-CRIT" in recorded
         assert "AST-FINDING" in recorded
         assert audit.verify_chain()
+
+
+# ===================================================================
+# #66: CRITICAL blocked decisions must reach the audit trail in full mode
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestCriticalAuditCompletenessFullMode:
+    """#66: in FULL audit mode + strict, a blocked CRITICAL decision must be
+    recorded before the raise — even with NO custom validators registered.
+
+    Previously the matcher short-circuit-raised the instant a CRITICAL keyword
+    fired, before the per-decision audit write. HIGH/BLOCK violations defer their
+    raise and were recorded, so the gap was specific to CRITICAL on the strict
+    fail-closed path — exactly the production/compliance configuration. The fix
+    suppresses the short-circuit whenever a per-entry audit log is active
+    (collect -> audit -> raise), leaving fast/aggregate mode unchanged.
+    """
+
+    @staticmethod
+    def _const() -> Constitution:
+        return Constitution.from_rules(
+            [
+                Rule(
+                    id="no-pii",
+                    text="Block PII",
+                    severity=Severity.CRITICAL,
+                    keywords=["ssn"],
+                    category="privacy",
+                ),
+                Rule(
+                    id="no-destructive",
+                    text="Block destructive ops",
+                    severity=Severity.HIGH,
+                    keywords=["drop table"],
+                    category="safety",
+                ),
+            ],
+            name="issue-66",
+        )
+
+    def _run_sequence(self, engine: GovernanceEngine, audit: AuditLog) -> None:
+        for action, agent in [
+            ("summarize the report", "a1"),
+            ("now DROP TABLE users", "a2"),
+            ("send my SSN 123-45-6789", "a3"),
+        ]:
+            with suppress(ConstitutionalViolationError):
+                engine.validate(action, agent_id=agent)
+
+    def test_issue_66_repro_records_all_three(self):
+        """The exact issue repro: allow + HIGH-block + CRITICAL-block all recorded."""
+        audit = AuditLog()
+        engine = GovernanceEngine(self._const(), audit_log=audit, strict=True)
+        self._run_sequence(engine, audit)
+        audit.flush()
+        entries = [(e.agent_id, e.valid) for e in audit.entries]
+        assert entries == [("a1", True), ("a2", False), ("a3", False)], entries
+        # The CRITICAL decision (a3) carries its rule id, not the HIGH one.
+        a3 = next(e for e in audit.entries if e.agent_id == "a3")
+        assert "no-pii" in a3.violations
+        assert audit.verify_chain()
+
+    def test_lone_critical_block_is_recorded(self):
+        """A single CRITICAL block with no other traffic still produces an entry."""
+        audit = AuditLog()
+        engine = GovernanceEngine(self._const(), audit_log=audit, strict=True)
+        with pytest.raises(ConstitutionalViolationError) as exc:
+            engine.validate("send my SSN 123-45-6789", agent_id="solo")
+        assert exc.value.rule_id == "no-pii"
+        assert exc.value.severity == "critical"
+        audit.flush()
+        assert len(audit.entries) == 1
+        assert audit.entries[0].valid is False
+        assert "no-pii" in audit.entries[0].violations
+        assert audit.verify_chain()
+
+    def test_critical_recorded_on_regex_python_path(self):
+        """Audit completeness holds when neither Rust nor AC is available."""
+        audit = AuditLog()
+        engine = GovernanceEngine(self._const(), audit_log=audit, strict=True)
+        _disable_rust_on_engine(engine)
+        _disable_ac_on_engine(engine)
+        with pytest.raises(ConstitutionalViolationError):
+            engine.validate("send my SSN 123-45-6789", agent_id="regex")
+        audit.flush()
+        assert len(audit.entries) == 1
+        assert "no-pii" in audit.entries[0].violations
+        assert audit.verify_chain()
+
+    def test_fast_mode_hot_path_unchanged(self):
+        """Fast/aggregate mode keeps the CRITICAL short-circuit (no per-entry log)."""
+        engine = GovernanceEngine(self._const(), strict=True, audit_mode="fast")
+        # Still blocks under strict — enforcement is unchanged.
+        with pytest.raises(ConstitutionalViolationError):
+            engine.validate("send my SSN 123-45-6789")
 
 
 # ===================================================================

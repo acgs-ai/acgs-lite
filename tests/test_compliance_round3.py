@@ -423,7 +423,7 @@ class TestMultiFrameworkAssessorRound3:
     def test_available_frameworks_lists_all_18(self) -> None:
         assessor = MultiFrameworkAssessor()
         available = assessor.available_frameworks()
-        assert len(available) == 19
+        assert len(available) == 20
         for fid in (
             "india_dpdp",
             "australia_ai_ethics",
@@ -454,8 +454,8 @@ class TestMultiFrameworkAssessorRound3:
                 "domain": "unknown",
             }
         )
-        # Unknown jurisdiction → all 19 frameworks
-        assert len(report.frameworks_assessed) == 19
+        # Unknown jurisdiction → all 20 frameworks
+        assert len(report.frameworks_assessed) == 20
 
     def test_cross_global_assessment_score_range(self) -> None:
         assessor = MultiFrameworkAssessor(
@@ -616,4 +616,4 @@ class TestComplianceReportExporter:
         assert len(text) > 1000
         assert len(md) > 1000
         data = json.loads(js)
-        assert len(data["frameworks_assessed"]) == 19
+        assert len(data["frameworks_assessed"]) == 20
