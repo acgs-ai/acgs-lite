@@ -78,6 +78,7 @@ dev = [
     "mypy>=1.13",
     "tomli>=2.0; python_version < '3.11'",
     "acgs-lite[docs]",
+    "acgs-lite[crypto]",
 ]
 
 [project.scripts]

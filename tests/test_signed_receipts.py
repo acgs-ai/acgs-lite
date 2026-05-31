@@ -11,7 +11,10 @@ import json
 
 import pytest
 
-from acgs_lite.legitimacy import (
+# Ed25519 signing needs the optional `crypto` extra; skip cleanly without it.
+pytest.importorskip("cryptography")
+
+from acgs_lite.legitimacy import (  # noqa: E402
     DecisionReceipt,
     Ed25519ReceiptSigner,
     ExecutionBoundary,
