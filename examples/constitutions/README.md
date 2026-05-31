@@ -5,6 +5,7 @@
 * If you are building tools to review, filter, or moderate user-generated content, start with the **Content Moderation Constitution** (`content_moderation.yaml`).
 * If you are deploying automated customer support bots, virtual agents, or ticketing systems, start with the **Customer Service Constitution** (`customer_service.yaml`).
 * If you are working on medical data processing, diagnostic aids, or healthcare communication workflows, start with the **Healthcare Constitution** (`healthcare.yaml`).
+* If you are building tools that *source*, search for, target ads to, reach out to, or pre-screen candidates at the top of the funnel (Boolean search builders, talent-pool mining, outreach bots), start with the **Recruiting & Sourcing Constitution** (`recruiting.yaml`).
 * If you are implementing AI tools for recruitment, resume screening, or automated employment assessments, start with the **Hiring & Recruitment Constitution** (`hiring.yaml`).
 * If you are developing systems for automated credit decisioning, loan underwriting, alternative data cash flow scoring, or compliance-safe debt collection, start with the **Lending & Credit Constitution** (`lending.yaml`).
 
@@ -37,6 +38,15 @@
     ```python
     from acgs_lite import Constitution
     constitution = Constitution.from_yaml("examples/constitutions/healthcare.yaml")
+    ```
+
+* **Recruiting & Sourcing Constitution (`recruiting.yaml`)**
+  * **Domain:** Talent sourcing, candidate search & outreach, top-of-funnel pre-screening, and high-risk employment compliance (EU AI Act Annex III / Title VII / ADEA / FCRA / GDPR).
+  * **Description:** Governance rules for AI agents that *source*, target, contact, and pre-screen candidates (distinct from final hiring decisions) covering non-discriminatory sourcing and ad targeting, candidate PII protection and consent, salary/compensation and outreach guardrails, and reference/background-check constraints.
+  * **How to load:**
+    ```python
+    from acgs_lite import Constitution
+    constitution = Constitution.from_yaml("examples/constitutions/recruiting.yaml")
     ```
 
 * **Hiring & Recruitment Constitution (`hiring.yaml`)**
