@@ -87,6 +87,14 @@ shows `request -> decision -> receipt -> bounded execution` telemetry; its
 deployment properties depend on your constitution, storage, authentication, and
 operational controls.
 
+## Security Disclosure
+
+Please report suspected ACGS-Lite governance or security vulnerabilities
+privately to `security@acgs.ai` instead of opening a public issue. The canonical
+supported-version, scope, and disclosure-window policy is in
+[`SECURITY.md`](./SECURITY.md), with a mirrored docs page at
+[`docs/security.md`](./docs/security.md).
+
 <img width="1280" height="680" alt="ACGS_Lite" src="https://github.com/user-attachments/assets/0d6deeef-40fe-4e8e-9dc0-537744162dff" />
 
 ## Recommended starting points
