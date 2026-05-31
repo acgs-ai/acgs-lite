@@ -631,6 +631,28 @@ class GovernedCallable:
         engine = self.engine
         agent_id = self.agent_id
 
+        # SMT / Z3 integration
+        from acgs_lite.z3_verify import (
+            Z3_AVAILABLE,
+            _extract_z3_policies,
+            verify_callable_arguments,
+            verify_callable_safety,
+        )
+
+        policies = _extract_z3_policies(self.constitution) if Z3_AVAILABLE else []
+
+        if Z3_AVAILABLE and policies:
+            # Perform static boundary checks
+            static_res = verify_callable_safety(func, policies)
+            if static_res.verified and not static_res.satisfiable:
+                _log.warning(
+                    "Static verification warning for function '%s': "
+                    "Possible constitutional violation detected in input space boundaries! "
+                    "Counterexample: %s",
+                    func.__name__,
+                    static_res.counterexample,
+                )
+
         if inspect.iscoroutinefunction(func):
 
             @functools.wraps(func)
@@ -646,6 +668,16 @@ class GovernedCallable:
                     actual_call=actual_call,
                     human_approval=human_approval,
                 )
+
+                # Z3 Runtime boundary check
+                if Z3_AVAILABLE and policies:
+                    runtime_res = verify_callable_arguments(func, args, kwargs, policies)
+                    if runtime_res.verified and not runtime_res.satisfiable:
+                        raise ConstitutionalViolationError(
+                            f"Action violates mathematical constraints: {runtime_res.counterexample}",
+                            rule_id="Z3-CONSTRAINT-VIOLATION",
+                        )
+
                 for payload in iter_governance_payloads(*args, kwargs):
                     engine.validate(payload, agent_id=agent_id)
                 result = await func(*args, **kwargs)
@@ -670,6 +702,16 @@ class GovernedCallable:
                     actual_call=actual_call,
                     human_approval=human_approval,
                 )
+
+                # Z3 Runtime boundary check
+                if Z3_AVAILABLE and policies:
+                    runtime_res = verify_callable_arguments(func, args, kwargs, policies)
+                    if runtime_res.verified and not runtime_res.satisfiable:
+                        raise ConstitutionalViolationError(
+                            f"Action violates mathematical constraints: {runtime_res.counterexample}",
+                            rule_id="Z3-CONSTRAINT-VIOLATION",
+                        )
+
                 for payload in iter_governance_payloads(*args, kwargs):
                     engine.validate(payload, agent_id=agent_id)
                 result = func(*args, **kwargs)
