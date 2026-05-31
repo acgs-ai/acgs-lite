@@ -1064,9 +1064,19 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         # short-circuit-raise on a CRITICAL string rule. Accumulate the violation
         # instead so the custom-validator block (below) and the audit write both
         # run; the deferred raise happens in _raise_for_enforcement, which blocks
-        # identically under strict. With no custom validators this is == strict,
-        # so the hot path is unchanged.
-        matcher_strict = strict and not self.custom_validators
+        # identically under strict.
+        #
+        # #66: the same short-circuit drops the per-decision audit entry in FULL
+        # audit mode. The matcher's CRITICAL early-raise fires before the audit
+        # write below (the HIGH/BLOCK path defers the raise and is recorded, but
+        # CRITICAL never reaches it), so a blocked CRITICAL decision vanishes from
+        # the tamper-evident trail — exactly the fail-closed path compliance relies
+        # on. Suppress the short-circuit whenever a per-entry audit log is active
+        # (``_fast_records is None`` == full mode) so the audit write runs first and
+        # the deferred raise still blocks identically under strict. Fast/aggregate
+        # mode (``_fast_records is not None``) keeps the short-circuit, so the hot
+        # benchmark path is unchanged.
+        matcher_strict = strict and not self.custom_validators and _fast_records is not None
         if _has_ac and _first_word in _pos_verbs and not _has_neg:
             violations = self._validate_python_ac(
                 action,
