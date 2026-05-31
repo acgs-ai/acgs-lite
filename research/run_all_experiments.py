@@ -28,11 +28,16 @@ def _simulation_metadata(seed: int) -> dict[str, object]:
     }
 
 
-def _run(script: str, extra_args: list[str] | None = None) -> dict[str, object]:
+def _run(
+    script: str,
+    extra_args: list[str] | None = None,
+    *,
+    cwd: Path | None = None,
+) -> dict[str, object]:
     cmd = [sys.executable, script]
     if extra_args:
         cmd.extend(extra_args)
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     if result.returncode != 0:
         print(f"[FAIL] {script}: {result.stderr}", file=sys.stderr)
         return {"script": script, "status": "failed", "error": result.stderr.strip()}
@@ -47,24 +52,61 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run all research experiments")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", type=str, default="summary.json")
+    parser.add_argument(
+        "--include-real-llm",
+        action="store_true",
+        help="Also run the opt-in real-LLM harness. Requires real provider credentials for a non-simulated artifact.",
+    )
+    parser.add_argument("--real-llm-limit", type=int, default=30)
+    parser.add_argument(
+        "--real-llm-output-dir",
+        type=str,
+        default="research/results/real_llm",
+    )
+    parser.add_argument(
+        "--real-llm-fail-if-simulated",
+        action="store_true",
+        help="Make the real-LLM subrun fail if it cannot honestly emit simulated=false.",
+    )
     args = parser.parse_args()
 
+    research_dir = Path(__file__).resolve().parent
+    repo_root = research_dir.parent
     experiments = [
         (
-            "x1_constitutional_humaneval.py",
+            str(research_dir / "x1_constitutional_humaneval.py"),
             ["--seed", str(args.seed), "--constitution", "constitution_secrets.json"],
         ),
-        ("x2_swe_secrets.py", ["--seed", str(args.seed)]),
-        ("x3_maci_decisions.py", ["--seed", str(args.seed)]),
-        ("x4_maci_latency.py", ["--seed", str(args.seed)]),
-        ("x5_prov_export.py", ["--seed", str(args.seed)]),
-        ("x6_diff_audit.py", ["--seed", str(args.seed)]),
+        (str(research_dir / "x2_swe_secrets.py"), ["--seed", str(args.seed)]),
+        (str(research_dir / "x3_maci_decisions.py"), ["--seed", str(args.seed)]),
+        (str(research_dir / "x4_maci_latency.py"), ["--seed", str(args.seed)]),
+        (str(research_dir / "x5_prov_export.py"), ["--seed", str(args.seed)]),
+        (str(research_dir / "x6_diff_audit.py"), ["--seed", str(args.seed)]),
     ]
 
     results = []
     for script, extra in experiments:
         print(f"Running {script} ...")
-        results.append(_run(script, extra))
+        results.append(_run(script, extra, cwd=research_dir))
+
+    if args.include_real_llm:
+        real_llm_args = [
+            "-m",
+            "research.real_llm.runner",
+            "--provider",
+            "openai",
+            "--provider",
+            "anthropic",
+            "--dataset",
+            "humaneval",
+            "--limit",
+            str(args.real_llm_limit),
+            "--output-dir",
+            args.real_llm_output_dir,
+        ]
+        if args.real_llm_fail_if_simulated:
+            real_llm_args.append("--fail-if-simulated")
+        results.append(_run(real_llm_args[0], real_llm_args[1:], cwd=repo_root))
 
     all_passed = all(
         r.get("status") == "passed"
