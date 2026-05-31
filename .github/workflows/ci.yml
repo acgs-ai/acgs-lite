@@ -83,6 +83,19 @@ jobs:
             --cov-fail-under=70 \
             -m "not slow and not benchmark and not e2e"
 
+  governance-regression:
+    name: Governance regression gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -e ".[dev,autonoma,anthropic,mcp,otel]" httpx
+      - name: Governance regression gate
+        run: make test-governance
+
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
