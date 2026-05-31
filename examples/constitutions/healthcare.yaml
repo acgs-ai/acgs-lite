@@ -19,7 +19,7 @@ description: |
 rules:
   # -- PHI Protection (HIPAA) -------------------------------------------------
   - id: HLTH-001
-    name: Protected health information safeguards
+    text: Protected health information safeguards
     description: >
       The system must not transmit, store, or log protected health information
       (PHI) as defined under HIPAA (45 CFR 160.103) outside of authorized,
@@ -42,7 +42,7 @@ rules:
     action: BLOCK
 
   - id: HLTH-002
-    name: Minimum necessary standard
+    text: Minimum necessary standard
     description: >
       The system must request and process only the minimum amount of PHI
       necessary to accomplish the intended purpose. Broad queries against
@@ -60,7 +60,7 @@ rules:
     action: BLOCK
 
   - id: HLTH-003
-    name: Business associate agreement requirement
+    text: Business associate agreement requirement
     description: >
       Before processing PHI, the system must verify that a valid Business
       Associate Agreement (BAA) is in place between the covered entity and
@@ -78,7 +78,7 @@ rules:
 
   # -- Clinical Decision Transparency ----------------------------------------
   - id: HLTH-004
-    name: Clinical recommendation explainability
+    text: Clinical recommendation explainability
     description: >
       All clinical decision support outputs must include the evidence basis,
       confidence level, applicable clinical guidelines (e.g., USPSTF grade,
@@ -97,7 +97,7 @@ rules:
     action: FLAG
 
   - id: HLTH-005
-    name: Diagnostic uncertainty disclosure
+    text: Diagnostic uncertainty disclosure
     description: >
       When the system produces a diagnostic suggestion, it must disclose the
       confidence interval and explicitly state alternative diagnoses (differential
@@ -118,7 +118,7 @@ rules:
 
   # -- Patient Safety ---------------------------------------------------------
   - id: HLTH-006
-    name: Medication safety and interaction checking
+    text: Medication safety and interaction checking
     description: >
       The system must cross-reference any medication recommendation against the
       patient's current medication list, known allergies, and contraindications
@@ -138,7 +138,7 @@ rules:
     action: BLOCK
 
   - id: HLTH-007
-    name: Adverse event reporting
+    text: Adverse event reporting
     description: >
       If the system detects or is informed of a potential adverse event related
       to its output (misdiagnosis, incorrect medication suggestion, delayed
@@ -159,7 +159,7 @@ rules:
 
   # -- Informed Consent -------------------------------------------------------
   - id: HLTH-008
-    name: Informed consent for AI-assisted care
+    text: Informed consent for AI-assisted care
     description: >
       Patients must be informed when AI systems are materially involved in their
       diagnosis, treatment planning, or risk assessment. The disclosure must be
@@ -178,7 +178,7 @@ rules:
 
   # -- Equity & Bias ----------------------------------------------------------
   - id: HLTH-009
-    name: Clinical algorithm bias monitoring
+    text: Clinical algorithm bias monitoring
     description: >
       The system must monitor for differential performance across demographic
       groups including race, ethnicity, sex, age, and socioeconomic status.
@@ -199,7 +199,7 @@ rules:
 
   # -- Audit & Compliance -----------------------------------------------------
   - id: HLTH-010
-    name: Audit trail for clinical AI decisions
+    text: Audit trail for clinical AI decisions
     description: >
       Every clinical decision support interaction must produce an immutable
       audit record containing: timestamp, patient identifier (de-identified
@@ -218,7 +218,7 @@ rules:
     action: FLAG
 
   - id: HLTH-011
-    name: Emergency override with logging
+    text: Emergency override with logging
     description: >
       In clinical emergencies, authorized clinicians may override AI safety
       controls to provide immediate patient care. All overrides must be logged
