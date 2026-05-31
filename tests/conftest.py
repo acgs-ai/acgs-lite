@@ -38,6 +38,7 @@ if importlib.util.find_spec("fastapi") is None:
         str(_HERE / "test_lifecycle_router.py"),
         str(_HERE / "test_autonoma.py"),
         str(_HERE / "test_cdp_record.py"),
+        str(_HERE / "test_claude_code_integration.py"),
         str(_HERE / "test_federation_transport.py"),
         str(_HERE / "test_openshell_governance_integration.py"),
         str(_HERE / "test_openshell_governance_http.py"),
@@ -49,6 +50,13 @@ if importlib.util.find_spec("anthropic") is None:
     collect_ignore += [
         str(_HERE / "test_anthropic_integration.py"),
         str(_HERE / "test_integrations.py"),
+    ]
+
+if importlib.util.find_spec("openai") is None:
+    # The xAI adapter is built on the OpenAI-compatible client; without the SDK
+    # its construction/completion tests raise ImportError at collection/run time.
+    collect_ignore += [
+        str(_HERE / "test_xai_integration.py"),
     ]
 
 if importlib.util.find_spec("opentelemetry") is None:
