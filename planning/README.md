@@ -11,7 +11,8 @@ see [`../README.md`](../README.md), [`../ROADMAP.md`](../ROADMAP.md), and
 ## Contents
 
 ### Roadmap & strategy
-- [`community-roadmap.md`](community-roadmap.md) — staged plan for growing contributors and community.
+- [`growth-execution-plan.md`](growth-execution-plan.md) — **ACTIVE** Discord-first + active-star-growth execution plan (2026-05-31). Supersedes the channel/metric stance of `community-roadmap.md`; read it first for current strategy.
+- [`community-roadmap.md`](community-roadmap.md) — staged plan for growing contributors and community (channel/metric stance partially superseded by `growth-execution-plan.md`).
 - [`next-milestones.md`](next-milestones.md) — near-term product/release milestones.
 - [`oss-growth-playbook.md`](oss-growth-playbook.md) — 0→1 stars/launch playbook.
 - [`PLANS.md`](PLANS.md) — long-form engineering plans and remediation history.
