@@ -1,5 +1,8 @@
 # Generated experiment outputs
 *.json
+!results/
+!results/real_llm/
+!results/real_llm/summary.json
 .venv/
 __pycache__/
 *.pyc

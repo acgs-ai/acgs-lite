@@ -264,6 +264,22 @@ def test_aliased_getattr_dunder_is_high():
     assert any(v.severity is Severity.HIGH for v in findings)
 
 
+def test_keyword_argument_dunder_is_high():
+    # Adversarial (verify-governance-fixes / L2-L3): a dunder smuggled through a
+    # KEYWORD argument must still promote to HIGH CODE-DUNDER-ACCESS. Scanning
+    # only positional args let setattr(o, name='__dict__', ...) fall through to
+    # MEDIUM CODE-INTROSPECTION and slip past the executor gate.
+    for code in (
+        "setattr(o, name='__dict__', value=1)",
+        "setattr(o, '__class__', value=type)",
+        "delattr(o, name='__weakref__')",
+    ):
+        findings = CodeActionValidator().analyze(code)
+        ids = _ids(findings)
+        assert "CODE-DUNDER-ACCESS" in ids, f"{code!r} -> {ids}"
+        assert any(v.severity is Severity.HIGH for v in findings), code
+
+
 def test_direct_exec_call_not_double_flagged():
     # A plain eval('1') yields exactly one CODE-EXEC (from the call), not also a
     # duplicate bare-name finding.
@@ -271,3 +287,78 @@ def test_direct_exec_call_not_double_flagged():
         v for v in CodeActionValidator().analyze("eval('1')") if v.rule_id == "CODE-EXEC"
     ]
     assert len(exec_findings) == 1
+
+
+# -- HIGH/MEDIUM builtin laundering: walrus / unpack / annassign / params (#2/#5/#6) --
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "(rd := open)('/etc/passwd')",  # walrus, immediate call
+        "rd = (open)\nrd('/etc/passwd')",  # parenthesised assign
+        "a, rd = 1, open\nrd('/etc/passwd')",  # tuple unpack
+        "[a, rd] = [1, open]\nrd('/etc/passwd')",  # list unpack
+        "rd: object = open\nrd('/etc/passwd')",  # annotated assign
+        "a = open\nrd = a\nrd('/etc/passwd')",  # 2-hop alias
+        "a = open\nb = a\nc = b\nc('/etc/passwd')",  # 3-hop alias
+        "def f(g=open):\n    return g('/etc/passwd')",  # positional param default
+        "def f(*, g=open):\n    return g('/etc/passwd')",  # keyword-only param default
+        "h = lambda g=open: g('/etc/passwd')",  # lambda param default
+    ],
+)
+def test_high_builtin_laundering_is_flagged(code):
+    # A HIGH builtin (open) reaching a call site through any binding form or an
+    # alias chain must still resolve to CODE-DANGEROUS-BUILTIN, not slip past the
+    # gate. (CRITICAL builtins are also caught as bare references by _check_name.)
+    findings = CodeActionValidator().analyze(code)
+    assert "CODE-DANGEROUS-BUILTIN" in _ids(findings), f"{code!r} -> {_ids(findings)}"
+    assert any(v.severity is Severity.HIGH for v in findings), code
+
+
+def test_laundering_no_false_positive_on_clean_code():
+    # Benign assignments / defaults that never bind a dangerous builtin must not
+    # be flagged.
+    for code in (
+        "x = 1\ny = x\nz = y + 1\nprint(z)",
+        "def greet(name='world'):\n    return 'hi ' + name",
+        "a, b = 1, 2\nc = a + b",
+    ):
+        assert CodeActionValidator().analyze(code) == [], code
+
+
+# -- __builtins__ namespace sandbox escape (#3) ----------------------------
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "__builtins__['eval']('1+1')",  # subscript into the namespace
+        "__builtins__.eval('1+1')",  # attribute on the namespace
+        "__builtins__.__import__('os').system('id')",  # __import__ via namespace
+        "b = __builtins__\nb['exec']('x=1')",  # aliased namespace
+    ],
+)
+def test_builtins_namespace_reference_is_flagged(code):
+    # Referencing the __builtins__ namespace is a sandbox escape that reaches
+    # eval/exec/__import__ without the bare name appearing; it must be flagged.
+    findings = CodeActionValidator().analyze(code)
+    assert "CODE-DUNDER-ACCESS" in _ids(findings), f"{code!r} -> {_ids(findings)}"
+    assert any(v.severity.blocks() for v in findings), code
+
+
+# -- deny lists extend, never shrink, the security floor (#19) -------------
+
+
+def test_custom_critical_imports_extend_defaults():
+    # Passing critical_imports must ADD to the built-in critical set, never drop
+    # os/subprocess/… from it (a silent security-floor shrink).
+    v = CodeActionValidator(critical_imports=["mycorp_secrets"])
+    assert "CODE-IMPORT-CRITICAL" in _ids(v.analyze("import os"))  # default still denied
+    assert "CODE-IMPORT-CRITICAL" in _ids(v.analyze("import mycorp_secrets"))  # added
+
+
+def test_custom_dangerous_calls_extend_defaults():
+    v = CodeActionValidator(dangerous_calls=["mymod.wipe"])
+    assert "CODE-DANGEROUS-CALL" in _ids(v.analyze("import os\nos.system('x')"))  # default kept
+    assert "CODE-DANGEROUS-CALL" in _ids(v.analyze("import mymod\nmymod.wipe()"))  # added

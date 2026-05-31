@@ -22,6 +22,14 @@ from pathlib import Path
 from typing import Any
 
 
+def _simulation_metadata(seed: int) -> dict[str, object]:
+    return {
+        "label": f"SIMULATION (seed={seed}), not empirical benchmark",
+        "seed": seed,
+        "empirical_benchmark": False,
+    }
+
+
 def _make_scenario(rng: random.Random, index: int) -> dict[str, Any]:
     """Generate a synthetic governance decision scenario."""
     # 30% of scenarios are actually bad (contain secret or destructive action)
@@ -114,6 +122,7 @@ def run_trials(num_trials: int, seed: int) -> dict[str, Any]:
         reduction = (single_false_approvals - maci_false_approvals) / single_false_approvals
 
     return {
+        "simulation": _simulation_metadata(seed),
         "trials": num_trials,
         "seed": seed,
         "single_false_approvals": single_false_approvals,

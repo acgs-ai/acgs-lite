@@ -80,6 +80,7 @@ nav:
   - Quickstart: quickstart.md
   - Architecture: architecture.md
   - Integrations: integrations.md
+  - Integration Decision Guide: integration-decision-guide.md
   - Guides:
       - Govern a LangChain Agent: guides/langchain.md
       - What Gets Blocked (Walkthrough): blog/what-got-blocked.md
@@ -94,6 +95,7 @@ nav:
       - Constitution Lifecycle: api/lifecycle.md
       - Constitution: api/constitution.md
       - Governance Engine: api/engine.md
+      - Runtime Legitimacy Kernel: api/legitimacy.md
       - GovernedAgent: api/governed_agent.md
       - MACI: api/maci.md
       - Audit Trail: api/audit.md

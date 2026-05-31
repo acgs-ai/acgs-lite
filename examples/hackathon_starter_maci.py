@@ -11,7 +11,7 @@ Usage:
 No API keys required.
 """
 
-from acgs_lite import Constitution, GovernedAgent
+from acgs_lite import Constitution, GovernedAgent, MACIRole
 
 # --- Step 1: Define rules for a code deployment pipeline ---
 DEPLOYMENT_RULES = """
@@ -62,18 +62,21 @@ def main() -> None:
         proposer_agent,
         constitution=constitution,
         agent_id="proposer",
+        maci_role=MACIRole.PROPOSER,
     )
 
     validator = GovernedAgent(
         validator_agent,
         constitution=constitution,
         agent_id="validator",
+        maci_role=MACIRole.VALIDATOR,
     )
 
     executor = GovernedAgent(
         executor_agent,
         constitution=constitution,
         agent_id="executor",
+        maci_role=MACIRole.EXECUTOR,
     )
 
     print("=== MACI Governance Demo ===\n")
@@ -93,7 +96,7 @@ def main() -> None:
 
         # Phase 1: Propose
         try:
-            proposal = proposer.run(action)
+            proposal = proposer.run(action, governance_action="propose")
             print(f"  Proposer:  {proposal}")
         except Exception as e:
             print(f"  Proposer:  [BLOCKED] {type(e).__name__}")
@@ -103,7 +106,7 @@ def main() -> None:
 
         # Phase 2: Validate
         try:
-            validated = validator.run(proposal)
+            validated = validator.run(proposal, governance_action="validate")
             print(f"  Validator: {validated}")
         except Exception as e:
             print(f"  Validator: [BLOCKED] {type(e).__name__}")
@@ -113,7 +116,7 @@ def main() -> None:
 
         # Phase 3: Execute
         try:
-            result = executor.run(validated)
+            result = executor.run(validated, governance_action="execute")
             print(f"  Executor:  {result}")
         except Exception as e:
             print(f"  Executor:  [BLOCKED] {type(e).__name__}")

@@ -87,13 +87,18 @@ class TestDedupViolations:
         assert _dedup_violations([v]) == [v]
 
     def test_removes_duplicates(self) -> None:
+        # Dedup is keyed on (rule_id, matched_content): an exact duplicate is
+        # removed, but distinct findings that share a rule_id (different
+        # matched_content) are both preserved so the audit keeps every distinct
+        # finding (#4 — e.g. two CODE-DANGEROUS-CALLs at different sites).
         v1 = Violation("R1", "text1", Severity.LOW, "m1", "cat")
-        v2 = Violation("R1", "text2", Severity.HIGH, "m2", "cat")
+        v2 = Violation("R1", "text2", Severity.HIGH, "m2", "cat")  # same rule, diff content
         v3 = Violation("R2", "text3", Severity.CRITICAL, "m3", "cat")
-        result = _dedup_violations([v1, v2, v3])
-        assert len(result) == 2
-        assert result[0].rule_id == "R1"
-        assert result[1].rule_id == "R2"
+        v4 = Violation("R1", "text1 again", Severity.LOW, "m1", "cat")  # exact (R1, m1) dup
+        result = _dedup_violations([v1, v2, v3, v4])
+        assert len(result) == 3
+        assert [v.rule_id for v in result] == ["R1", "R1", "R2"]
+        assert [v.matched_content for v in result] == ["m1", "m2", "m3"]
 
 
 # ---------------------------------------------------------------------------

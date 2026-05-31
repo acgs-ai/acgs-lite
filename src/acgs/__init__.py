@@ -10,8 +10,12 @@ This module is the canonical ``acgs`` import namespace. It re-exports the full
     from acgs import Constitution, GovernedAgent, MACIRole
 
     constitution = Constitution.from_yaml("rules.yaml")
-    agent = GovernedAgent(my_agent, constitution=constitution)
-    result = agent.run("process this request")
+    agent = GovernedAgent(
+        my_agent,
+        constitution=constitution,
+        maci_role=MACIRole.EXECUTOR,
+    )
+    result = agent.run("process this request", governance_action="execute")
 
 ``acgs_lite`` remains available as a compatibility import namespace.
 

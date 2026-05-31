@@ -6,6 +6,12 @@
 
 ACGS-Lite is designed to be framework-agnostic. It provides native adapters for the most popular AI ecosystems, ensuring you can add a governance layer to any agent in minutes.
 
+> **Not sure which adapter to pick?** Start with the
+> [Integration Decision Guide](integration-decision-guide.md) — a short FAQ on
+> native provider adapters vs. framework wrappers, streaming vs. non-streaming,
+> when you need the async API, and when to run the MCP server vs. embed the
+> engine in-process.
+
 | Platform | Install Extra | Governance Pattern | Status |
 |---|---|---|---|
 | **Anthropic** | `acgs-lite[anthropic]` | `GovernedAnthropic` | Production |

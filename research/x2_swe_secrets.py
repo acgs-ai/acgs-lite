@@ -24,6 +24,14 @@ from pathlib import Path
 from typing import Any
 
 
+def _simulation_metadata(seed: int) -> dict[str, object]:
+    return {
+        "label": f"SIMULATION (seed={seed}), not empirical benchmark",
+        "seed": seed,
+        "empirical_benchmark": False,
+    }
+
+
 def _make_issue(rng: random.Random, index: int) -> dict[str, Any]:
     """Generate a simulated SWE-bench-like issue."""
     # 40% of issues involve secret/credential handling
@@ -90,6 +98,7 @@ def run_experiment(num_trials: int, seed: int) -> dict[str, Any]:
     delta = overall_with - overall_without
 
     return {
+        "simulation": _simulation_metadata(seed),
         "trials": num_trials,
         "seed": seed,
         "guarded_issues": len(guarded_issues),

@@ -14,6 +14,8 @@ Constitutional Hash: 608508a9bd224290
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 import pytest
 
 from acgs_lite.audit import AuditLog
@@ -894,7 +896,14 @@ class TestCustomValidatorsSlowPath:
         assert len(custom_vs) == 1
 
     def test_custom_validator_exception_on_python_path(self):
-        """Custom validator exception caught on Python path."""
+        """A crashing custom validator fails CLOSED on the Python path.
+
+        A validator that raises did not clear the action, so the engine records a
+        HIGH (blocking) CUSTOM-ERROR rather than a non-blocking MEDIUM warning —
+        otherwise a crashing security validator (e.g. the AST analyzer) would let
+        the action proceed ungoverned. Consistent with the runtime-rule-filtering
+        path, which already blocks.
+        """
 
         def bad_validator(action: str, ctx: dict) -> list[Violation]:
             raise ValueError("boom")
@@ -902,10 +911,49 @@ class TestCustomValidatorsSlowPath:
         engine = _make_engine(strict=False, custom_validators=[bad_validator])
         _disable_rust_on_engine(engine)
         result = engine.validate("normal action")
-        # CUSTOM-ERROR uses MEDIUM severity (infrastructure error: warn, not block)
-        error_ws = [v for v in result.warnings if v.rule_id == "CUSTOM-ERROR"]
-        assert len(error_ws) == 1
-        assert "boom" in error_ws[0].rule_text
+        # Fail-closed: a blocking HIGH violation, not a non-blocking warning.
+        error_vs = [v for v in result.violations if v.rule_id == "CUSTOM-ERROR"]
+        assert len(error_vs) == 1
+        assert error_vs[0].severity is Severity.HIGH
+        assert "boom" in error_vs[0].rule_text
+        assert result.valid is False
+        # Under strict, the same crash raises rather than passing the action.
+        strict_engine = _make_engine(strict=True, custom_validators=[bad_validator])
+        _disable_rust_on_engine(strict_engine)
+        with pytest.raises(ConstitutionalViolationError):
+            strict_engine.validate("normal action")
+
+    def test_distinct_findings_with_same_rule_id_both_reach_audit(self):
+        """#4: dedup must not collapse distinct findings that share a rule_id.
+
+        The AST analyzer can flag two different sites under one rule_id (e.g. two
+        CODE-DANGEROUS-CALLs). Keying dedup on rule_id alone merged them to one
+        before the audit write, degrading the forensic record; keying on
+        (rule_id, matched_content) preserves both while still collapsing true
+        duplicates.
+        """
+
+        def multi_finding_validator(action: str, ctx: dict) -> list[Violation]:
+            return [
+                Violation("AST-RISK", "first risky site", Severity.HIGH, "site_one", "code"),
+                Violation("AST-RISK", "second risky site", Severity.HIGH, "site_two", "code"),
+                Violation("AST-RISK", "first risky site again", Severity.HIGH, "site_one", "code"),
+            ]
+
+        audit = AuditLog()
+        engine = _make_engine(
+            audit_log=audit, strict=False, custom_validators=[multi_finding_validator]
+        )
+        _disable_rust_on_engine(engine)
+        result = engine.validate("trigger custom validator")
+        # The two DISTINCT sites survive; the exact-duplicate third is collapsed.
+        risk = [v for v in result.violations if v.rule_id == "AST-RISK"]
+        assert {v.matched_content for v in risk} == {"site_one", "site_two"}
+        assert len(risk) == 2
+        # Both distinct findings are recorded in the audit entry, chain intact.
+        entries = [e for e in audit.query() if e.type == "validation"]
+        assert entries[-1].violations.count("AST-RISK") == 2
+        assert audit.verify_chain()
 
     def test_custom_validators_skipped_after_critical(self):
         """Custom validators are skipped when critical violations already found."""
@@ -967,6 +1015,103 @@ class TestCustomValidatorsSlowPath:
         assert "STR-CRIT" in recorded
         assert "AST-FINDING" in recorded
         assert audit.verify_chain()
+
+
+# ===================================================================
+# #66: CRITICAL blocked decisions must reach the audit trail in full mode
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestCriticalAuditCompletenessFullMode:
+    """#66: in FULL audit mode + strict, a blocked CRITICAL decision must be
+    recorded before the raise — even with NO custom validators registered.
+
+    Previously the matcher short-circuit-raised the instant a CRITICAL keyword
+    fired, before the per-decision audit write. HIGH/BLOCK violations defer their
+    raise and were recorded, so the gap was specific to CRITICAL on the strict
+    fail-closed path — exactly the production/compliance configuration. The fix
+    suppresses the short-circuit whenever a per-entry audit log is active
+    (collect -> audit -> raise), leaving fast/aggregate mode unchanged.
+    """
+
+    @staticmethod
+    def _const() -> Constitution:
+        return Constitution.from_rules(
+            [
+                Rule(
+                    id="no-pii",
+                    text="Block PII",
+                    severity=Severity.CRITICAL,
+                    keywords=["ssn"],
+                    category="privacy",
+                ),
+                Rule(
+                    id="no-destructive",
+                    text="Block destructive ops",
+                    severity=Severity.HIGH,
+                    keywords=["drop table"],
+                    category="safety",
+                ),
+            ],
+            name="issue-66",
+        )
+
+    def _run_sequence(self, engine: GovernanceEngine, audit: AuditLog) -> None:
+        for action, agent in [
+            ("summarize the report", "a1"),
+            ("now DROP TABLE users", "a2"),
+            ("send my SSN 123-45-6789", "a3"),
+        ]:
+            with suppress(ConstitutionalViolationError):
+                engine.validate(action, agent_id=agent)
+
+    def test_issue_66_repro_records_all_three(self):
+        """The exact issue repro: allow + HIGH-block + CRITICAL-block all recorded."""
+        audit = AuditLog()
+        engine = GovernanceEngine(self._const(), audit_log=audit, strict=True)
+        self._run_sequence(engine, audit)
+        audit.flush()
+        entries = [(e.agent_id, e.valid) for e in audit.entries]
+        assert entries == [("a1", True), ("a2", False), ("a3", False)], entries
+        # The CRITICAL decision (a3) carries its rule id, not the HIGH one.
+        a3 = next(e for e in audit.entries if e.agent_id == "a3")
+        assert "no-pii" in a3.violations
+        assert audit.verify_chain()
+
+    def test_lone_critical_block_is_recorded(self):
+        """A single CRITICAL block with no other traffic still produces an entry."""
+        audit = AuditLog()
+        engine = GovernanceEngine(self._const(), audit_log=audit, strict=True)
+        with pytest.raises(ConstitutionalViolationError) as exc:
+            engine.validate("send my SSN 123-45-6789", agent_id="solo")
+        assert exc.value.rule_id == "no-pii"
+        assert exc.value.severity == "critical"
+        audit.flush()
+        assert len(audit.entries) == 1
+        assert audit.entries[0].valid is False
+        assert "no-pii" in audit.entries[0].violations
+        assert audit.verify_chain()
+
+    def test_critical_recorded_on_regex_python_path(self):
+        """Audit completeness holds when neither Rust nor AC is available."""
+        audit = AuditLog()
+        engine = GovernanceEngine(self._const(), audit_log=audit, strict=True)
+        _disable_rust_on_engine(engine)
+        _disable_ac_on_engine(engine)
+        with pytest.raises(ConstitutionalViolationError):
+            engine.validate("send my SSN 123-45-6789", agent_id="regex")
+        audit.flush()
+        assert len(audit.entries) == 1
+        assert "no-pii" in audit.entries[0].violations
+        assert audit.verify_chain()
+
+    def test_fast_mode_hot_path_unchanged(self):
+        """Fast/aggregate mode keeps the CRITICAL short-circuit (no per-entry log)."""
+        engine = GovernanceEngine(self._const(), strict=True, audit_mode="fast")
+        # Still blocks under strict — enforcement is unchanged.
+        with pytest.raises(ConstitutionalViolationError):
+            engine.validate("send my SSN 123-45-6789")
 
 
 # ===================================================================

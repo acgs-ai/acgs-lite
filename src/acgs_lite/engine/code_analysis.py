@@ -227,12 +227,14 @@ class CodeActionValidator:
         if extra_authorized_imports:
             base |= set(extra_authorized_imports)
         self.authorized_imports: frozenset[str] = frozenset(base)
-        self.critical_imports: frozenset[str] = frozenset(
-            CRITICAL_IMPORTS if critical_imports is None else critical_imports
+        # Deny lists EXTEND the built-in security floor rather than replacing it:
+        # passing critical_imports/dangerous_calls can only *add* to the default
+        # denied set, never silently drop os/subprocess/eval/… from it. (The allow
+        # list above is the inverse — authorized_imports legitimately replaces.)
+        self.critical_imports: frozenset[str] = CRITICAL_IMPORTS | frozenset(
+            critical_imports or ()
         )
-        self.dangerous_calls: frozenset[str] = frozenset(
-            DANGEROUS_CALLS if dangerous_calls is None else dangerous_calls
-        )
+        self.dangerous_calls: frozenset[str] = DANGEROUS_CALLS | frozenset(dangerous_calls or ())
         self.category = category
         self.flag_medium_builtins = flag_medium_builtins
         self.block_unparseable = block_unparseable
@@ -411,24 +413,70 @@ class CodeActionValidator:
 
     @staticmethod
     def _collect_builtin_aliases(nodes: list[ast.AST]) -> dict[str, str]:
-        """Map a local name → the dangerous builtin it was assigned from.
+        """Map a local name → the dangerous builtin it ultimately resolves to.
 
-        ``e = eval`` → ``{"e": "eval"}``; ``rd = open`` → ``{"rd": "open"}``.
-        Used so a builtin laundered through a plain assignment is still resolved
-        to its real identity at the call site (builtin-aliasing bypass).
+        Resolves a HIGH/MEDIUM builtin laundered through *any* name binding —
+        plain assignment (``rd = open``), tuple/list unpacking
+        (``a, rd = 1, open``), annotated assignment (``rd: T = open``), the walrus
+        operator (``(rd := open)``), and function/lambda parameter defaults
+        (``def f(rd=open): ...``) — and follows multi-hop chains (``a = open;
+        b = a; b(...)``) to a fixpoint, so a builtin cannot reach a call site
+        unflagged by hiding behind an alias-of-an-alias. (CRITICAL builtins are
+        additionally caught as bare references by :meth:`_check_name`, so the
+        gap this closes is chiefly the HIGH/MEDIUM tiers.)
         """
         dangerous = CRITICAL_BUILTINS | HIGH_BUILTINS | MEDIUM_BUILTINS
-        aliases: dict[str, str] = {}
+        # name -> source name (another local, or a builtin) for every binding form.
+        bindings: dict[str, str] = {}
+
+        def bind(target: ast.AST, value: ast.AST) -> None:
+            if isinstance(target, ast.Name) and isinstance(value, ast.Name):
+                bindings[target.id] = value.id
+
+        def bind_param(arg: ast.arg, default: ast.expr | None) -> None:
+            if isinstance(default, ast.Name):
+                bindings[arg.arg] = default.id
+
         for node in nodes:
-            if (
-                isinstance(node, ast.Assign)
-                and isinstance(node.value, ast.Name)
-                and node.value.id in dangerous
-            ):
+            if isinstance(node, ast.Assign):
                 for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        aliases[target.id] = node.value.id
-        return aliases
+                    if (
+                        isinstance(target, (ast.Tuple, ast.List))
+                        and isinstance(node.value, (ast.Tuple, ast.List))
+                        and len(target.elts) == len(node.value.elts)
+                    ):
+                        for elt, val in zip(target.elts, node.value.elts, strict=True):
+                            bind(elt, val)
+                    else:
+                        bind(target, node.value)
+            elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)):
+                # ``e := open`` (always has a value) and ``e: T = open`` (may not).
+                if node.value is not None:
+                    bind(node.target, node.value)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                fn_args = node.args
+                positional = [*getattr(fn_args, "posonlyargs", []), *fn_args.args]
+                if fn_args.defaults:
+                    for arg, default in zip(
+                        positional[-len(fn_args.defaults) :], fn_args.defaults, strict=True
+                    ):
+                        bind_param(arg, default)
+                for kw_arg, kw_default in zip(
+                    fn_args.kwonlyargs, fn_args.kw_defaults, strict=True
+                ):
+                    bind_param(kw_arg, kw_default)
+
+        # Resolve each name transitively to a dangerous builtin (cycle-guarded).
+        resolved: dict[str, str] = {}
+        for name in bindings:
+            seen: set[str] = set()
+            cur = name
+            while cur in bindings and cur not in seen:
+                seen.add(cur)
+                cur = bindings[cur]
+            if cur in dangerous:
+                resolved[name] = cur
+        return resolved
 
     def _check_name(self, node: ast.Name, call_func_ids: set[int]) -> list[Violation]:
         """Flag a bare *reference* to a dynamic-execution builtin.
@@ -447,6 +495,20 @@ class CodeActionValidator:
                     "CODE-EXEC",
                     f"Reference to a dynamic-execution builtin is forbidden: {node.id}",
                     Severity.CRITICAL,
+                    node.id,
+                )
+            ]
+        # Sandbox escape via the builtins namespace: ``__builtins__['eval'](...)``,
+        # ``__builtins__.eval(...)``, ``__builtins__.__import__('os')`` all reach
+        # eval/exec/__import__ without the bare name ever appearing. The attribute
+        # checks miss these (the attr is ``eval``, not a dunder; the dotted call is
+        # ``__builtins__.eval``), so flag any reference to the namespace itself.
+        if node.id == "__builtins__":
+            return [
+                self._violation(
+                    "CODE-DUNDER-ACCESS",
+                    "Reference to the __builtins__ namespace is forbidden (sandbox escape)",
+                    Severity.HIGH,
                     node.id,
                 )
             ]
@@ -543,6 +605,10 @@ class CodeActionValidator:
         builtin_aliases: dict[str, str] | None = None,
     ) -> list[Violation]:
         func = node.func
+        # Unwrap an immediately-called walrus binding: ``(rd := open)(...)`` calls
+        # the bound value, so resolve through to the underlying name.
+        if isinstance(func, ast.NamedExpr):
+            func = func.value
         if isinstance(func, ast.Name):
             name = func.id
             # Resolve a builtin laundered through a local name (``rd = open``).
@@ -617,8 +683,16 @@ class CodeActionValidator:
 
     @staticmethod
     def _literal_dunder_arg(node: ast.Call) -> str | None:
-        """Return a string-literal argument starting with ``__``, else ``None``."""
-        for arg in node.args:
+        """Return a string-literal dunder argument (``__…``), else ``None``.
+
+        Scans positional *and* keyword arguments: ``setattr(o, name='__dict__', …)``
+        smuggles the dunder through the ``name=`` keyword, so inspecting only
+        ``node.args`` would let it fall through to MEDIUM ``CODE-INTROSPECTION``
+        instead of being promoted to HIGH ``CODE-DUNDER-ACCESS``.
+        """
+        candidates: list[ast.expr] = list(node.args)
+        candidates.extend(kw.value for kw in node.keywords)
+        for arg in candidates:
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 if arg.value.startswith("__"):
                     return arg.value

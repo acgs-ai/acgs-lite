@@ -17,15 +17,22 @@
 ### Basic usage
 
 ```python
-from acgs_lite import Constitution, GovernedAgent
+from acgs_lite import Constitution, GovernedAgent, MACIRole
 
 constitution = Constitution.from_template("general")
-agent = GovernedAgent(my_llm_agent, constitution=constitution)
+agent = GovernedAgent(
+    my_llm_agent,
+    constitution=constitution,
+    maci_role=MACIRole.EXECUTOR,
+)
 
-result = agent.run("summarise this document")
+result = agent.run("summarise this document", governance_action="execute")
 ```
 
-### With MACI role enforcement
+MACI is enforced by default. A governed call without an explicit role and
+per-call `governance_action` is denied before the wrapped agent executes.
+
+### With a proposer role
 
 ```python
 from acgs_lite import MACIRole
@@ -34,14 +41,13 @@ agent = GovernedAgent(
     my_agent,
     constitution=constitution,
     maci_role=MACIRole.PROPOSER,
-    enforce_maci=True,
 )
 
-result = agent.run("approve this policy change", governance_action="propose_rule")
+result = agent.run("draft this policy change", governance_action="propose")
 ```
 
 ### Async usage
 
 ```python
-result = await agent.arun("process this request")
+result = await agent.arun("process this request", governance_action="propose")
 ```

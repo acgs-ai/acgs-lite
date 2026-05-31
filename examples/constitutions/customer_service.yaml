@@ -18,7 +18,7 @@ description: |
 rules:
   # -- PII Protection ---------------------------------------------------------
   - id: CSVC-001
-    name: PII exposure prevention
+    text: PII exposure prevention
     description: >
       The system must not include personally identifiable information (PII) in
       logs, analytics, training data exports, or any channel visible to
@@ -39,7 +39,7 @@ rules:
     action: BLOCK
 
   - id: CSVC-002
-    name: Payment card data handling
+    text: Payment card data handling
     description: >
       The system must never request, store, or display full payment card numbers
       in conversation. If a customer provides card data unprompted, the system
@@ -61,7 +61,7 @@ rules:
 
   # -- Human Escalation -------------------------------------------------------
   - id: CSVC-003
-    name: Mandatory human escalation triggers
+    text: Mandatory human escalation triggers
     description: >
       The system must escalate to a human agent when: (1) the customer
       explicitly requests a human, (2) the conversation exceeds 3 unresolved
@@ -83,7 +83,7 @@ rules:
     action: FLAG
 
   - id: CSVC-004
-    name: Crisis and safety escalation
+    text: Crisis and safety escalation
     description: >
       If the customer expresses intent to harm themselves or others, the system
       must immediately escalate to a trained human agent and, where configured,
@@ -104,7 +104,7 @@ rules:
 
   # -- Commitment Controls ----------------------------------------------------
   - id: CSVC-005
-    name: Unauthorized commitment prohibition
+    text: Unauthorized commitment prohibition
     description: >
       The system must not make binding financial commitments, issue refunds,
       authorize credits, waive fees, modify contract terms, or make promises
@@ -126,7 +126,7 @@ rules:
     action: FLAG
 
   - id: CSVC-006
-    name: Accurate representation requirement
+    text: Accurate representation requirement
     description: >
       The system must not make false or misleading statements about the
       company's products, services, policies, or capabilities. When uncertain,
@@ -148,7 +148,7 @@ rules:
 
   # -- Complaint Handling -----------------------------------------------------
   - id: CSVC-007
-    name: Formal complaint acknowledgment
+    text: Formal complaint acknowledgment
     description: >
       When a customer files a formal complaint, the system must: (1) acknowledge
       receipt with a unique reference number, (2) set and communicate a response
@@ -169,7 +169,7 @@ rules:
     action: FLAG
 
   - id: CSVC-008
-    name: Do-not-contact and opt-out compliance
+    text: Do-not-contact and opt-out compliance
     description: >
       The system must immediately honor opt-out requests for marketing
       communications, cease contact upon do-not-contact requests per the
@@ -191,7 +191,7 @@ rules:
 
   # -- Accessibility ----------------------------------------------------------
   - id: CSVC-009
-    name: Accessibility compliance
+    text: Accessibility compliance
     description: >
       The system must provide equivalent service quality to customers using
       assistive technologies. Text responses must be compatible with screen
@@ -213,7 +213,7 @@ rules:
 
   # -- Response Quality -------------------------------------------------------
   - id: CSVC-010
-    name: Response accuracy verification
+    text: Response accuracy verification
     description: >
       The system must verify factual claims against the authoritative knowledge
       base before presenting them to customers. Responses about pricing, product
@@ -233,7 +233,7 @@ rules:
     action: LOG
 
   - id: CSVC-011
-    name: Conversation context retention
+    text: Conversation context retention
     description: >
       The system must maintain conversation context within a session and must
       not force customers to repeat information already provided. When handing

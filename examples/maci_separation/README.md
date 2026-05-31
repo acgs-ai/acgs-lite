@@ -48,7 +48,7 @@ if the same role tries to both propose and validate.
 ```python
 from acgs_lite import GovernedAgent, MACIRole
 
-agent = GovernedAgent(my_agent, maci_role=MACIRole.PROPOSER, enforce_maci=True)
+agent = GovernedAgent(my_agent, maci_role=MACIRole.PROPOSER)
 agent.run("draft change", governance_action="propose")  # ✅
 agent.run("validate change", governance_action="validate")  # 🚫 MACIViolationError
 ```

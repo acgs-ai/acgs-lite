@@ -137,8 +137,15 @@ class GovernedPydanticAgent(GovernedBase):
         return result
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate attribute access to the wrapped agent."""
-        return getattr(self._agent, name)
+        """Delegate attribute access to the wrapped agent.
+
+        Fail-closed: a prompt string passed to an un-overridden execution method
+        is validated before the underlying agent runs it (see
+        ``_govern_forwarded_attr``), so delegation is not an ungoverned path.
+        """
+        if name == "_agent":
+            raise AttributeError(name)
+        return self._govern_forwarded_attr(name, getattr(self._agent, name))
 
     @property
     def stats(self) -> dict[str, Any]:
@@ -232,8 +239,15 @@ class GovernedModel(GovernedBase):
         return response
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate attribute access to the wrapped model."""
-        return getattr(self._model, name)
+        """Delegate attribute access to the wrapped model.
+
+        Fail-closed: a prompt string passed to an un-overridden execution method
+        is validated before the underlying model runs it (see
+        ``_govern_forwarded_attr``), so delegation is not an ungoverned path.
+        """
+        if name == "_model":
+            raise AttributeError(name)
+        return self._govern_forwarded_attr(name, getattr(self._model, name))
 
     @property
     def stats(self) -> dict[str, Any]:

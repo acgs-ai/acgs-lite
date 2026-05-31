@@ -1,6 +1,6 @@
 """Multi-framework AI compliance module for acgs-lite.
 
-Provides compliance assessment against eighteen major regulatory frameworks:
+Provides compliance assessment against nineteen major regulatory frameworks:
 
 - **NIST AI RMF**: US AI Risk Management Framework (GOVERN/MAP/MEASURE/MANAGE)
 - **ISO 42001**: International AI Management System standard
@@ -20,6 +20,7 @@ Provides compliance assessment against eighteen major regulatory frameworks:
 - **Brazil LGPD + AI**: Lei Geral de Proteção de Dados + Art.20 ADMT
 - **China AI**: Algorithmic Recommendations + Deep Synthesis + GenAI + PIPL
 - **CCPA/CPRA + ADMT**: California privacy + automated decision-making rules
+- **Japan AI Guidelines**: METI/MIC AI Guidelines for Business (10 principles)
 
 Each framework auto-populates checklist items that acgs-lite satisfies,
 computing coverage and gap analysis.
@@ -71,6 +72,7 @@ from acgs_lite.compliance.gdpr import GDPRFramework
 from acgs_lite.compliance.hipaa_ai import HIPAAAIFramework
 from acgs_lite.compliance.india_dpdp import IndiaDPDPFramework
 from acgs_lite.compliance.iso_42001 import ISO42001Framework
+from acgs_lite.compliance.japan_ai_guidelines import JapanAIGuidelinesFramework
 from acgs_lite.compliance.multi_framework import MultiFrameworkAssessor
 from acgs_lite.compliance.nist_ai_rmf import NISTAIRMFFramework
 from acgs_lite.compliance.nyc_ll144 import NYCLL144Framework
@@ -110,6 +112,8 @@ __all__ = [
     "BrazilLGPDFramework",
     "ChinaAIFramework",
     "CCPACPRAFramework",
+    # Frameworks (round 5: +1)
+    "JapanAIGuidelinesFramework",
     # Orchestrator
     "MultiFrameworkAssessor",
     # Report exporter

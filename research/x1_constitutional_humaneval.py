@@ -15,6 +15,15 @@ import random
 from pathlib import Path
 from typing import Any
 
+
+def _simulation_metadata(seed: int) -> dict[str, object]:
+    return {
+        "label": f"SIMULATION (seed={seed}), not empirical benchmark",
+        "seed": seed,
+        "empirical_benchmark": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Simulated HumanEval-like problems (5 proxy problems for speed)
 # In production: replace with real HumanEval dataset from datasets library
@@ -169,6 +178,7 @@ def main() -> int:
     }
 
     result = {
+        "simulation": _simulation_metadata(args.seed),
         "baseline": baseline["aggregated"],
         "filtered": filtered["aggregated"],
         "deltas": deltas,

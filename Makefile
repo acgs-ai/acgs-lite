@@ -18,6 +18,7 @@ TEST_DIR    = $(PACKAGE_DIR)/tests
 REPO_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 
 .PHONY: help dev-setup install install-dev test test-quick test-cov test-examples \
+        test-governance \
         lint format typecheck check build publish-dry-run publish \
         examples visualize clean
 
@@ -35,6 +36,7 @@ help:
 	@echo "    make test          Full test suite"
 	@echo "    make test-quick    Skip slow/benchmark tests (-m 'not slow')"
 	@echo "    make test-cov      Test + coverage report (HTML in htmlcov/)"
+	@echo "    make test-governance  Governance-regression safety gate"
 	@echo "    make test-examples Run all examples/ as smoke tests"
 	@echo ""
 	@echo "  Quality:"
@@ -123,6 +125,19 @@ test-cov:
 	    --cov-report=term-missing \
 	    --cov-report=html:htmlcov
 	@echo "Coverage report: htmlcov/index.html"
+
+test-governance:
+	$(TEST_ENV) $(PYTEST) \
+	    $(TEST_DIR)/test_maci.py \
+	    $(TEST_DIR)/test_core.py \
+	    $(TEST_DIR)/test_legitimacy_contract.py \
+	    $(TEST_DIR)/test_claude_code_integration.py \
+	    $(TEST_DIR)/test_governance_regression_invariants.py \
+	    $(TEST_DIR)/red_team \
+	    $(PYTEST_ROOTDIR) \
+	    --import-mode=importlib \
+	    -q
+	$(TEST_ENV) $(PYTHON) scripts/run_governance_regression.py --check
 
 test-examples:
 	@echo "Running examples as smoke tests..."

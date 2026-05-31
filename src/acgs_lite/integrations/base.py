@@ -23,6 +23,64 @@ from acgs_lite.errors import ConstitutionalViolationError
 
 logger = logging.getLogger(__name__)
 
+# Keyword names under which agent/task execution entry points commonly receive
+# the prompt to run. Mirrors smolagents' positional-first code extraction, but
+# for natural-language task strings rather than code actions.
+_FORWARD_PROMPT_KWARGS = (
+    "task",
+    "prompt",
+    "query",
+    "message",
+    "messages",
+    "input",
+    "text",
+    "description",
+    "instruction",
+    "goal",
+)
+
+
+def _coerce_prompt(value: Any) -> str | None:
+    """Return *value* as text if it is a task/prompt carrier, else ``None``.
+
+    Recognises ``str`` and every bytes-like form (bytes/bytearray/memoryview),
+    decoding the latter so a task smuggled as bytes cannot slip past the
+    forwarded gate ungoverned. Non-text payloads (dicts, numbers, tools) are not
+    agent actions and return ``None``.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", "replace")
+    return None
+
+
+def _extract_forwarded_prompts(args: tuple[Any, ...], kwargs: dict[str, Any]) -> list[str]:
+    """Return *every* task/prompt carried by a forwarded execution call.
+
+    Agent execution entry points take the task as a positional argument (or via a
+    ``task``/``prompt``/``query``/… keyword). A call carrying no text payload is
+    configuration, not an agent action (``set_temperature(0.5)``,
+    ``add_tool(tool)``, ``run(data={...})``), and is forwarded unchanged so the
+    fail-closed gate governs execution without blocking benign setup.
+
+    Returns *all* text carriers, not just the first, and decodes bytes-like
+    carriers: a task passed behind a leading non-text/benign argument
+    (``run(session_id, task)``) or smuggled as bytes must still be validated —
+    otherwise the leading argument is validated, passes, and the trailing task is
+    forwarded to the underlying agent ungoverned (a fail-open bypass).
+    """
+    prompts: list[str] = []
+    for value in args:
+        text = _coerce_prompt(value)
+        if text is not None:
+            prompts.append(text)
+    for key in _FORWARD_PROMPT_KWARGS:
+        text = _coerce_prompt(kwargs.get(key))
+        if text is not None:
+            prompts.append(text)
+    return prompts
+
 
 class GovernedBase:
     """Mixin providing common governance plumbing for integration wrappers.
@@ -76,6 +134,55 @@ class GovernedBase:
             "agent_id": self.agent_id,
             "audit_chain_valid": self.audit_log.verify_chain(),
         }
+
+    def _validate_forwarded(self, text: str) -> None:
+        """Validate a forwarded execution call's task/prompt.
+
+        Honors the adapter's strictness exactly like the primary governed path
+        (``run``/``kickoff``/…): a blocking violation under strict raises
+        :class:`ConstitutionalViolationError`; under ``strict=False`` it is
+        audit-only. This keeps un-overridden execution methods at parity with the
+        methods the wrapper governs explicitly.
+        """
+        self.engine.validate(text, agent_id=self.agent_id)
+
+    def _govern_forwarded_attr(self, name: str, inner: Any) -> Any:
+        """Fail-closed forwarding for a delegated wrapper attribute.
+
+        Wrapper adapters delegate unknown attributes to the wrapped object via
+        ``__getattr__``. Without a guard, an execution entry point the wrapper
+        does not override by name (``arun``, ``akickoff``, ``stream``,
+        ``run_batched``, or a future method) would run the agent on an
+        *ungoverned* task — a fail-open bypass of the governance the wrapper
+        exists to enforce.
+
+        This returns *inner* unchanged unless it is a non-dunder **callable**, in
+        which case it is wrapped so a task/prompt string passed to it is validated
+        (see :meth:`_validate_forwarded`) before the underlying call runs. Calls
+        carrying no string payload (config setters, dict/list inputs) and dunder
+        lookups are forwarded unchanged.
+
+        Adapters call this from ``__getattr__`` after resolving the attribute, and
+        must guard their inner-object attribute name to avoid recursion, e.g.::
+
+            def __getattr__(self, name):
+                if name == "_agent":
+                    raise AttributeError(name)
+                return self._govern_forwarded_attr(name, getattr(self._agent, name))
+        """
+        if not callable(inner) or name.startswith("__"):
+            return inner
+        validate = self._validate_forwarded
+
+        def _governed(*args: Any, **kwargs: Any) -> Any:
+            # Gate EVERY task carrier (not just the first): a benign leading
+            # argument must not shadow a dangerous task in a later argument.
+            for prompt in _extract_forwarded_prompts(args, kwargs):
+                if prompt:
+                    validate(prompt)
+            return inner(*args, **kwargs)
+
+        return _governed
 
     def _validate_nonstrict(
         self,

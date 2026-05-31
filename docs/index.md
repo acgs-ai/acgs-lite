@@ -13,38 +13,45 @@ The standard `GovernedAgent` path provides deterministic input/output validation
 3. An execution boundary the executor must match
 4. Fail-closed behavior on missing or unverifiable receipt proof
 
-## 5-Line Quickstart
+## Quickstart
 
 ```python
-from acgs_lite import Constitution, GovernedAgent
+from acgs_lite import Constitution, GovernedAgent, MACIRole
 
 # 1. Load rules from your Constitution
 constitution = Constitution.from_yaml("rules.yaml")
 
-# 2. Wrap your existing agent
-agent = GovernedAgent(my_llm_agent, constitution=constitution)
+# 2. Wrap your existing agent with an explicit MACI execution role
+agent = GovernedAgent(
+    my_llm_agent,
+    constitution=constitution,
+    maci_role=MACIRole.EXECUTOR,
+)
 
-# 3. Execute through deterministic validation
-result = agent.run("Process this request")
+# 3. Execute through deterministic validation with per-call authorization
+result = agent.run("Process this request", governance_action="execute")
 ```
 
 ## Compliance Mapping Examples
 
-ACGS can map governance constraints to global regulatory frameworks to support audits and risk assessments.
+ACGS can map governance constraints to global regulatory frameworks to support
+audits and risk assessments. The ratios below are SELF-ASSESSED mapping
+coverage only; they are not certification, regulatory approval, adoption proof,
+or a substitute for legal review.
 
-| Framework | Business Risk | Mapped Controls |
+| Framework | Business Risk | Mapping Coverage |
 |---|---|---|
-| **EU AI Act** | 7% global revenue penalty | 5/9 |
-| **NIST AI RMF** | US Federal procurement gate | 7/16 |
-| **ISO/IEC 42001** | International audit failure | 9/18 |
-| **SOC 2 + AI** | Enterprise gate / lost contracts | 10/16 |
-| **HIPAA + AI** | $1.5M fine per violation | 9/15 |
-| **GDPR Art. 22** | 4% global revenue | 10/12 |
-| **ECOA/FCRA** | Unlimited damages | 6/12 |
-| **NYC LL 144** | $1,500/day | 6/12 |
-| **OECD AI** | Baseline standard | 10/15 |
+| **EU AI Act** | 7% global revenue penalty | SELF-ASSESSED mapping coverage: 5/9 |
+| **NIST AI RMF** | US Federal procurement gate | SELF-ASSESSED mapping coverage: 7/16 |
+| **ISO/IEC 42001** | International audit failure | SELF-ASSESSED mapping coverage: 9/18 |
+| **SOC 2 + AI** | Enterprise gate / lost contracts | SELF-ASSESSED mapping coverage: 10/16 |
+| **HIPAA + AI** | $1.5M fine per violation | SELF-ASSESSED mapping coverage: 9/15 |
+| **GDPR Art. 22** | 4% global revenue | SELF-ASSESSED mapping coverage: 10/12 |
+| **ECOA/FCRA** | Unlimited damages | SELF-ASSESSED mapping coverage: 6/12 |
+| **NYC LL 144** | $1,500/day | SELF-ASSESSED mapping coverage: 6/12 |
+| **OECD AI** | Baseline standard | SELF-ASSESSED mapping coverage: 10/15 |
 
-**Run `acgs assess` to see coverage for your jurisdiction and domain.**
+**Run `acgs assess` to see self-assessed mapping coverage for your jurisdiction and domain.**
 
 ## Next Steps & Guides
 

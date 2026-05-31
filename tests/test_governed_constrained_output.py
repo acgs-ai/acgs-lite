@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 
-from acgs_lite import GovernedAgent
+from acgs_lite import GovernedAgent, MACIRole
 from acgs_lite.constitution import Constitution, Rule, Severity
 from acgs_lite.provider_capabilities import (
     CapabilityLevel,
@@ -83,10 +83,14 @@ def _reset_registry() -> Iterator[None]:
 def test_governed_agent_injects_response_format_for_structured_output() -> None:
     agent = RecordingAgent()
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
-    governed.run("safe input", capability_profile=_profile())
+    governed.run("safe input", governance_action="execute", capability_profile=_profile())
 
     response_format = cast(dict[str, Any], agent.calls[0]["kwargs"]["response_format"])
     assert isinstance(response_format, dict)
@@ -96,11 +100,16 @@ def test_governed_agent_injects_response_format_for_structured_output() -> None:
 def test_governed_agent_skips_response_format_when_capability_is_missing() -> None:
     agent = RecordingAgent()
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
     governed.run(
         "safe input",
+        governance_action="execute",
         capability_profile=_profile(structured_output=CapabilityLevel.NONE),
     )
 
@@ -123,10 +132,14 @@ def test_governed_agent_resolves_profile_from_local_registry() -> None:
     get_capability_registry().register(_profile())
 
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
-    governed.run("safe input")
+    governed.run("safe input", governance_action="execute")
 
     response_format = cast(dict[str, Any], agent.calls[0]["kwargs"]["response_format"])
     assert isinstance(response_format, dict)
@@ -139,10 +152,14 @@ def test_governed_agent_resolves_profile_from_default_registry() -> None:
     agent.provider_type = "openai"
 
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
-    governed.run("safe input")
+    governed.run("safe input", governance_action="execute")
 
     response_format = cast(dict[str, Any], agent.calls[0]["kwargs"]["response_format"])
     assert isinstance(response_format, dict)
@@ -155,10 +172,14 @@ def test_governed_agent_resolves_legacy_openai_model_from_default_registry() -> 
     agent.provider_type = "openai"
 
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
-    governed.run("safe input")
+    governed.run("safe input", governance_action="execute")
 
     response_format = cast(dict[str, Any], agent.calls[0]["kwargs"]["response_format"])
     assert isinstance(response_format, dict)
@@ -171,10 +192,14 @@ def test_governed_agent_resolves_prefixed_model_ids() -> None:
     agent.provider_type = "openai"
 
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
-    governed.run("safe input")
+    governed.run("safe input", governance_action="execute")
 
     response_format = cast(dict[str, Any], agent.calls[0]["kwargs"]["response_format"])
     assert isinstance(response_format, dict)
@@ -186,10 +211,14 @@ def test_governed_agent_inferrs_provider_from_model_prefix() -> None:
     agent.model = "openai:gpt-4o-mini"
 
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
-    governed.run("safe input")
+    governed.run("safe input", governance_action="execute")
 
     response_format = cast(dict[str, Any], agent.calls[0]["kwargs"]["response_format"])
     assert isinstance(response_format, dict)
@@ -199,11 +228,16 @@ def test_governed_agent_inferrs_provider_from_model_prefix() -> None:
 def test_governed_agent_injects_google_structured_output_config() -> None:
     agent = RecordingAgent()
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
     governed.run(
         "safe input",
+        governance_action="execute",
         capability_profile=_profile(model_id="gemini-2.5-flash", provider_type="google"),
     )
 
@@ -215,11 +249,16 @@ def test_governed_agent_injects_google_structured_output_config() -> None:
 def test_governed_agent_merges_google_config_with_existing_kwargs() -> None:
     agent = RecordingAgent()
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
     governed.run(
         "safe input",
+        governance_action="execute",
         config={"temperature": 0.2},
         capability_profile=_profile(model_id="gemini-2.5-pro", provider_type="google"),
     )
@@ -232,11 +271,16 @@ def test_governed_agent_merges_google_config_with_existing_kwargs() -> None:
 def test_governed_agent_injects_anthropic_structured_output_config() -> None:
     agent = RecordingAgent()
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
     governed.run(
         "safe input",
+        governance_action="execute",
         capability_profile=_profile(model_id="claude-opus-4-6", provider_type="anthropic"),
     )
 
@@ -249,11 +293,16 @@ def test_governed_agent_injects_anthropic_structured_output_config() -> None:
 def test_governed_agent_merges_anthropic_output_config() -> None:
     agent = RecordingAgent()
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
     governed.run(
         "safe input",
+        governance_action="execute",
         output_config={"foo": "bar"},
         capability_profile=_profile(model_id="claude-sonnet-4-6", provider_type="anthropic"),
     )
@@ -268,11 +317,16 @@ def test_preview_model_fails_closed_without_preview_policy(monkeypatch: pytest.M
     monkeypatch.delenv("ACGS_ALLOW_PREVIEW_MODEL_CAPABILITIES", raising=False)
     agent = RecordingAgent()
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
     governed.run(
         "safe input",
+        governance_action="execute",
         capability_profile=_profile(
             model_id="gemini-3-flash-preview",
             provider_type="google",
@@ -288,11 +342,16 @@ def test_inferred_support_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ACGS_ALLOW_PREVIEW_MODEL_CAPABILITIES", "1")
     agent = RecordingAgent()
     governed = GovernedAgent(
-        agent, constitution=_constitution(), strict=False, validate_output=True
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
     governed.run(
         "safe input",
+        governance_action="execute",
         capability_profile=_profile(
             provider_type="anthropic",
             support_level=CapabilitySupportLevel.INFERRED,

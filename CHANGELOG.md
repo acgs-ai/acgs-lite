@@ -7,6 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-05-31
+
+### Security
+
+- **BREAKING: `GovernedAgent` now enforces MACI fail-closed by default.** The
+  default is `enforce_maci=True`; callers that use `GovernedAgent` must pass a
+  `maci_role` at construction time and a `governance_action` for governed runs.
+  Misconfigured or missing role/action context now fails closed instead of
+  silently treating MACI as advisory.
+- Added a bundled fail-closed Claude Code governance hook route so local hook
+  enforcement no longer depends on an unbundled `/x402/check` sidecar.
+- Closed adversarially proven fail-open paths in framework integrations,
+  including delegated `__getattr__` calls, bytes-like and non-first positional
+  code/task carriers, dict-keyed smolagents `step_callbacks`, unknown hook
+  decision classes, and multi-governor wrapping gaps.
+- Hardened validation and code-analysis failure behavior: validator crashes now
+  fail closed, blocked CRITICAL decisions are retained in full-audit mode, and
+  builtin-laundering / `__builtins__` escape vectors are blocked.
+- Added an honest `SECURITY.md` responsible-disclosure policy with scope,
+  supported-version posture, and response-window targets. It does not claim
+  certification, production readiness, independent staffing, or third-party
+  validation.
+
+### Added
+
+- Graduated the Runtime Legitimacy Kernel to a stable public surface, with
+  receipt-bound legitimacy contracts documented as the committed membrane story.
+- Added the governed execution membrane example and tests for the
+  `request -> decision -> receipt -> bounded execution` positioning.
+- Added a five-trigger adversarial fail-closed suite with committed evidence
+  artifacts covering authorization, constitution version, policy staleness,
+  receipt integrity, and audit-evidence verifiability.
+- Added a CI governance-regression gate and invariant pinning so previously
+  closed bypass vectors, the canonical constitutional hash, and receipt-binding
+  assumptions are checked continuously.
+- Added a real-LLM experiment harness backed by real `AuditLog` plumbing. This
+  release includes the harness only; it does not include or claim empirical
+  real-LLM results.
+- Added Japan AI Guidelines for Business compliance mapping, Swarms governance
+  adapter support, xAI/Grok adapter tests, smolagents adapter coverage, SMT
+  boundary verification for governed callables, and a recruiting-domain
+  constitution template.
+- Added runnable examples and docs for DSPy governance, GitHub Actions,
+  pre-commit usage, AI-agent verification, LangChain onboarding, integration
+  choice guidance, and what-gets-blocked walkthroughs.
+
+### Changed
+
+- Repositioned the project around the constitutional governance membrane:
+  ACGS-Lite checks proposed side effects, emits decisions and receipts, and
+  records audit evidence; it does not claim to be an agent framework or a
+  compliance-certification layer.
+- Completed the public honesty pass: removed unsupported social proof, avoided
+  claims of independently confirmed production users, labeled simulations and
+  self-assessed compliance coverage, and kept adoption claims limited to
+  verifiable evidence.
+- Updated smolagents documentation so fail-open/strict-flag behavior matches the
+  implementation instead of overstating enforcement.
+- Added measurable `GOAL.md` success criteria that separate buildable release
+  work from owner-gated or third-party-gated outcomes such as PyPI token
+  renewal, curated-list acceptance, independent adoption, and external
+  validation.
+- Refreshed planning, community, and capability-manifest docs, including Stage 0
+  community scaffolding and Stage 1 ignition content.
+- Updated Rust dependency pins for `spacetimedb`, `wasm-bindgen-test`, and
+  `serde_json`.
+
+### Fixed
+
+- Repaired constitution templates that failed to load and added a guard that
+  every shipped template loads and enforces.
+- Fixed hook and integration routing so every code/task carrier is gated, not
+  just the first positional carrier.
+- Pinned strict per-call override behavior against shared-state mutation and
+  guarded heavy ML libraries against eager module-level imports.
+- Fixed README audit example usage and the lending example load path in the
+  constitutions README.
+- Preserved distinct audit findings when validator errors occur.
+
+### Known limitations
+
+- Simulations and seeded harness runs are not empirical benchmarks. The real-LLM
+  experiment harness is present, but real artifacts require provider API keys,
+  committed result JSON, stated datasets/sample sizes, and explicit summaries.
+- There are no independently confirmed production users in this release.
+- PyPI publication is not performed by this packaging unit and remains pending
+  owner action with valid credentials.
+- Curated-list submission or acceptance, third-party validation, certification,
+  and independent adoption remain external outcomes and are not claimed here.
+
 ## [2.10.1] - 2026-05-16
 
 ### Changed

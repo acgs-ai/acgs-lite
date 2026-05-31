@@ -47,6 +47,7 @@ from acgs_lite.compliance.hipaa_ai import HIPAAAIFramework
 from acgs_lite.compliance.igaming import IGamingFramework
 from acgs_lite.compliance.india_dpdp import IndiaDPDPFramework
 from acgs_lite.compliance.iso_42001 import ISO42001Framework
+from acgs_lite.compliance.japan_ai_guidelines import JapanAIGuidelinesFramework
 from acgs_lite.compliance.nist_ai_rmf import NISTAIRMFFramework
 from acgs_lite.compliance.nyc_ll144 import NYCLL144Framework
 from acgs_lite.compliance.oecd_ai import OECDAIFramework
@@ -80,6 +81,8 @@ _FRAMEWORK_REGISTRY: dict[str, type] = {
     "ccpa_cpra": CCPACPRAFramework,
     # Round 4: iGaming vertical
     "igaming": IGamingFramework,
+    # Round 5: +1
+    "japan_ai_guidelines": JapanAIGuidelinesFramework,
 }
 
 # Jurisdiction -> frameworks that apply
@@ -94,6 +97,7 @@ _JURISDICTION_MAP: dict[str, list[str]] = {
     "gibraltar": ["igaming"],
     "singapore": ["singapore_maigf", "iso_42001", "oecd_ai"],
     "asean": ["singapore_maigf", "oecd_ai"],
+    "japan": ["japan_ai_guidelines", "iso_42001", "oecd_ai"],
     "india": ["india_dpdp", "oecd_ai"],
     "australia": ["australia_ai_ethics", "oecd_ai"],
     "brazil": ["brazil_lgpd", "oecd_ai"],
@@ -348,7 +352,14 @@ class MultiFrameworkAssessor:
     ) -> list[str]:
         """Determine which frameworks to run."""
         if self._requested_frameworks is not None:
-            return [fid for fid in self._requested_frameworks if fid in _FRAMEWORK_REGISTRY]
+            # Normalize CLI-style dashed IDs (e.g. "japan-ai-guidelines") to the
+            # canonical underscore registry keys ("japan_ai_guidelines").
+            resolved: list[str] = []
+            for fid in self._requested_frameworks:
+                key = fid if fid in _FRAMEWORK_REGISTRY else fid.replace("-", "_")
+                if key in _FRAMEWORK_REGISTRY:
+                    resolved.append(key)
+            return resolved
 
         jurisdiction = system_description.get("jurisdiction", "").lower().replace(" ", "_")
         domain = system_description.get("domain", "").lower().replace(" ", "_")

@@ -437,13 +437,16 @@ class TestCustomValidators:
         def bad_validator(action: str, ctx: dict) -> list[Violation]:
             raise RuntimeError("Validator crashed")
 
-        # CUSTOM-ERROR uses Severity.MEDIUM (infrastructure error: warn, not block).
-        # Appears in result.warnings, not result.violations.
+        # Fail-closed: a crashing validator yields a HIGH (blocking) CUSTOM-ERROR
+        # in result.violations, not a non-blocking warning — a crashing security
+        # validator must not let the action through ungoverned.
         engine = _make_engine(strict=False, custom_validators=[bad_validator])
         result = engine.validate("normal action")
-        error_warnings = [v for v in result.warnings if v.rule_id == "CUSTOM-ERROR"]
-        assert len(error_warnings) == 1
-        assert "Validator crashed" in error_warnings[0].rule_text
+        error_violations = [v for v in result.violations if v.rule_id == "CUSTOM-ERROR"]
+        assert len(error_violations) == 1
+        assert error_violations[0].severity is Severity.HIGH
+        assert "Validator crashed" in error_violations[0].rule_text
+        assert result.valid is False
 
     def test_add_validator_method(self):
         engine = _make_engine(strict=False)

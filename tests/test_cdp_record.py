@@ -437,14 +437,16 @@ class TestOptIn:
         monkeypatch.setenv("ACGS_CDP_ENABLED", "true")
 
         from acgs_lite.governed import GovernedAgent
+        from acgs_lite.maci import MACIRole
 
         cdp_backend = InMemoryCDPBackend()
         agent = GovernedAgent(
             agent=lambda x, **kw: f"response: {x}",
             agent_id="opt-in-agent",
             cdp_backend=cdp_backend,
+            maci_role=MACIRole.EXECUTOR,
         )
-        agent.run("test input")
+        agent.run("test input", governance_action="execute")
 
         assert cdp_backend.count() == 1
         assert cdp_backend.save_calls[0].cdp_id.startswith("cdp-")
@@ -454,6 +456,7 @@ class TestOptIn:
         monkeypatch.delenv("ACGS_CDP_ENABLED", raising=False)
 
         from acgs_lite.governed import GovernedAgent
+        from acgs_lite.maci import MACIRole
         from acgs_lite.server import _cdp_backend as server_backend
 
         initial_count = server_backend.count()
@@ -461,8 +464,9 @@ class TestOptIn:
             agent=lambda x, **kw: f"response: {x}",
             agent_id="opt-out-agent",
             # No cdp_backend passed → only emits if ACGS_CDP_ENABLED is set
+            maci_role=MACIRole.EXECUTOR,
         )
-        agent.run("test input")
+        agent.run("test input", governance_action="execute")
 
         # Server backend should not have grown (no env var, no explicit backend)
         assert server_backend.count() == initial_count

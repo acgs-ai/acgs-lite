@@ -222,6 +222,78 @@ def test_executor_decodes_and_governs_bytes_code_action():
     assert inner.calls == []
 
 
+def test_executor_gates_bytearray_and_memoryview_on_forwarded_path():
+    # Adversarial (governance-branch-review #1): _extract_code_arg once accepted
+    # only (str, bytes) while _gate decoded bytearray, so a bytearray code action
+    # on a FORWARDED method (run_code_raise_errors) skipped the gate entirely and
+    # ran ungoverned -- a fail-open bypass of the executor gate. Every bytes-like
+    # carrier must be gated on the forwarded path exactly as on direct __call__.
+    class _RealisticExec:
+        def __init__(self):
+            self.ran: list = []
+            self.state: dict = {}
+
+        def __call__(self, code):
+            return self.run_code_raise_errors(code)
+
+        def run_code_raise_errors(self, code, return_final_answer=False):
+            self.ran.append(code)
+            return ("out", "logs", False)
+
+    dangerous = DANGEROUS_CODE.encode()
+    for carrier in (bytearray(dangerous), memoryview(dangerous)):
+        inner = _RealisticExec()
+        executor = SmolagentsGovernor().python_executor(inner)
+        # Forwarded execution method must gate the bytes-like action (the bypass).
+        with pytest.raises(ConstitutionalViolationError):
+            executor.run_code_raise_errors(carrier)
+        assert inner.ran == []
+        # Direct __call__ path gates it too (control).
+        with pytest.raises(ConstitutionalViolationError):
+            executor(carrier)
+        assert inner.ran == []
+
+    # Safe bytes-like code still reaches the inner executor through forwarding.
+    inner = _RealisticExec()
+    executor = SmolagentsGovernor().python_executor(inner)
+    executor.run_code_raise_errors(bytearray(SAFE_CODE.encode()))
+    assert len(inner.ran) == 1
+    assert bytes(inner.ran[0]).decode() == SAFE_CODE
+
+
+def test_executor_gates_code_shadowed_behind_benign_positional():
+    # Adversarial (verify-governance-fixes / M6 residual): dangerous code passed
+    # behind a benign leading positional must NOT run. Returning only the FIRST
+    # code carrier let the benign string be validated (passing) while the trailing
+    # code was forwarded to the inner executor ungoverned. The gate now validates
+    # EVERY carrier, on both the forwarded path and __call__.
+    class _SessionExec:
+        def __init__(self):
+            self.ran: list = []
+
+        def __call__(self, *args, **kwargs):
+            self.ran.append(args)
+            return "called"
+
+        def run(self, session_id, code, **kwargs):
+            self.ran.append((session_id, code))
+            return f"executed under {session_id}"
+
+    danger = "import os\nos.system('id')"
+    # Forwarded method with code at the 2nd positional.
+    inner = _SessionExec()
+    ex = SmolagentsGovernor().python_executor(inner)
+    with pytest.raises(ConstitutionalViolationError):
+        ex.run("session-9", danger)
+    assert inner.ran == []
+    # __call__ with a benign leading marker then dangerous code.
+    inner2 = _SessionExec()
+    ex2 = SmolagentsGovernor().python_executor(inner2)
+    with pytest.raises(ConstitutionalViolationError):
+        ex2("benign_marker", danger)
+    assert inner2.ran == []
+
+
 def test_executor_delegates_unknown_attributes():
     inner = _FakeExecutor()
     executor = GovernedPythonExecutor(inner, SmolagentsGovernor())
@@ -316,6 +388,53 @@ def test_wrap_is_idempotent_on_executor():
     assert agent.python_executor is first
 
 
+def test_wrap_with_different_governor_enforces_both_constitutions():
+    # #16: a SECOND governor wrapping an already-governed agent must still enforce
+    # its constitution at the executor gate. Skipping the re-wrap (because the
+    # executor was already a GovernedPythonExecutor) silently dropped the second
+    # governor's code-gate rules.
+    def const(kw: str) -> Constitution:
+        return Constitution(
+            id="c",
+            version="1.0.0",
+            rules=[
+                Rule(
+                    id="R",
+                    text=f"block {kw}",
+                    severity=Severity.CRITICAL,
+                    category="x",
+                    keywords=[kw],
+                    workflow_action=ViolationAction.BLOCK,
+                )
+            ],
+        )
+
+    agent = _FakeAgent()
+    SmolagentsGovernor(constitution=const("alphaword")).wrap(agent)
+    SmolagentsGovernor(constitution=const("betaword")).wrap(agent)
+    # Both governors' string rules are now enforced at the executor gate.
+    for kw in ("alphaword = 1", "betaword = 1"):
+        with pytest.raises(ConstitutionalViolationError):
+            agent.python_executor(kw)
+    # A code action matching neither constitution still runs.
+    assert agent.python_executor("gamma = 1") is not None
+
+
+def test_validate_code_fails_closed_on_non_string():
+    # #18/#30: the public validate_code must not leak a raw TypeError on non-str;
+    # #34: non-UTF-8 bytes must be blocked, not validated against a lossy decode.
+    gov = SmolagentsGovernor()
+    # Valid UTF-8 bytes are decoded and analyzed.
+    with pytest.raises(ConstitutionalViolationError) as exc:
+        gov.validate_code(b"import os")
+    assert exc.value.rule_id == "CODE-IMPORT-CRITICAL"
+    # Non-analyzable / non-UTF-8 inputs fail closed with CODE-UNANALYZABLE.
+    for bad in (123, ["import os"], None, b"\xff\xfe import os"):
+        with pytest.raises(ConstitutionalViolationError) as exc:
+            gov.validate_code(bad)  # type: ignore[arg-type]
+        assert exc.value.rule_id == "CODE-UNANALYZABLE", bad
+
+
 def test_wrap_initialises_none_hook_lists():
     class _Bare:
         def __init__(self):
@@ -402,6 +521,30 @@ def test_final_answer_check_serialises_structured_answer():
     assert check({"plan": "use the forbiddenphrase"}) is False
 
 
+def test_final_answer_check_matches_non_ascii_in_structured_answer():
+    # Adversarial (verify-governance-fixes / M5-L9): a non-ASCII forbidden keyword
+    # inside a structured answer must be matchable. With json.dumps' default
+    # ensure_ascii=True it would serialise to "café" and slip past substring
+    # matching; ensure_ascii=False exposes it at plain-string fidelity.
+    rule = Rule(
+        id="TEST-NONASCII",
+        text="café is not allowed",
+        severity=Severity.CRITICAL,
+        category="safety",
+        keywords=["café"],
+        workflow_action=ViolationAction.BLOCK,
+    )
+    const = Constitution(id="nonascii-const", version="1.0.0", rules=[rule])
+    check = SmolagentsGovernor(constitution=const).final_answer_check()
+    # Plain string is caught (control)...
+    assert check("go to the café now") is False
+    # ...and so is the same content wrapped in a structured answer.
+    assert check({"plan": "go to the café now"}) is False
+    assert check(["meet at the café"]) is False
+    # A clean structured answer is still accepted.
+    assert check({"plan": "summarise the report"}) is True
+
+
 def test_step_callback_never_raises_on_halt_rule():
     # M1: step callbacks are non-blocking even when a HALT rule matches.
     gov = SmolagentsGovernor(constitution=_const_with_rule(ViolationAction.HALT))
@@ -436,3 +579,28 @@ def test_wrap_does_not_double_append_hooks():
     gov.wrap(agent)
     assert len(agent.final_answer_checks) == 1
     assert len(agent.step_callbacks) == 1
+
+
+def test_wrap_attaches_to_dict_keyed_step_callbacks():
+    # #9/#21: smolagents step_callbacks can be a dict keyed by step type. Such a
+    # dict was previously skipped (logged), leaving step actions un-audited. The
+    # governance hook is now attached to each registered step-type list, and a
+    # tuple value is coerced in place.
+    class _DictCallbackAgent:
+        def __init__(self):
+            self.python_executor = _FakeExecutor()
+            self.final_answer_checks: list = []
+            self.step_callbacks = {"ActionStep": [], "PlanningStep": (object(),)}
+
+    agent = _DictCallbackAgent()
+    gov = SmolagentsGovernor()
+    gov.wrap(agent)
+    # Every registered step-type list now carries the governance callback.
+    assert any(getattr(h, "_acgs_governor", None) is not None for h in agent.step_callbacks["ActionStep"])
+    planning = agent.step_callbacks["PlanningStep"]
+    assert isinstance(planning, list)  # tuple coerced in place
+    assert any(getattr(h, "_acgs_governor", None) is not None for h in planning)
+    # Idempotent: re-wrapping the same governor does not double-attach.
+    before = {k: len(v) for k, v in agent.step_callbacks.items()}
+    gov.wrap(agent)
+    assert {k: len(v) for k, v in agent.step_callbacks.items()} == before

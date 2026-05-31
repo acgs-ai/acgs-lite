@@ -73,21 +73,64 @@ _LABEL_OUTPUT = "output"  # step observations / tool output
 _CODE_KWARGS: tuple[str, ...] = ("code", "code_action", "source")
 
 
-def _extract_code_arg(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | bytes | None:
-    """Return the code action of an executor call, if the call carries one.
+def _extract_code_args(
+    args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> list[str | bytes | bytearray | memoryview]:
+    """Return *every* code-carrier argument of an executor call.
 
-    A smolagents executor receives the code action as its first positional
-    argument (or, defensively, via a ``code``/``code_action``/``source``
-    keyword).  A call with no str/bytes argument is not code execution
-    (``send_variables(dict)``, ``send_tools(list)``) and is delegated unchanged.
+    A smolagents executor receives the code action as a positional argument (or,
+    defensively, via a ``code``/``code_action``/``source`` keyword).  A call with
+    no code-carrier argument is not code execution (``send_variables(dict)``,
+    ``send_tools(list)``) and is delegated unchanged.
+
+    Returns *all* carriers, not just the first: a caller can shadow the real code
+    behind a benign leading positional (``run("session-9", DANGER)``), so the gate
+    must validate every str/bytes-like argument — otherwise the benign string is
+    validated, passes, and all args (including the trailing code) are forwarded to
+    the inner executor ungoverned (a fail-open bypass). Recognises every bytes-like
+    carrier ``_gate`` can decode (str/bytes/bytearray/memoryview); recognising
+    fewer than ``_gate`` accepts would let a carrier slip past the gate.
     """
-    if args and isinstance(args[0], (str, bytes)):
-        return args[0]
+    carriers: list[str | bytes | bytearray | memoryview] = [
+        value for value in args if isinstance(value, (str, bytes, bytearray, memoryview))
+    ]
     for key in _CODE_KWARGS:
         value = kwargs.get(key)
-        if isinstance(value, (str, bytes)):
-            return value
-    return None
+        if isinstance(value, (str, bytes, bytearray, memoryview)):
+            carriers.append(value)
+    return carriers
+
+
+def _coerce_code_to_str(value: Any) -> str:
+    """Return *value* as analyzable source text, or fail closed.
+
+    Decodes a bytes-like carrier (bytes/bytearray/memoryview) as **strict** UTF-8:
+    non-UTF-8 bytes are not valid Python source, and decoding them with
+    ``errors="replace"`` would make the gate validate a *different* string than
+    the executor runs — so they are blocked outright (CODE-UNANALYZABLE) rather
+    than silently validated against a lossy transcription. Any other non-``str``
+    type cannot be analyzed and is likewise blocked. This keeps the public
+    ``validate_code`` and the live executor gate from leaking a raw ``TypeError``
+    on non-string input and realises the analyzer's fail-closed guarantee at the
+    call boundary.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        try:
+            return bytes(value).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ConstitutionalViolationError(
+                "Code action blocked: not valid UTF-8 source and cannot be analyzed",
+                rule_id="CODE-UNANALYZABLE",
+                severity="high",
+            ) from exc
+    raise ConstitutionalViolationError(
+        f"Code action blocked: non-string code action of type {type(value).__name__} "
+        "cannot be analyzed",
+        rule_id="CODE-UNANALYZABLE",
+        severity="high",
+    )
 
 
 def _coerce_answer_text(value: Any) -> str:
@@ -95,14 +138,18 @@ def _coerce_answer_text(value: Any) -> str:
 
     Strings pass through.  Mappings/sequences are JSON-serialised (sorted, with
     a ``str`` fallback) so their *content* is visible to substring/regex rules
-    rather than an opaque ``repr`` (L9).  Any object whose ``__str__`` raises
+    rather than an opaque ``repr`` (L9).  ``ensure_ascii=False`` keeps non-ASCII
+    content readable at the same fidelity as a plain string — with the default
+    ``ensure_ascii=True`` a forbidden non-ASCII keyword inside a structured answer
+    (``{"plan": "go to the café now"}`` -> ``café``) would be escaped past
+    substring matching and evade the check.  Any object whose ``__str__`` raises
     falls back to ``repr`` and finally to ``""`` so coercion never raises (M5).
     """
     if isinstance(value, str):
         return value
     if isinstance(value, (dict, list, tuple)):
         try:
-            return json.dumps(value, default=str, sort_keys=True)
+            return json.dumps(value, default=str, sort_keys=True, ensure_ascii=False)
         except Exception:  # noqa: BLE001 - best-effort; fall through to str()
             pass
     try:
@@ -142,22 +189,13 @@ class GovernedPythonExecutor:
         engine strictness, and re-raises defensively if any path were ever to
         return an invalid result instead of raising.
 
-        Non-string actions are normalised here so the analyzer's fail-closed
-        guarantee is realised at the live gate, not just in ``analyze()``: bytes
-        are decoded, and any other non-string type is blocked outright. Without
-        this the engine would crash on ``action[:500]`` / ``action.lower()``
-        before the AST validator's ``CODE-UNANALYZABLE`` guard could run.
+        Non-string actions are normalised (and non-analyzable ones blocked) via
+        :func:`_coerce_code_to_str` so the analyzer's fail-closed guarantee is
+        realised at the live gate, not just in ``analyze()`` — without this the
+        engine would crash on ``action[:500]`` / ``action.lower()`` before the AST
+        validator's ``CODE-UNANALYZABLE`` guard could run.
         """
-        if not isinstance(code_action, str):
-            if isinstance(code_action, (bytes, bytearray)):
-                code_action = bytes(code_action).decode("utf-8", "replace")
-            else:
-                raise ConstitutionalViolationError(
-                    "Code action blocked before execution: non-string code action of "
-                    f"type {type(code_action).__name__} cannot be analyzed",
-                    rule_id="CODE-UNANALYZABLE",
-                    severity="high",
-                )
+        code_action = _coerce_code_to_str(code_action)
         result = self._gov.validate_code(code_action, strict=True)
         if result is not None and not result.valid:  # defense in depth
             first = result.violations[0] if result.violations else None
@@ -168,8 +206,14 @@ class GovernedPythonExecutor:
             )
 
     def __call__(self, code_action: str, *args: Any, **kwargs: Any) -> Any:
-        # Raises if the code is blocked; records an audit entry either way.
+        # Raises if any carried code is blocked; records an audit entry either way.
+        # ``code_action`` is the primary code slot, gated unconditionally so a
+        # non-string action fails closed (CODE-UNANALYZABLE). Additional carriers in
+        # *args/code kwargs are gated too, so a caller cannot shadow dangerous code
+        # behind a benign leading positional (``executor("marker", DANGER)``).
         self._gate(code_action)
+        for code in _extract_code_args(args, kwargs):
+            self._gate(code)
         return self._inner(code_action, *args, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
@@ -178,7 +222,7 @@ class GovernedPythonExecutor:
             raise AttributeError(name)
         attr = getattr(self._inner, name)
         # Fail-closed forwarding: gate *any* callable the inner executor exposes
-        # when it is invoked with a code action (a str/bytes argument), so an
+        # when it is invoked with a code action (a str/bytes-like argument), so an
         # execution entry point we don't know by name — the real smolagents
         # ``run_code_raise_errors``, ``run_async``, a future method — cannot run
         # code ungoverned.  Dunder lookups and non-code calls
@@ -187,8 +231,9 @@ class GovernedPythonExecutor:
             gate = self._gate
 
             def _governed(*args: Any, **kwargs: Any) -> Any:
-                code = _extract_code_arg(args, kwargs)
-                if code is not None:
+                # Gate EVERY carrier (not just the first): a benign leading
+                # positional must not shadow dangerous code in a later argument.
+                for code in _extract_code_args(args, kwargs):
                     gate(code)
                 return attr(*args, **kwargs)
 
@@ -239,7 +284,13 @@ class SmolagentsGovernor(GovernedBase):
         :class:`~acgs_lite.errors.ConstitutionalViolationError`.  Callers that
         need an unconditional gate (the executor) pass ``strict=True``; the
         default ``None`` defers to the engine's instance strictness.
+
+        Non-string input is coerced fail-closed (bytes-like decoded as strict
+        UTF-8; anything else blocked) so the public API never leaks a raw
+        ``TypeError`` and a bytes code action cannot reach ``engine.validate``
+        un-decoded.
         """
+        code = _coerce_code_to_str(code)
         return self.engine.validate(
             code,
             agent_id=f"{self.agent_id}:{_LABEL_CODE}",
@@ -312,11 +363,16 @@ class SmolagentsGovernor(GovernedBase):
 
         Replaces ``agent.python_executor`` with a governed wrapper and appends
         the final-answer check and step callback.  Returns the same agent for
-        chaining.  Idempotent: re-wrapping the same agent with the same governor
-        neither double-wraps the executor nor re-appends duplicate hooks (L8).
+        chaining.  Idempotent for the SAME governor: re-wrapping the same agent
+        neither double-wraps the executor nor re-appends duplicate hooks (L8). A
+        DIFFERENT governor nests its wrapper so its constitution is also enforced
+        at the executor gate — skipping that (because the executor was already a
+        GovernedPythonExecutor) silently dropped the second governor's code-gate
+        rules.
         """
         inner = getattr(agent, "python_executor", None)
-        if inner is not None and not isinstance(inner, GovernedPythonExecutor):
+        already_self = isinstance(inner, GovernedPythonExecutor) and inner._gov is self
+        if inner is not None and not already_self:
             agent.python_executor = self.python_executor(inner)
 
         _append_hook(agent, "final_answer_checks", self.final_answer_check())
@@ -338,37 +394,62 @@ def _first_str_attr(obj: Any, names: tuple[str, ...]) -> str | None:
     return None
 
 
+def _append_to_seq(seq: list, hook: Any) -> None:
+    """Append *hook* to *seq* unless an equivalent governor hook is already there."""
+    marker = getattr(hook, "_acgs_governor", None)
+    if marker is not None and any(getattr(h, "_acgs_governor", None) == marker for h in seq):
+        return  # already governed by this governor; do not double-append
+    seq.append(hook)
+
+
 def _append_hook(agent: Any, attr: str, hook: Any) -> None:
-    """Append *hook* to a smolagents list/None hook attribute, idempotently.
+    """Append *hook* to a smolagents list/None/tuple/dict hook attribute.
 
     ``step_callbacks`` may be a list, ``None``, a tuple, or a dict keyed by step
     type.  Lists and ``None`` are handled directly; a tuple (or other sequence)
     is coerced to a list so governance is actually attached rather than silently
-    dropped (M4).  A dict cannot be keyed without importing smolagents types, so
-    we skip it and log.  Hooks tagged with the same governor id are not appended
-    twice (L8).
+    dropped (M4).  A dict (smolagents' per-step-type form) is handled best-effort:
+    the hook is attached to every registered step-type list, so step actions are
+    still audited rather than silently skipped (#9/#21) — step types not present
+    in the dict are not covered, so register the hook explicitly for full coverage.
+    Hooks tagged with the same governor id are not appended twice (L8).
     """
     existing = getattr(agent, attr, None)
     if existing is None:
         setattr(agent, attr, [hook])
         return
     if isinstance(existing, list):
-        seq = existing
-    elif isinstance(existing, tuple):
+        _append_to_seq(existing, hook)
+        return
+    if isinstance(existing, tuple):
         seq = list(existing)
         setattr(agent, attr, seq)
-    else:
-        logger.warning(
-            "Cannot attach governance to agent.%s of type %s; "
-            "pass the hook explicitly when constructing the agent.",
-            attr,
-            type(existing).__name__,
-        )
+        _append_to_seq(seq, hook)
         return
-    marker = getattr(hook, "_acgs_governor", None)
-    if marker is not None and any(getattr(h, "_acgs_governor", None) == marker for h in seq):
-        return  # already governed by this governor; do not double-append
-    seq.append(hook)
+    if isinstance(existing, dict):
+        # Attach to each registered step-type list (best-effort) rather than
+        # silently dropping governance for a dict-keyed step_callbacks.
+        attached = False
+        for key, value in list(existing.items()):
+            if isinstance(value, (list, tuple)):
+                seq = list(value) if isinstance(value, tuple) else value
+                if isinstance(value, tuple):
+                    existing[key] = seq
+                _append_to_seq(seq, hook)
+                attached = True
+        if not attached:
+            logger.warning(
+                "Could not attach governance to agent.%s: dict has no list-valued "
+                "step-type entries; pass the hook explicitly when constructing the agent.",
+                attr,
+            )
+        return
+    logger.warning(
+        "Cannot attach governance to agent.%s of type %s; "
+        "pass the hook explicitly when constructing the agent.",
+        attr,
+        type(existing).__name__,
+    )
 
 
 def build_governed_code_agent(

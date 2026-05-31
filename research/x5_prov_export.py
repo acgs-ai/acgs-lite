@@ -22,6 +22,15 @@ import time
 from pathlib import Path
 from typing import Any
 
+
+def _simulation_metadata(seed: int) -> dict[str, object]:
+    return {
+        "label": f"SIMULATION (seed={seed}), not empirical benchmark",
+        "seed": seed,
+        "empirical_benchmark": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Simulated ACGS audit entries
 # ---------------------------------------------------------------------------
@@ -127,6 +136,7 @@ def run_experiment(num_events: int, seed: int) -> dict[str, Any]:
     coverage = len(prov_fields) / max(len(acgs_fields), 1)
 
     return {
+        "simulation": _simulation_metadata(seed),
         "events": num_events,
         "seed": seed,
         "entries_mapped": len(mapped),

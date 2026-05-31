@@ -52,7 +52,7 @@ rules:
 ## 3. Govern a Callable
 
 ```python
-from acgs_lite import Constitution, GovernedAgent
+from acgs_lite import Constitution, GovernedAgent, MACIRole
 
 
 def my_agent(prompt: str) -> str:
@@ -60,9 +60,14 @@ def my_agent(prompt: str) -> str:
 
 
 constitution = Constitution.from_yaml("constitution.yaml")
-agent = GovernedAgent(my_agent, constitution=constitution, agent_id="demo-agent")
+agent = GovernedAgent(
+    my_agent,
+    constitution=constitution,
+    agent_id="demo-agent",
+    maci_role=MACIRole.EXECUTOR,
+)
 
-result = agent.run("Summarize the quarterly report")
+result = agent.run("Summarize the quarterly report", governance_action="execute")
 print(result)
 ```
 
@@ -72,7 +77,7 @@ print(result)
 from acgs_lite import ConstitutionalViolationError
 
 try:
-    agent.run("My social security number is 123-45-6789")
+    agent.run("My social security number is 123-45-6789", governance_action="execute")
 except ConstitutionalViolationError as exc:
     print(f"Blocked: {exc}")
 ```

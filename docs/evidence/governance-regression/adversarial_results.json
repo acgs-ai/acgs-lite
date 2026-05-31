@@ -1,0 +1,90 @@
+{
+  "generated_artifact": true,
+  "generated_by": {
+    "generated_at": "2026-05-31T21:17:42.319147+00:00",
+    "platform": "Linux-6.17.0-29-generic-x86_64-with-glibc2.42",
+    "python": "3.11.15",
+    "script": "scripts/run_governance_regression.py"
+  },
+  "not_hand_written_claim": true,
+  "results": [
+    {
+      "attack_name": "proposer_role_execute_action",
+      "audit_evidence_ok": true,
+      "bypass": false,
+      "exception_message": "MACI violation: proposer cannot execute. Role proposer may only: amend, draft, propose, query, read, suggest",
+      "exception_type": "MACIViolationError",
+      "expected_decision": "FAIL_CLOSED",
+      "observed_decision": "FAIL_CLOSED",
+      "ood_provenance": null,
+      "pass": true,
+      "side_effect_count": 0,
+      "trigger_class": "authorization_failure"
+    },
+    {
+      "attack_name": "wrong_constitution_hash_provenance",
+      "audit_evidence_ok": true,
+      "bypass": false,
+      "exception_message": "Constitutional hash mismatch: expected '608508a9bd224290', got 'attacker-supplied-constitution' \u2014 INV-004 violated",
+      "exception_type": "ValueError",
+      "expected_decision": "FAIL_CLOSED",
+      "observed_decision": "FAIL_CLOSED",
+      "ood_provenance": null,
+      "pass": true,
+      "side_effect_count": 0,
+      "trigger_class": "constitution_hash_mismatch"
+    },
+    {
+      "attack_name": "expired_receipt_replay",
+      "audit_evidence_ok": true,
+      "bypass": false,
+      "exception_message": "Execution boundary mismatch blocks completion",
+      "exception_type": "LegitimacyInvariantError",
+      "expected_decision": "FAIL_CLOSED",
+      "observed_decision": "FAIL_CLOSED",
+      "ood_provenance": null,
+      "pass": true,
+      "side_effect_count": 0,
+      "trigger_class": "stale_policy"
+    },
+    {
+      "attack_name": "tampered_receipt_hash",
+      "audit_evidence_ok": true,
+      "bypass": false,
+      "exception_message": "Decision receipt integrity check failed",
+      "exception_type": "LegitimacyInvariantError",
+      "expected_decision": "FAIL_CLOSED",
+      "observed_decision": "FAIL_CLOSED",
+      "ood_provenance": null,
+      "pass": true,
+      "side_effect_count": 0,
+      "trigger_class": "receipt_integrity_failure"
+    },
+    {
+      "attack_name": "tampered_audit_chain_replay",
+      "audit_evidence_ok": false,
+      "bypass": false,
+      "exception_message": "Audit evidence is not verifiable, no execution",
+      "exception_type": "LegitimacyInvariantError",
+      "expected_decision": "FAIL_CLOSED",
+      "observed_decision": "FAIL_CLOSED",
+      "ood_provenance": null,
+      "pass": true,
+      "side_effect_count": 0,
+      "trigger_class": "audit_evidence_unverifiability"
+    },
+    {
+      "attack_name": "ood_confused_deputy_subject_substitution",
+      "audit_evidence_ok": true,
+      "bypass": false,
+      "exception_message": "Execution boundary mismatch blocks completion",
+      "exception_type": "LegitimacyInvariantError",
+      "expected_decision": "FAIL_CLOSED",
+      "observed_decision": "FAIL_CLOSED",
+      "ood_provenance": "Externally inspired by the confused-deputy / argument-substitution attack class from capability-security literature; original scenario.",
+      "pass": true,
+      "side_effect_count": 0,
+      "trigger_class": "receipt_integrity_failure"
+    }
+  ]
+}

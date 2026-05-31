@@ -43,7 +43,7 @@ def test_valid_request_passes_through() -> None:
         def model_predict(self, request: dict[str, str]) -> dict[str, str]:
             return {"result": "ok"}
 
-    api = ValidAPI(constitution=Constitution.default())
+    api = ValidAPI(constitution=Constitution.default(), maci_role=MACIRole.VALIDATOR)
     api.setup(device="cpu")
 
     result = api.predict({"input": "hello world"})
@@ -76,7 +76,7 @@ def test_input_violation_raises_422(monkeypatch: pytest.MonkeyPatch) -> None:
         "_CONSTITUTIONAL_HASH",
         GovernanceEngine(constitution)._const_hash,
     )
-    api = InputGuardAPI(constitution=constitution)
+    api = InputGuardAPI(constitution=constitution, maci_role=MACIRole.VALIDATOR)
     api.setup(device="cpu")
 
     with pytest.raises(_HTTPException) as exc_info:
@@ -110,7 +110,7 @@ def test_output_violation_raises_422(monkeypatch: pytest.MonkeyPatch) -> None:
         "_CONSTITUTIONAL_HASH",
         GovernanceEngine(constitution)._const_hash,
     )
-    api = OutputGuardAPI(constitution=constitution)
+    api = OutputGuardAPI(constitution=constitution, maci_role=MACIRole.VALIDATOR)
     api.setup(device="cpu")
 
     with pytest.raises(_HTTPException) as exc_info:
@@ -130,7 +130,7 @@ def test_constitutional_hash_mismatch_raises_on_setup(monkeypatch: pytest.Monkey
             return {"result": "ok"}
 
     monkeypatch.setattr(litserve_mod, "_CONSTITUTIONAL_HASH", "wronghash000000")
-    api = HashGuardAPI(constitution=Constitution.default())
+    api = HashGuardAPI(constitution=Constitution.default(), maci_role=MACIRole.VALIDATOR)
 
     with pytest.raises(RuntimeError, match="constitutional hash mismatch"):
         api.setup(device="cpu")
@@ -144,7 +144,7 @@ def test_unexpected_exception_raises_500() -> None:
         def model_predict(self, request: dict[str, str]) -> dict[str, str]:
             raise ValueError("boom")
 
-    api = BoomAPI(constitution=Constitution.default())
+    api = BoomAPI(constitution=Constitution.default(), maci_role=MACIRole.VALIDATOR)
     api.setup(device="cpu")
 
     with pytest.raises(_HTTPException) as exc_info:
@@ -165,7 +165,6 @@ def test_maci_validator_role_enforced() -> None:
     api = MACIAPI(
         constitution=Constitution.default(),
         maci_role=MACIRole.VALIDATOR,
-        enforce_maci=True,
     )
     api.setup(device="cpu")
 
@@ -195,7 +194,7 @@ def test_audit_entries_populated() -> None:
         def model_predict(self, request: dict[str, str]) -> dict[str, str]:
             return {"result": "ok"}
 
-    api = AuditAPI(constitution=Constitution.default())
+    api = AuditAPI(constitution=Constitution.default(), maci_role=MACIRole.VALIDATOR)
     api.setup(device="cpu")
     api.predict({"input": "hello world"})
 

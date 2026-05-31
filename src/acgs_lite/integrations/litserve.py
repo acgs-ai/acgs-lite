@@ -12,6 +12,7 @@ Usage::
 
     from acgs_lite.integrations.litserve import GovernedLitAPI
     from acgs_lite.constitution import Constitution
+    from acgs_lite.maci import MACIRole
     import litserve as ls
 
     class MyAPI(GovernedLitAPI):
@@ -22,7 +23,12 @@ Usage::
             return self.model(request["input"])
 
     if __name__ == "__main__":
-        server = ls.LitServer(MyAPI(constitution=Constitution.default()))
+        server = ls.LitServer(
+            MyAPI(
+                constitution=Constitution.default(),
+                maci_role=MACIRole.VALIDATOR,
+            )
+        )
         server.run(port=8000)
 """
 
@@ -63,7 +69,7 @@ class GovernedLitAPI(_LitAPIBase):  # type: ignore[misc,valid-type]
 
     On every predict() call:
     1. Pre-validates the request against the constitution (fail-closed: 422 on violation)
-    2. Enforces MACI role if enforce_maci=True (403 on violation)
+    2. Enforces MACI role by default (403 on violation)
     3. Calls model_predict() (your inference logic)
     4. Post-validates the response (422 on violation)
     5. Returns the response
@@ -74,8 +80,10 @@ class GovernedLitAPI(_LitAPIBase):  # type: ignore[misc,valid-type]
     Args:
         constitution: Constitution to validate against. Defaults to Constitution.default().
         agent_id: Identifier for this agent in audit logs.
-        maci_role: MACI role to assign. Required when enforce_maci=True.
+        maci_role: MACI role to assign. Required unless enforce_maci=False is
+            explicitly used for advisory-only evaluation.
         enforce_maci: Whether to enforce MACI role boundaries on each predict call.
+            Defaults to True.
         strict: Whether to raise on violations (True) or just log (False).
     """
 
@@ -85,7 +93,7 @@ class GovernedLitAPI(_LitAPIBase):  # type: ignore[misc,valid-type]
         *,
         agent_id: str = "governed",
         maci_role: MACIRole | None = None,
-        enforce_maci: bool = False,
+        enforce_maci: bool = True,
         strict: bool = True,
     ) -> None:
         self._constitution = constitution or Constitution.default()

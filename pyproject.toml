@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "acgs-lite"
-version = "2.10.1"
+version = "2.11.0"
 description = "Runtime governance for AI agents — deterministic enforcement before execution, MACI role separation, tamper-evident audit trails, and operator intervention workflows."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -52,15 +52,17 @@ autogen = ["autogen-core>=0.4", "autogen-agentchat>=0.4"]
 mcp = ["mcp>=1.0", "structlog>=21.0"]
 crewai = ["crewai>=0.30"]
 smolagents = ["smolagents>=1.9"]
+swarms = ["swarms>=7.0"]
 autonoma = ["pyjwt>=2.0", "structlog>=21.0", "fastapi>=0.100"]
 server = ["fastapi>=0.100", "uvicorn>=0.24"]
 gitlab = ["httpx>=0.27", "starlette>=0.37"]
 google-cloud = ["google-cloud-logging>=3.0"]
 mistral = ["mistralai>=2.0"]
 pdf = ["fpdf2>=2.7"]
+crypto = ["cryptography>=42.0"]
 otel = ["opentelemetry-api>=1.0,<2.0", "opentelemetry-sdk>=1.0,<2.0"]
 postgres = ["psycopg[binary]>=3.1", "psycopg-pool>=3.2"]
-all = ["acgs-lite[a2a,openai,anthropic,agno,langchain,litellm,google,llamaindex,autogen,mcp,crewai,smolagents,autonoma,gitlab,google-cloud,pdf,mistral,otel]"]
+all = ["acgs-lite[a2a,openai,anthropic,agno,langchain,litellm,google,llamaindex,autogen,mcp,crewai,smolagents,swarms,autonoma,gitlab,google-cloud,pdf,crypto,mistral,otel]"]
 docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",

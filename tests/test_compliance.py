@@ -698,7 +698,7 @@ class TestMultiFrameworkAssessor:
         assessor = MultiFrameworkAssessor()
         report = assessor.assess(desc)
         assert isinstance(report, MultiFrameworkReport)
-        assert len(report.frameworks_assessed) == 19
+        assert len(report.frameworks_assessed) == 20
         assert 0.0 <= report.overall_score <= 1.0
 
     def test_assess_explicit_frameworks(self, system_desc: dict) -> None:
@@ -737,7 +737,7 @@ class TestMultiFrameworkAssessor:
 
     def test_available_frameworks_lists_all_18(self) -> None:
         available = MultiFrameworkAssessor.available_frameworks()
-        assert len(available) == 19
+        assert len(available) == 20
         assert "nist_ai_rmf" in available
         assert "gdpr" in available
         assert "eu_ai_act" in available
@@ -877,7 +877,7 @@ class TestJurisdictionSelection:
     def test_unknown_jurisdiction_returns_all_19(self) -> None:
         assessor = MultiFrameworkAssessor()
         fws = assessor.applicable_frameworks("unknown_place", "unknown_domain")
-        assert len(fws) == 19
+        assert len(fws) == 20
 
     def test_auto_selection_from_system_desc(self) -> None:
         assessor = MultiFrameworkAssessor()
