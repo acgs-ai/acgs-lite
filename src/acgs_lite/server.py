@@ -21,6 +21,7 @@ from acgs_lite.audit import AuditEntry, AuditLog
 from acgs_lite.cdp.store import InMemoryCDPBackend
 from acgs_lite.constitution import Constitution
 from acgs_lite.engine import GovernanceEngine
+from acgs_lite.errors import ConstitutionalViolationError
 from acgs_lite.events import GovernanceEvent, get_event_bus
 from acgs_lite.federation import federation_router
 from acgs_lite.integrations.openshell_governance import (
@@ -35,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 # Module-level CDP backend (shared across requests, replaceable for testing)
 _cdp_backend: InMemoryCDPBackend = InMemoryCDPBackend()
+_CLAUDE_CODE_READ_ONLY_TOOLS = frozenset({"Read", "Glob", "Grep", "LS"})
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -95,6 +97,188 @@ def _build_default_audit_store(path: str | Path) -> _AuditStoreLike | None:
     if store_cls is None:
         return None
     return cast(_AuditStoreLike, store_cls(path))
+
+
+def _extract_claude_code_action(payload: dict[str, Any]) -> dict[str, Any]:
+    """Extract the side-effect text from a Claude Code PreToolUse hook payload."""
+    raw_tool_name = payload.get("tool_name") or payload.get("tool") or payload.get("name")
+    if not isinstance(raw_tool_name, str) or not raw_tool_name.strip():
+        raise ValueError("'tool_name' must be a non-empty string")
+    tool_name = raw_tool_name.strip()
+
+    raw_tool_input = payload.get("tool_input")
+    if raw_tool_input is None:
+        raw_tool_input = payload.get("input")
+    if not isinstance(raw_tool_input, dict):
+        raise ValueError("'tool_input' must be an object")
+    tool_input = cast(dict[str, Any], raw_tool_input)
+
+    raw_agent_id = payload.get("agent_id") or payload.get("session_id") or "claude-code"
+    if not isinstance(raw_agent_id, str):
+        raise ValueError("'agent_id' must be a string when provided")
+    agent_id = raw_agent_id.strip() or "claude-code"
+
+    if tool_name in _CLAUDE_CODE_READ_ONLY_TOOLS:
+        return {
+            "tool_name": tool_name,
+            "action": "",
+            "agent_id": agent_id,
+            "skip": True,
+            "context": {
+                "integration": "claude-code",
+                "tool_name": tool_name,
+                "read_only": True,
+            },
+        }
+
+    action = ""
+    if tool_name == "Bash":
+        command = tool_input.get("command")
+        if not isinstance(command, str):
+            raise ValueError("'tool_input.command' must be a string for Bash")
+        action = command
+    elif tool_name == "Write":
+        content = tool_input.get("content")
+        if not isinstance(content, str):
+            raise ValueError("'tool_input.content' must be a string for Write")
+        action = content
+    elif tool_name == "Edit":
+        new_string = tool_input.get("new_string")
+        if not isinstance(new_string, str):
+            raise ValueError("'tool_input.new_string' must be a string for Edit")
+        action = new_string
+    elif tool_name == "MultiEdit":
+        edits = tool_input.get("edits")
+        if not isinstance(edits, list):
+            raise ValueError("'tool_input.edits' must be a list for MultiEdit")
+        parts: list[str] = []
+        for edit in edits:
+            if not isinstance(edit, dict):
+                raise ValueError("'tool_input.edits' entries must be objects")
+            new_string = edit.get("new_string")
+            if not isinstance(new_string, str):
+                raise ValueError("'tool_input.edits[].new_string' must be a string")
+            parts.append(new_string)
+        action = "\n".join(parts)
+    else:
+        for key in ("command", "content", "new_string"):
+            value = tool_input.get(key)
+            if isinstance(value, str):
+                action = value
+                break
+
+    if not action.strip():
+        raise ValueError("Claude Code hook payload did not contain side-effect text")
+
+    context: dict[str, Any] = {
+        "integration": "claude-code",
+        "tool_name": tool_name,
+    }
+    hook_event_name = payload.get("hook_event_name")
+    if isinstance(hook_event_name, str):
+        context["hook_event_name"] = hook_event_name
+
+    return {
+        "tool_name": tool_name,
+        "action": action,
+        "agent_id": agent_id,
+        "skip": False,
+        "context": context,
+    }
+
+
+def _claude_code_violation_dict(
+    *,
+    rule_id: str,
+    rule_text: str,
+    severity: str = "high",
+    matched_content: str = "",
+    category: str = "integration",
+) -> dict[str, str]:
+    return {
+        "rule_id": rule_id,
+        "rule_text": rule_text,
+        "severity": severity,
+        "matched_content": matched_content,
+        "category": category,
+    }
+
+
+def _claude_code_blocked_response(
+    *,
+    reason: str,
+    message: str,
+    rule_id: str,
+    tool_name: str = "",
+    action: str = "",
+    agent_id: str = "claude-code",
+    severity: str = "high",
+    category: str = "integration",
+) -> dict[str, Any]:
+    return {
+        "compliant": False,
+        "decision": "deny",
+        "status": "blocked",
+        "reason": reason,
+        "tool_name": tool_name,
+        "action": action,
+        "agent_id": agent_id,
+        "first_violation": _claude_code_violation_dict(
+            rule_id=rule_id,
+            rule_text=message,
+            severity=severity,
+            matched_content=action[:200],
+            category=category,
+        ),
+    }
+
+
+def _claude_code_result_response(
+    result: Any,
+    *,
+    tool_name: str,
+    action: str,
+    agent_id: str,
+    reason: str = "validated",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    valid = bool(getattr(result, "valid", False))
+    violations = list(getattr(result, "violations", []) or [])
+    first_violation = None
+    if violations:
+        violation = violations[0]
+        first_violation = _claude_code_violation_dict(
+            rule_id=str(getattr(violation, "rule_id", "UNKNOWN")),
+            rule_text=str(getattr(violation, "rule_text", "constitutional violation detected")),
+            severity=str(getattr(getattr(violation, "severity", ""), "value", "")) or "high",
+            matched_content=str(getattr(violation, "matched_content", "")),
+            category=str(getattr(violation, "category", "constitution")),
+        )
+    elif not valid:
+        first_violation = _claude_code_violation_dict(
+            rule_id="UNCERTAIN_VALIDATION",
+            rule_text="Governance engine did not produce an explicit allow decision.",
+            matched_content=action[:200],
+            category="uncertain",
+        )
+
+    response = {
+        "compliant": valid and not violations,
+        "decision": "allow" if valid and not violations else "deny",
+        "status": "allowed" if valid and not violations else "blocked",
+        "reason": reason,
+        "tool_name": tool_name,
+        "action": action,
+        "agent_id": agent_id,
+        "first_violation": first_violation,
+        "constitutional_hash": getattr(result, "constitutional_hash", ""),
+        "request_id": getattr(result, "request_id", ""),
+        "rules_checked": getattr(result, "rules_checked", 0),
+        "latency_ms": getattr(result, "latency_ms", 0.0),
+    }
+    if extra:
+        response.update(extra)
+    return response
 
 
 def create_governance_app(
@@ -160,7 +344,11 @@ def create_governance_app(
     ``telegram_secret_token`` to additionally enforce Telegram's
     ``X-Telegram-Bot-Api-Secret-Token`` header.
     """
-    from fastapi import Depends, FastAPI, Header, HTTPException, Query
+    from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+    from fastapi.responses import JSONResponse
+
+    globals()["Request"] = Request
+    globals()["JSONResponse"] = JSONResponse
 
     resolved_api_key = api_key if api_key is not None else os.getenv("ACGS_API_KEY")
     if require_auth is True and not resolved_api_key:
@@ -247,6 +435,150 @@ def create_governance_app(
             context=context,
         )
         return result.to_dict()
+
+    def _validate_claude_code_action(
+        *,
+        tool_name: str,
+        action: str,
+        agent_id: str,
+        context: dict[str, Any],
+        extra: dict[str, Any] | None = None,
+    ) -> JSONResponse:
+        try:
+            result = engine.validate(
+                action,
+                agent_id=agent_id,
+                context=context,
+                audit_metadata={"integration": "claude-code"},
+                strict=False,
+            )
+        except ConstitutionalViolationError as exc:
+            return JSONResponse(
+                content=_claude_code_blocked_response(
+                    reason="constitutional_denial",
+                    message=str(exc),
+                    rule_id=exc.rule_id,
+                    tool_name=tool_name,
+                    action=action,
+                    agent_id=agent_id,
+                    severity=exc.severity,
+                    category="constitution",
+                )
+            )
+        except Exception:
+            logger.exception("Claude Code governance check failed")
+            return JSONResponse(
+                status_code=503,
+                content=_claude_code_blocked_response(
+                    reason="engine_unavailable",
+                    message="Governance engine unavailable; fail-closed.",
+                    rule_id="ENGINE_UNAVAILABLE",
+                    tool_name=tool_name,
+                    action=action,
+                    agent_id=agent_id,
+                    category="engine",
+                ),
+            )
+
+        return JSONResponse(
+            content=_claude_code_result_response(
+                result,
+                tool_name=tool_name,
+                action=action,
+                agent_id=agent_id,
+                extra=extra,
+            )
+        )
+
+    @app.post("/integrations/claude-code/check", dependencies=auth_deps)
+    async def claude_code_check(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except (UnicodeDecodeError, ValueError):
+            return JSONResponse(
+                status_code=400,
+                content=_claude_code_blocked_response(
+                    reason="malformed_json",
+                    message="Claude Code hook payload must be valid JSON.",
+                    rule_id="CLAUDE_CODE_PAYLOAD",
+                    category="malformed-request",
+                ),
+            )
+
+        if not isinstance(payload, dict):
+            return JSONResponse(
+                status_code=400,
+                content=_claude_code_blocked_response(
+                    reason="malformed_payload",
+                    message="Claude Code hook payload must be a JSON object.",
+                    rule_id="CLAUDE_CODE_PAYLOAD",
+                    category="malformed-request",
+                ),
+            )
+
+        try:
+            extracted = _extract_claude_code_action(payload)
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=400,
+                content=_claude_code_blocked_response(
+                    reason="malformed_payload",
+                    message=str(exc),
+                    rule_id="CLAUDE_CODE_PAYLOAD",
+                    category="malformed-request",
+                ),
+            )
+
+        tool_name = cast(str, extracted["tool_name"])
+        action = cast(str, extracted["action"])
+        agent_id = cast(str, extracted["agent_id"])
+        if extracted["skip"]:
+            return JSONResponse(
+                content={
+                    "compliant": True,
+                    "decision": "allow",
+                    "status": "allowed",
+                    "reason": "read_only_tool",
+                    "tool_name": tool_name,
+                    "action": action,
+                    "agent_id": agent_id,
+                    "first_violation": None,
+                }
+            )
+
+        return _validate_claude_code_action(
+            tool_name=tool_name,
+            action=action,
+            agent_id=agent_id,
+            context=cast(dict[str, Any], extracted["context"]),
+        )
+
+    @app.get("/x402/check", deprecated=True, dependencies=auth_deps)
+    def x402_check(
+        action: str = Query(default=""),
+        agent_id: str = Query(default="claude-code"),
+    ) -> JSONResponse:
+        if not action.strip():
+            return JSONResponse(
+                status_code=400,
+                content=_claude_code_blocked_response(
+                    reason="malformed_payload",
+                    message="'action' must be a non-empty string.",
+                    rule_id="CLAUDE_CODE_PAYLOAD",
+                    tool_name="",
+                    action=action,
+                    agent_id=agent_id,
+                    category="malformed-request",
+                ),
+                headers={"Deprecation": "true"},
+            )
+        return _validate_claude_code_action(
+            tool_name="",
+            action=action,
+            agent_id=agent_id,
+            context={"integration": "claude-code", "deprecated_route": "/x402/check"},
+            extra={"deprecated": True},
+        )
 
     # --- Rules CRUD ---
 
