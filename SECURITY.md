@@ -8,12 +8,12 @@ secure.
 
 ## Supported Versions
 
-Only the current released version line is targeted for security fixes.
+Only the current packaged version line is targeted for security fixes.
 
 | Version line | Security status | Notes |
 | --- | --- | --- |
-| `2.10.x` | Supported for responsible-disclosure triage and intended fixes | Current package version is `2.10.1` in `pyproject.toml`. |
-| `< 2.10` | Not supported | Upgrade to the latest `2.10.x` release before reporting unless the issue also affects `2.10.x`. |
+| `2.11.x` | Supported for responsible-disclosure triage and intended fixes | Current package version is `2.11.0` in `pyproject.toml`. |
+| `< 2.11` | Not supported | Upgrade to the latest `2.11.x` release before reporting unless the issue also affects `2.11.x`. |
 
 ## Vulnerability Scope
 

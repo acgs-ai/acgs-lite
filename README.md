@@ -83,9 +83,10 @@ The Phoenix example under
 shows `request -> decision -> receipt -> bounded execution` telemetry; its
 `governance.decision.*` span attributes are experimental.
 
-**Current status:** v2.10.1 package with a CI-backed test suite. Production
-deployment properties depend on your constitution, storage, authentication, and
-operational controls.
+**Current status:** v2.11.0 package metadata with a CI-backed test suite. PyPI
+publication remains an owner-gated external action. Production deployment
+properties depend on your constitution, storage, authentication, and operational
+controls.
 
 ## Security Disclosure
 
@@ -512,7 +513,10 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 
 ---
 
-## ✅ What is production-hardened today (v2.10.1)
+## Stable surfaces today (v2.11.0)
+
+This table describes library surfaces with stable APIs and test coverage. It is
+not a blanket production-readiness claim for every deployment.
 
 | Layer | Status | What you get |
 |-------|--------|--------------|
