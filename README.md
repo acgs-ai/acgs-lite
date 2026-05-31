@@ -644,6 +644,7 @@ acgs resume --agent-id agent-01
 | Guide | Description |
 |-------|-------------|
 | [Examples](./examples/README.md) | Canonical demo path: block, audit, then MCP |
+| [Constitution Templates](./examples/constitutions/README.md) | Reusable constitutions for content moderation, customer service, healthcare, hiring, and lending |
 | [Quickstart](https://acgs.ai/docs/quickstart) | Up and running in 5 minutes |
 | [Architecture](https://acgs.ai/docs/architecture) | Engine internals, MACI deep dive |
 | [Integrations](https://acgs.ai/docs/integrations) | OpenAI, Anthropic, LangChain, MCP, A2A |
