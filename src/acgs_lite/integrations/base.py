@@ -55,8 +55,8 @@ def _coerce_prompt(value: Any) -> str | None:
     return None
 
 
-def _extract_forwarded_prompt(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
-    """Return the task/prompt of a forwarded execution call, if present.
+def _extract_forwarded_prompts(args: tuple[Any, ...], kwargs: dict[str, Any]) -> list[str]:
+    """Return *every* task/prompt carried by a forwarded execution call.
 
     Agent execution entry points take the task as a positional argument (or via a
     ``task``/``prompt``/``query``/… keyword). A call carrying no text payload is
@@ -64,19 +64,22 @@ def _extract_forwarded_prompt(args: tuple[Any, ...], kwargs: dict[str, Any]) -> 
     ``add_tool(tool)``, ``run(data={...})``), and is forwarded unchanged so the
     fail-closed gate governs execution without blocking benign setup.
 
-    Scans *all* positional args (not just the first) and decodes bytes-like
-    carriers, so a task passed behind a leading non-text argument or smuggled as
-    bytes is still validated rather than slipping past ungoverned.
+    Returns *all* text carriers, not just the first, and decodes bytes-like
+    carriers: a task passed behind a leading non-text/benign argument
+    (``run(session_id, task)``) or smuggled as bytes must still be validated —
+    otherwise the leading argument is validated, passes, and the trailing task is
+    forwarded to the underlying agent ungoverned (a fail-open bypass).
     """
+    prompts: list[str] = []
     for value in args:
         text = _coerce_prompt(value)
         if text is not None:
-            return text
+            prompts.append(text)
     for key in _FORWARD_PROMPT_KWARGS:
         text = _coerce_prompt(kwargs.get(key))
         if text is not None:
-            return text
-    return None
+            prompts.append(text)
+    return prompts
 
 
 class GovernedBase:
@@ -172,9 +175,11 @@ class GovernedBase:
         validate = self._validate_forwarded
 
         def _governed(*args: Any, **kwargs: Any) -> Any:
-            prompt = _extract_forwarded_prompt(args, kwargs)
-            if prompt:
-                validate(prompt)
+            # Gate EVERY task carrier (not just the first): a benign leading
+            # argument must not shadow a dangerous task in a later argument.
+            for prompt in _extract_forwarded_prompts(args, kwargs):
+                if prompt:
+                    validate(prompt)
             return inner(*args, **kwargs)
 
         return _governed

@@ -72,37 +72,33 @@ _LABEL_OUTPUT = "output"  # step observations / tool output
 # Keyword names through which a smolagents executor may receive a code action.
 _CODE_KWARGS: tuple[str, ...] = ("code", "code_action", "source")
 
-# Code-carrier types the gate must recognise. ``_gate`` decodes every bytes-like
-# form (bytes/bytearray/memoryview); recognising fewer here than ``_gate`` accepts
-# would let a forwarded call slip an unrecognised carrier past the gate ungoverned.
-_CODE_CARRIER_TYPES: tuple[type, ...] = (str, bytes, bytearray, memoryview)
 
-
-def _extract_code_arg(
+def _extract_code_args(
     args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> str | bytes | bytearray | memoryview | None:
-    """Return the code action of an executor call, if the call carries one.
+) -> list[str | bytes | bytearray | memoryview]:
+    """Return *every* code-carrier argument of an executor call.
 
     A smolagents executor receives the code action as a positional argument (or,
     defensively, via a ``code``/``code_action``/``source`` keyword).  A call with
     no code-carrier argument is not code execution (``send_variables(dict)``,
     ``send_tools(list)``) and is delegated unchanged.
 
-    Recognises every bytes-like carrier ``_gate`` can decode — str, bytes,
-    bytearray, memoryview — so a forwarded call cannot smuggle one past the gate
-    (a ``bytearray`` once returned ``None`` here while ``_gate`` happily decoded
-    it, a fail-open bypass of the executor gate). Scans *all* positional args, not
-    just the first, so a code action passed positionally behind a leading non-code
-    argument is still gated.
+    Returns *all* carriers, not just the first: a caller can shadow the real code
+    behind a benign leading positional (``run("session-9", DANGER)``), so the gate
+    must validate every str/bytes-like argument — otherwise the benign string is
+    validated, passes, and all args (including the trailing code) are forwarded to
+    the inner executor ungoverned (a fail-open bypass). Recognises every bytes-like
+    carrier ``_gate`` can decode (str/bytes/bytearray/memoryview); recognising
+    fewer than ``_gate`` accepts would let a carrier slip past the gate.
     """
-    for value in args:
-        if isinstance(value, _CODE_CARRIER_TYPES):
-            return value
+    carriers: list[str | bytes | bytearray | memoryview] = [
+        value for value in args if isinstance(value, (str, bytes, bytearray, memoryview))
+    ]
     for key in _CODE_KWARGS:
         value = kwargs.get(key)
-        if isinstance(value, _CODE_CARRIER_TYPES):
-            return value
-    return None
+        if isinstance(value, (str, bytes, bytearray, memoryview)):
+            carriers.append(value)
+    return carriers
 
 
 def _coerce_answer_text(value: Any) -> str:
@@ -167,7 +163,7 @@ class GovernedPythonExecutor:
         non-string type is blocked outright. Without this the engine would crash
         on ``action[:500]`` / ``action.lower()`` before the AST validator's
         ``CODE-UNANALYZABLE`` guard could run. The accepted bytes-like set must
-        stay in sync with ``_extract_code_arg`` so the forwarded path and this
+        stay in sync with ``_extract_code_args`` so the forwarded path and this
         gate never disagree on what counts as a code carrier.
         """
         if not isinstance(code_action, str):
@@ -190,8 +186,14 @@ class GovernedPythonExecutor:
             )
 
     def __call__(self, code_action: str, *args: Any, **kwargs: Any) -> Any:
-        # Raises if the code is blocked; records an audit entry either way.
+        # Raises if any carried code is blocked; records an audit entry either way.
+        # ``code_action`` is the primary code slot, gated unconditionally so a
+        # non-string action fails closed (CODE-UNANALYZABLE). Additional carriers in
+        # *args/code kwargs are gated too, so a caller cannot shadow dangerous code
+        # behind a benign leading positional (``executor("marker", DANGER)``).
         self._gate(code_action)
+        for code in _extract_code_args(args, kwargs):
+            self._gate(code)
         return self._inner(code_action, *args, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
@@ -200,7 +202,7 @@ class GovernedPythonExecutor:
             raise AttributeError(name)
         attr = getattr(self._inner, name)
         # Fail-closed forwarding: gate *any* callable the inner executor exposes
-        # when it is invoked with a code action (a str/bytes argument), so an
+        # when it is invoked with a code action (a str/bytes-like argument), so an
         # execution entry point we don't know by name — the real smolagents
         # ``run_code_raise_errors``, ``run_async``, a future method — cannot run
         # code ungoverned.  Dunder lookups and non-code calls
@@ -209,8 +211,9 @@ class GovernedPythonExecutor:
             gate = self._gate
 
             def _governed(*args: Any, **kwargs: Any) -> Any:
-                code = _extract_code_arg(args, kwargs)
-                if code is not None:
+                # Gate EVERY carrier (not just the first): a benign leading
+                # positional must not shadow dangerous code in a later argument.
+                for code in _extract_code_args(args, kwargs):
                     gate(code)
                 return attr(*args, **kwargs)
 

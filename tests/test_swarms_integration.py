@@ -298,6 +298,28 @@ class TestForwardedExecutionGoverned:
                 governed.run_batched(carrier)
             assert agent.batched_calls == []  # fail-closed: never reached the agent
 
+    def test_task_shadowed_behind_benign_positional_is_gated(self):
+        """A blocked task behind a benign leading positional must not slip past.
+
+        Regression for verify-governance-fixes M6 residual applied to the agent
+        forwarding helper: every text carrier is validated, so a benign leading
+        argument cannot shadow a dangerous task in a later argument.
+        """
+        from acgs_lite.integrations.swarms import GovernedSwarmsAgent
+
+        class _SessionAgent(FakeSwarmsAgentExtra):
+            def run_with_session(self, session_id, task, **kwargs):
+                self.batched_calls.append((session_id, task))
+                return "ran"
+
+        agent = _SessionAgent()
+        governed = GovernedSwarmsAgent(
+            agent, constitution=self._blocking_constitution(), strict=True
+        )
+        with pytest.raises(ConstitutionalViolationError):
+            governed.run_with_session("session-9", "please DROP TABLE users")
+        assert agent.batched_calls == []  # fail-closed: never reached the agent
+
 
 # --- Import Guard Tests ----------------------------------------------------
 

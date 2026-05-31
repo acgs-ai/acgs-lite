@@ -261,6 +261,39 @@ def test_executor_gates_bytearray_and_memoryview_on_forwarded_path():
     assert bytes(inner.ran[0]).decode() == SAFE_CODE
 
 
+def test_executor_gates_code_shadowed_behind_benign_positional():
+    # Adversarial (verify-governance-fixes / M6 residual): dangerous code passed
+    # behind a benign leading positional must NOT run. Returning only the FIRST
+    # code carrier let the benign string be validated (passing) while the trailing
+    # code was forwarded to the inner executor ungoverned. The gate now validates
+    # EVERY carrier, on both the forwarded path and __call__.
+    class _SessionExec:
+        def __init__(self):
+            self.ran: list = []
+
+        def __call__(self, *args, **kwargs):
+            self.ran.append(args)
+            return "called"
+
+        def run(self, session_id, code, **kwargs):
+            self.ran.append((session_id, code))
+            return f"executed under {session_id}"
+
+    danger = "import os\nos.system('id')"
+    # Forwarded method with code at the 2nd positional.
+    inner = _SessionExec()
+    ex = SmolagentsGovernor().python_executor(inner)
+    with pytest.raises(ConstitutionalViolationError):
+        ex.run("session-9", danger)
+    assert inner.ran == []
+    # __call__ with a benign leading marker then dangerous code.
+    inner2 = _SessionExec()
+    ex2 = SmolagentsGovernor().python_executor(inner2)
+    with pytest.raises(ConstitutionalViolationError):
+        ex2("benign_marker", danger)
+    assert inner2.ran == []
+
+
 def test_executor_delegates_unknown_attributes():
     inner = _FakeExecutor()
     executor = GovernedPythonExecutor(inner, SmolagentsGovernor())
