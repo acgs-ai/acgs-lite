@@ -22,9 +22,9 @@ And smolagents exposes three stable hooks that map almost 1:1 onto
 
 | smolagents hook | Signature | ACGS mapping |
 | --- | --- | --- |
-| `executor=` (custom `PythonExecutor`) | `(code, …) -> result` | `validate(code, strict)` pre-execution |
-| `final_answer_checks` | `(answer, memory) -> bool` | `validate(output, strict=False)` gate |
-| `step_callbacks` | `(step, agent) -> None` | per-step audit logging |
+| `executor=` (custom `PythonExecutor`) | `(code, …) -> result` | unconditional pre-execution code gate — always strict, **not** downgradable by the governor's `strict` flag |
+| `final_answer_checks` | `(answer, memory) -> bool` | `validate(output, strict=False)` gate (non-blocking) |
+| `step_callbacks` | `(step, agent) -> None` | per-step audit **and** AST validation of step code (not audit-only) |
 
 ## What we adapted
 
@@ -65,11 +65,16 @@ never affected.
 
 Design choices:
 
-- **Unparseable input returns no findings** — a partial/non-Python snippet falls
-  through to the engine's string rules rather than being blocked on a syntax
-  error.
-- **Everything is configurable** — authorized imports, critical imports, and
-  dangerous calls are constructor arguments; `flag_medium_builtins=False`
+- **Unparseable input is blocked (fail-closed)** — by default
+  (`block_unparseable=True`) a snippet that cannot be parsed yields a blocking
+  `CODE-UNPARSEABLE` violation rather than running unanalyzed; non-`str` and
+  non-UTF-8 input is likewise blocked `CODE-UNANALYZABLE`. Passing
+  `block_unparseable=False` restores best-effort fall-through to the string rules
+  (only safe behind another sandbox).
+- **Configurable, but deny-lists only grow** — the authorized-import allow-list
+  can be replaced (`authorized_imports`) or extended (`extra_authorized_imports`);
+  the `critical_imports`/`dangerous_calls` deny-lists **extend** the built-in
+  security floor (they can add to it but never shrink it); `flag_medium_builtins=False`
   silences introspection noise.
 - It **never executes code**.
 
