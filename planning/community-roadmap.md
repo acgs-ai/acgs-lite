@@ -17,6 +17,8 @@ Status: proposed plan
 
 ## 1. Where we actually are (grounded)
 
+> **Superseded baseline (2026-05-31):** GOVERNANCE.md and ROADMAP.md now **exist**, GitHub Discussions are **enabled**, and forks = 2. For current state see [`growth-execution-plan.md`](growth-execution-plan.md) §1; the 2026-05-30 snapshot below is retained as the historical baseline.
+
 | Signal | Value (2026-05-30) | Reading |
 | --- | --- | --- |
 | GitHub stars | 2 | Pre-traction |
@@ -172,7 +174,7 @@ Content hierarchy by evidenced conversion, highest first:
 
 1. **"What got blocked" demos** — real agent action denied + audit trail. The share-driving format for security audiences. Consider a recurring monthly "what our users blocked this month" aggregate digest (the Cloudflare/Fail2Ban transparency-report pattern; aggregate block data is non-sensitive but instructive).
 2. **Integration guides** — one per framework (LangChain → AutoGen → CrewAI → MCP). Each is a permanent distribution channel into that framework's community.
-3. **Compliance-mapping docs** — repo-resident markdown mapping controls to NIST AI RMF / EU AI Act / ISO 42001. Enterprise top-of-funnel; no comparable project has published this cleanly.
+3. **Compliance-mapping docs** — repo-resident markdown mapping controls to NIST AI RMF / EU AI Act / ISO 42001. Enterprise top-of-funnel; no comparable project has published this cleanly. *Use only verified domains (`healthcare`, `hr_recruitment`) and avoid the known defects (the `spam_filter` tier; the eu-ai-act report omitting `eu_ai_act` from its own score) — see [`growth-execution-plan.md`](growth-execution-plan.md) §5.*
 4. **Third-party tutorials** — convince *one* visible practitioner to write the tutorial. Worth more than ten self-authored posts.
 5. **AI-discoverability formatting** — every doc page opens with "What does this do? When do you use it?" (FAQ-first), which measurably increases LLM-answer citation.
 

@@ -18,7 +18,8 @@ All planned items are complete.
 
 All planned items are complete.
 
-- [x] Ship the hero demo asset (`docs/assets/basic-governance-hero.gif` placeholder; live image block wired in README)
+- [x] Wire the hero demo image block in README (live `<img>` → `docs/assets/basic-governance-hero.gif`)
+  - **Correction (2026-05-31):** the GIF asset itself was never produced — `docs/assets/` does not yet exist. Only the README image block was wired. The hero GIF is an open P1 blocker tracked in [`growth-execution-plan.md`](growth-execution-plan.md) §2.
 - [x] Launch public burst — v2.10.0 tagged, release notes published
 - [x] Tighten repo credibility signals — issue/PR hygiene, concrete release notes, canonical three-step proof path in README and examples
 - [x] Publish technical walkthrough — blocked-action demo, audit trail, and MCP governance server paths all documented in `examples/`
