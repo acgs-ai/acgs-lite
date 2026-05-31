@@ -157,6 +157,130 @@ class TestGovernedSwarmsAgent:
         assert agent.run_calls == [""]
 
 
+# --- Fail-closed delegation (forwarded execution methods) ------------------
+
+
+class FakeSwarmsAgentExtra(FakeSwarmsAgent):
+    """Fake agent exposing execution methods the wrapper does NOT override.
+
+    These reach the governed wrapper only through ``__getattr__`` delegation, so
+    they exercise the fail-closed forwarding guard rather than the explicit
+    ``run``/``__call__`` gates.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.batched_calls: list[str] = []
+        self.config_calls: list[Any] = []
+
+    def run_batched(self, task: str, *args: Any, **kwargs: Any) -> str:
+        # An un-overridden execution entry point — the bypass surface.
+        self.batched_calls.append(task)
+        return f"batched: {task}"
+
+    def set_system_prompt(self, prompt: str) -> str:
+        # A config setter that takes a (benign) string.
+        self.config_calls.append(prompt)
+        return prompt
+
+    def set_options(self, options: dict) -> dict:
+        # A config call with no string payload — must delegate unchanged.
+        self.config_calls.append(options)
+        return options
+
+
+@pytest.mark.unit
+class TestForwardedExecutionGoverned:
+    """#56 follow-up: delegated execution methods must not bypass governance."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_swarms_available(self):
+        with patch("acgs_lite.integrations.swarms.SWARMS_AVAILABLE", True):
+            yield
+
+    @staticmethod
+    def _blocking_constitution() -> Constitution:
+        return Constitution.from_rules(
+            [
+                Rule(
+                    id="NO-SQL",
+                    text="No SQL injection",
+                    severity=Severity.CRITICAL,
+                    keywords=["drop table"],
+                ),
+            ]
+        )
+
+    def test_forwarded_execution_method_blocks_unsafe(self):
+        """A blocked task sent to an un-overridden method raises, underlying not run."""
+        from acgs_lite.integrations.swarms import GovernedSwarmsAgent
+
+        agent = FakeSwarmsAgentExtra()
+        governed = GovernedSwarmsAgent(
+            agent, constitution=self._blocking_constitution(), strict=True
+        )
+        with pytest.raises(ConstitutionalViolationError):
+            governed.run_batched("please DROP TABLE users now")
+        assert agent.batched_calls == []  # fail-closed: never reached the agent
+
+    def test_forwarded_execution_method_allows_safe(self):
+        """A safe task is forwarded through to the underlying execution method."""
+        from acgs_lite.integrations.swarms import GovernedSwarmsAgent
+
+        agent = FakeSwarmsAgentExtra()
+        governed = GovernedSwarmsAgent(
+            agent, constitution=self._blocking_constitution(), strict=True
+        )
+        result = governed.run_batched("summarise the quarterly report")
+        assert result == "batched: summarise the quarterly report"
+        assert agent.batched_calls == ["summarise the quarterly report"]
+
+    def test_forwarded_validation_is_audited(self):
+        """The forwarded gate records to the same audit chain as the primary path."""
+        from acgs_lite.integrations.swarms import GovernedSwarmsAgent
+
+        agent = FakeSwarmsAgentExtra()
+        governed = GovernedSwarmsAgent(
+            agent, constitution=self._blocking_constitution(), strict=False
+        )
+        governed.run_batched("DROP TABLE users")  # strict=False -> audited, not raised
+        entries = governed.audit_log.query()
+        assert any(not e.valid for e in entries)
+        assert governed.audit_log.verify_chain()
+
+    def test_benign_string_config_setter_delegates(self):
+        """A config setter with a non-violating string is forwarded (and passes)."""
+        from acgs_lite.integrations.swarms import GovernedSwarmsAgent
+
+        agent = FakeSwarmsAgentExtra()
+        governed = GovernedSwarmsAgent(
+            agent, constitution=self._blocking_constitution(), strict=True
+        )
+        assert governed.set_system_prompt("you are a helpful research assistant") == (
+            "you are a helpful research assistant"
+        )
+        assert agent.config_calls == ["you are a helpful research assistant"]
+
+    def test_non_string_payload_call_is_not_gated(self):
+        """A delegated call carrying no string payload is forwarded unchanged."""
+        from acgs_lite.integrations.swarms import GovernedSwarmsAgent
+
+        agent = FakeSwarmsAgentExtra()
+        governed = GovernedSwarmsAgent(
+            agent, constitution=self._blocking_constitution(), strict=True
+        )
+        # No string argument -> not an agent action -> delegated without validation.
+        assert governed.set_options({"temperature": 0.2}) == {"temperature": 0.2}
+
+    def test_non_callable_attribute_still_delegates(self):
+        """Plain attribute delegation is unaffected by the forwarding guard."""
+        from acgs_lite.integrations.swarms import GovernedSwarmsAgent
+
+        agent = FakeSwarmsAgentExtra()
+        governed = GovernedSwarmsAgent(agent)
+        assert governed.agent_name == "Researcher"
+
+
 # --- Import Guard Tests ----------------------------------------------------
 
 

@@ -178,8 +178,15 @@ class GovernedDSPyModule(GovernedBase):
         return self.forward(**kwargs)
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate to the underlying DSPy module."""
-        return getattr(self._module, name)
+        """Delegate to the underlying DSPy module.
+
+        Fail-closed: a string passed to an un-overridden execution method is
+        validated before the underlying module runs it (see
+        ``_govern_forwarded_attr``), so delegation is not an ungoverned path.
+        """
+        if name == "_module":
+            raise AttributeError(name)
+        return self._govern_forwarded_attr(name, getattr(self._module, name))
 
     @property
     def stats(self) -> dict[str, Any]:
@@ -300,8 +307,15 @@ class GovernedPredict(GovernedBase):
         return result
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate to the underlying predictor."""
-        return getattr(self._predict, name)
+        """Delegate to the underlying predictor.
+
+        Fail-closed: a string passed to an un-overridden execution method is
+        validated before the underlying predictor runs it (see
+        ``_govern_forwarded_attr``), so delegation is not an ungoverned path.
+        """
+        if name == "_predict":
+            raise AttributeError(name)
+        return self._govern_forwarded_attr(name, getattr(self._predict, name))
 
     @property
     def stats(self) -> dict[str, Any]:

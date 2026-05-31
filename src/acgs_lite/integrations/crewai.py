@@ -97,8 +97,15 @@ class GovernedCrewAgent(GovernedBase):
         )
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate attribute access to the underlying CrewAI agent."""
-        return getattr(self._agent, name)
+        """Delegate attribute access to the underlying CrewAI agent.
+
+        Fail-closed: a task string passed to an un-overridden execution method
+        is validated before the underlying agent runs it (see
+        ``_govern_forwarded_attr``), so delegation is not an ungoverned path.
+        """
+        if name == "_agent":
+            raise AttributeError(name)
+        return self._govern_forwarded_attr(name, getattr(self._agent, name))
 
     def _validate_input(self, text: str) -> None:
         """Validate input text against the constitution (raises on violation)."""
@@ -189,8 +196,15 @@ class GovernedTask(GovernedBase):
         )
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate attribute access to the underlying CrewAI task."""
-        return getattr(self._task, name)
+        """Delegate attribute access to the underlying CrewAI task.
+
+        Fail-closed: a description/prompt string passed to an un-overridden
+        execution method is validated before it runs (see
+        ``_govern_forwarded_attr``), so delegation is not an ungoverned path.
+        """
+        if name == "_task":
+            raise AttributeError(name)
+        return self._govern_forwarded_attr(name, getattr(self._task, name))
 
     @property
     def stats(self) -> dict[str, Any]:
@@ -253,8 +267,15 @@ class GovernedCrew(GovernedBase):
         )
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate attribute access to the underlying CrewAI crew."""
-        return getattr(self._crew, name)
+        """Delegate attribute access to the underlying CrewAI crew.
+
+        Fail-closed: a task string passed to an un-overridden execution method
+        is validated before the crew runs it (see ``_govern_forwarded_attr``),
+        so delegation is not an ungoverned path.
+        """
+        if name == "_crew":
+            raise AttributeError(name)
+        return self._govern_forwarded_attr(name, getattr(self._crew, name))
 
     def _validate_tasks_input(self) -> None:
         """Validate all task descriptions in the crew before execution."""

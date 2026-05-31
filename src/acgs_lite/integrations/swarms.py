@@ -98,8 +98,16 @@ class GovernedSwarmsAgent(GovernedBase):
         )
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate attribute access to the underlying Swarms agent."""
-        return getattr(self._agent, name)
+        """Delegate attribute access to the underlying Swarms agent.
+
+        Fail-closed: a task string passed to an execution method this wrapper
+        does not override by name (``arun``, ``run_batched``, ``stream``, a
+        future method) is validated before the underlying agent runs it, so
+        delegation cannot become an ungoverned execution path.
+        """
+        if name == "_agent":
+            raise AttributeError(name)
+        return self._govern_forwarded_attr(name, getattr(self._agent, name))
 
     def _validate_input(self, text: str) -> None:
         """Validate input text against the constitution (raises on violation)."""
