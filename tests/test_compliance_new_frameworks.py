@@ -486,7 +486,7 @@ class TestMultiFrameworkAssessorNewJurisdictions:
     def test_available_frameworks_lists_all_13(self) -> None:
         assessor = MultiFrameworkAssessor()
         available = assessor.available_frameworks()
-        assert len(available) >= 13  # now 18 after round-3 additions
+        assert len(available) >= 13  # now 20 (incl. igaming + japan_ai_guidelines)
         for fid in (
             "eu_ai_act",
             "dora",
