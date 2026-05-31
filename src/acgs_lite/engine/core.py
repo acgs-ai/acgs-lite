@@ -678,9 +678,11 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                             )
                         )
 
-        if self.custom_validators and (
-            not violations or not any(v.severity == Severity.CRITICAL for v in violations)
-        ):
+        # M7: always run custom validators when present so their findings reach
+        # the audit trail even when a CRITICAL string rule already matched. The
+        # CRITICAL short-circuit is an enforcement concern (resolved below), not
+        # a reason to omit findings from the forensic record.
+        if self.custom_validators:
             ctx = context or {}
             for validator in self.custom_validators:
                 try:
@@ -797,9 +799,19 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                             violations = []
                         violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
             elif self._pattern_rule_idxs:
-                if self._pat_anchor_search is None or self._pat_anchor_search(text_lower):
-                    for rule_idx, pat in self._pattern_rule_idxs:
-                        if pat.search(text_lower):
+                # F4: no-anchor patterns (secret regexes with no literal anchor
+                # word, e.g. ``sk-...`` keys or SSNs) must ALWAYS be evaluated.
+                # Gating the whole pattern list behind the anchor search dropped
+                # them whenever the text had no anchor word — a fail-open the
+                # Aho-Corasick backend never had. Fall back to the no-anchor
+                # subset when the anchor search misses.
+                _pats = (
+                    self._pattern_rule_idxs
+                    if (self._pat_anchor_search is None or self._pat_anchor_search(text_lower))
+                    else self._no_anchor_patterns
+                )
+                for rule_idx, pat in _pats:
+                    if pat.search(text_lower):
                             rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
                             if strict and is_crit:
                                 _e_src = self._rule_excs[rule_idx]
@@ -851,9 +863,15 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                             if violations is None:
                                 violations = []
                             violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-                if self._pat_anchor_search is None or self._pat_anchor_search(text_lower):
-                    for rule_idx, pat in self._pattern_rule_idxs:
-                        if not (fired & (1 << rule_idx)) and pat.search(text_lower):
+                # F4: always evaluate no-anchor patterns even when no anchor word
+                # is present (mirrors the Aho-Corasick backend).
+                _pats = (
+                    self._pattern_rule_idxs
+                    if (self._pat_anchor_search is None or self._pat_anchor_search(text_lower))
+                    else self._no_anchor_patterns
+                )
+                for rule_idx, pat in _pats:
+                    if not (fired & (1 << rule_idx)) and pat.search(text_lower):
                             fired |= 1 << rule_idx
                             rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
                             if strict and is_crit:
@@ -868,9 +886,19 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                                 violations = []
                             violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
             elif self._pattern_rule_idxs:
-                if self._pat_anchor_search is None or self._pat_anchor_search(text_lower):
-                    for rule_idx, pat in self._pattern_rule_idxs:
-                        if pat.search(text_lower):
+                # F4: no-anchor patterns (secret regexes with no literal anchor
+                # word, e.g. ``sk-...`` keys or SSNs) must ALWAYS be evaluated.
+                # Gating the whole pattern list behind the anchor search dropped
+                # them whenever the text had no anchor word — a fail-open the
+                # Aho-Corasick backend never had. Fall back to the no-anchor
+                # subset when the anchor search misses.
+                _pats = (
+                    self._pattern_rule_idxs
+                    if (self._pat_anchor_search is None or self._pat_anchor_search(text_lower))
+                    else self._no_anchor_patterns
+                )
+                for rule_idx, pat in _pats:
+                    if pat.search(text_lower):
                             rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
                             if strict and is_crit:
                                 _e_src = self._rule_excs[rule_idx]
@@ -927,11 +955,21 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             _is_noop,
             _rv,
         ) = self._hot
-        if _rv is not None and _fast_records is not None and strict and not audit_metadata:
+        if (
+            _rv is not None
+            and _fast_records is not None
+            and strict
+            and not audit_metadata
+            and not self.custom_validators
+        ):
             # audit_metadata guard: same as strict=False path — when audit_metadata is
             # present, fall through to the full Python path which calls
             # _record_validation_audit with the metadata.  Omitting this guard would
             # silently drop audit_metadata in fast (aggregate-only) mode.
+            # custom_validators guard (M7): a registered custom validator must always
+            # run and reach the audit trail even under a CRITICAL string-rule match.
+            # The Rust fast path short-circuits before custom validators, so when any
+            # are present we fall through to the Python path, which defers the raise.
             _action_lower = action if action.islower() else action.lower()
             _decision, _data = _rv.validate_hot(_action_lower)
             _has_gov_ctx = context is not None and (
@@ -980,7 +1018,13 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             )
             if _result is not None:
                 return self._post_dispatch_result(_result, action, strict=strict)
-        elif _rv is not None and _fast_records is not None and context and strict:
+        elif (
+            _rv is not None
+            and _fast_records is not None
+            and context
+            and strict
+            and not self.custom_validators  # M7: see custom_validators guard above
+        ):
             _ctx_pairs = [
                 (k, v)
                 for k, v in context.items()
@@ -1016,10 +1060,17 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         text_lower = action.lower()
         _first_word, _, _ = text_lower.partition(" ")
         _has_neg = bool(_NEGATIVE_VERBS_RE.search(text_lower))
+        # M7: when custom validators are registered, do not let the matcher
+        # short-circuit-raise on a CRITICAL string rule. Accumulate the violation
+        # instead so the custom-validator block (below) and the audit write both
+        # run; the deferred raise happens in _raise_for_enforcement, which blocks
+        # identically under strict. With no custom validators this is == strict,
+        # so the hot path is unchanged.
+        matcher_strict = strict and not self.custom_validators
         if _has_ac and _first_word in _pos_verbs and not _has_neg:
             violations = self._validate_python_ac(
                 action,
-                strict,
+                matcher_strict,
                 text_lower,
                 True,
                 violations,
@@ -1027,7 +1078,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         elif _has_ac:
             violations = self._validate_python_ac(
                 action,
-                strict,
+                matcher_strict,
                 text_lower,
                 False,
                 violations,
@@ -1035,7 +1086,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         elif _first_word in _POSITIVE_VERBS_SET and self._neg_findall is not None and not _has_neg:
             violations = self._validate_python_regex(
                 action,
-                strict,
+                matcher_strict,
                 text_lower,
                 True,
                 violations,
@@ -1043,7 +1094,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         elif self._combined_findall is not None:
             violations = self._validate_python_regex(
                 action,
-                strict,
+                matcher_strict,
                 text_lower,
                 False,
                 violations,
@@ -1071,9 +1122,11 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                                 )
                             )
 
-        if self.custom_validators and (
-            not violations or not any(v.severity == Severity.CRITICAL for v in violations)
-        ):
+        # M7: always run custom validators when present so their findings reach
+        # the audit trail even when a CRITICAL string rule already matched. The
+        # CRITICAL short-circuit is an enforcement concern (resolved below), not
+        # a reason to omit findings from the forensic record.
+        if self.custom_validators:
             ctx = context or {}
             for validator in self.custom_validators:
                 try:

@@ -19,6 +19,14 @@ plugs into the existing enforcement/audit pipeline two ways:
    constitution's string rules and these structural rules under one
    enforcement/audit decision.
 
+**Fail-closed by default.** For a governance layer guarding code *before it
+runs*, "I could not analyze this" must not silently mean "allowed". When the
+analyzer cannot parse a snippet, exceeds its size bound, or hits a
+``RecursionError`` on pathologically nested input, it emits a *blocking*
+violation rather than an empty result.  Set ``block_unparseable=False`` to
+restore the old best-effort behaviour (e.g. when stacking the analyzer behind
+another sandbox).
+
 The analyzer is deliberately conservative and configurable: it never executes
 code, and any module/builtin/attribute set can be overridden at construction.
 
@@ -65,19 +73,28 @@ DEFAULT_AUTHORIZED_IMPORTS: frozenset[str] = frozenset(
 
 # Imports that are not merely unauthorized but actively high-risk (filesystem,
 # process, network, code-loading, serialization).  Importing any of these is a
-# CRITICAL finding regardless of the authorized list.
+# CRITICAL finding regardless of the authorized list.  Private C-accelerator
+# twins (``_socket``, ``_ctypes`` …) are included so they cannot slip through at
+# the lower CODE-IMPORT-FORBIDDEN tier (see L12).
 CRITICAL_IMPORTS: frozenset[str] = frozenset(
     {
         "os",
         "sys",
         "subprocess",
+        "_posixsubprocess",
         "socket",
+        "_socket",
+        "ssl",
+        "_ssl",
         "shutil",
         "ctypes",
+        "_ctypes",
         "importlib",
         "multiprocessing",
         "threading",
+        "_thread",
         "pickle",
+        "_pickle",
         "marshal",
         "pty",
         "fcntl",
@@ -94,6 +111,9 @@ HIGH_BUILTINS: frozenset[str] = frozenset({"open", "input", "breakpoint", "exit"
 MEDIUM_BUILTINS: frozenset[str] = frozenset(
     {"getattr", "setattr", "delattr", "vars", "globals", "locals"}
 )
+# Introspection builtins whose first string-literal argument we inspect: a
+# dunder target (``getattr(o, "__globals__")``) is an escape vector, not noise.
+_ATTR_BUILTINS: frozenset[str] = frozenset({"getattr", "setattr", "delattr"})
 
 # Dotted call targets that are dangerous wherever they appear.
 DANGEROUS_CALLS: frozenset[str] = frozenset(
@@ -140,6 +160,12 @@ MEDIUM_DUNDERS: frozenset[str] = frozenset(
     {"__class__", "__dict__", "__getattribute__", "__reduce__", "__reduce_ex__"}
 )
 
+# Default upper bound on the size of a single code action (characters).  Beyond
+# this we refuse to parse rather than spend unbounded time/stack on hostile
+# input (see H2/L4).  ``ast.parse`` recurses in CPython, so deeply nested but
+# "small" source can still blow the stack — handled separately via RecursionError.
+DEFAULT_MAX_CODE_SIZE = 100_000
+
 
 def _dotted_name(node: ast.AST) -> str | None:
     """Return the dotted name for an attribute/name chain, else ``None``.
@@ -172,6 +198,17 @@ class CodeActionValidator:
 
         engine.add_validator(validator.as_engine_validator())
         engine.validate(code, context={"action_type": "code"})
+
+    Parameters
+    ----------
+    block_unparseable:
+        When ``True`` (default), code that cannot be parsed, exceeds
+        ``max_code_size``, or overflows the parser stack yields a *blocking*
+        violation (fail-closed).  When ``False``, such input yields ``[]``
+        (legacy best-effort behaviour — only safe behind another sandbox).
+    max_code_size:
+        Reject code longer than this many characters before parsing.  ``0``
+        disables the bound.
     """
 
     def __init__(
@@ -183,6 +220,8 @@ class CodeActionValidator:
         dangerous_calls: Iterable[str] | None = None,
         category: str = "code-analysis",
         flag_medium_builtins: bool = True,
+        block_unparseable: bool = True,
+        max_code_size: int = DEFAULT_MAX_CODE_SIZE,
     ) -> None:
         base = set(DEFAULT_AUTHORIZED_IMPORTS if authorized_imports is None else authorized_imports)
         if extra_authorized_imports:
@@ -196,6 +235,8 @@ class CodeActionValidator:
         )
         self.category = category
         self.flag_medium_builtins = flag_medium_builtins
+        self.block_unparseable = block_unparseable
+        self.max_code_size = max_code_size
 
     def _violation(self, rule_id: str, text: str, severity: Severity, matched: str) -> Violation:
         return Violation(
@@ -206,33 +247,136 @@ class CodeActionValidator:
             category=self.category,
         )
 
-    def analyze(self, code: str) -> list[Violation]:
-        """Return structural violations for *code* (empty if clean/unparseable).
+    def _fail_closed(
+        self, rule_id: str, text: str, severity: Severity, matched: str
+    ) -> list[Violation]:
+        """Return a blocking violation when fail-closed, else nothing.
 
-        Unparseable input returns ``[]`` rather than a violation: a partial or
-        non-Python snippet should fall through to the engine's string rules
-        instead of being blocked on a syntax error.
+        Central choke point for every "could not analyze this" outcome so the
+        fail-open vs. fail-closed policy lives in exactly one place.
         """
+        if not self.block_unparseable:
+            return []
+        return [self._violation(rule_id, text, severity, matched)]
+
+    def analyze(self, code: str) -> list[Violation]:
+        """Return structural violations for *code*.
+
+        Clean, fully-parsed code with no findings returns ``[]``.  Code that
+        cannot be analyzed (unparseable, oversized, too deeply nested, or not a
+        string) returns a *blocking* violation when ``block_unparseable`` is set
+        — never a silent empty list, which would let dangerous code run
+        ungoverned (see H2/H3).
+        """
+        # L5: only ``str`` is analyzable. Decode bytes; refuse other types
+        # fail-closed instead of raising TypeError out of the engine path.
+        if isinstance(code, bytes):
+            try:
+                code = code.decode("utf-8")
+            except UnicodeDecodeError:
+                return self._fail_closed(
+                    "CODE-UNPARSEABLE",
+                    "Code action is not valid UTF-8; blocked (fail-closed).",
+                    Severity.HIGH,
+                    "<non-utf8>",
+                )
+        if not isinstance(code, str):
+            return self._fail_closed(
+                "CODE-UNANALYZABLE",
+                f"Code action is not a string ({type(code).__name__}); blocked (fail-closed).",
+                Severity.HIGH,
+                repr(code),
+            )
         if not code:
             return []
+        # L4: bound the work before touching the parser.
+        if self.max_code_size and len(code) > self.max_code_size:
+            return self._fail_closed(
+                "CODE-TOO-LARGE",
+                f"Code action exceeds {self.max_code_size} chars ({len(code)}); blocked.",
+                Severity.HIGH,
+                f"<{len(code)} chars>",
+            )
+
         try:
             tree = ast.parse(code)
         except (SyntaxError, ValueError):
-            return []
+            # Genuinely unparseable: cannot prove it safe, so block (fail-closed).
+            return self._fail_closed(
+                "CODE-UNPARSEABLE",
+                "Code action could not be parsed; blocked (fail-closed).",
+                Severity.HIGH,
+                "<unparseable>",
+            )
+        except (RecursionError, MemoryError):
+            # H2: deeply nested source overflows the parser. CPython raises
+            # RecursionError at moderate depth but MemoryError at extreme depth
+            # (e.g. ``"not " * 9000``); both mean "too deep to analyze" → block.
+            return self._fail_closed(
+                "CODE-ANALYSIS-ERROR",
+                "Code action too deeply nested to analyze; blocked (fail-closed).",
+                Severity.CRITICAL,
+                "<recursion-limit>",
+            )
+        except Exception:  # noqa: BLE001 - any other parser failure is unanalyzable
+            # Fail-closed catch-all: an action we could not prove safe must never
+            # fall through to execution because the parser raised a new error type.
+            return self._fail_closed(
+                "CODE-ANALYSIS-ERROR",
+                "Code action could not be analyzed; blocked (fail-closed).",
+                Severity.CRITICAL,
+                "<analysis-error>",
+            )
+
+        try:
+            nodes = list(ast.walk(tree))
+        except (RecursionError, MemoryError):  # pragma: no cover - ast.walk is iterative; defensive
+            return self._fail_closed(
+                "CODE-ANALYSIS-ERROR",
+                "Code action too complex to analyze; blocked (fail-closed).",
+                Severity.CRITICAL,
+                "<recursion-limit>",
+            )
+        except Exception:  # noqa: BLE001 - fail closed on any walk failure
+            return self._fail_closed(
+                "CODE-ANALYSIS-ERROR",
+                "Code action could not be analyzed; blocked (fail-closed).",
+                Severity.CRITICAL,
+                "<analysis-error>",
+            )
+
+        # First pass: resolve import aliases so ``import os as o; o.system(...)``
+        # is still caught (L3), and builtin aliases so a dangerous builtin
+        # laundered through a local name (``e = eval; e(...)``; ``rd = open;
+        # rd(...)``) cannot reach execution unflagged (builtin-aliasing bypass).
+        alias_map = self._collect_aliases(nodes)
+        builtin_aliases = self._collect_builtin_aliases(nodes)
+        # Names that are the direct callee of a call are inspected in
+        # ``_check_call``; skip them in the bare-reference scan so a plain
+        # ``eval('...')`` is not flagged twice.
+        call_func_ids = {id(n.func) for n in nodes if isinstance(n, ast.Call)}
 
         raw: list[Violation] = []
-        for node in ast.walk(tree):
+        for node in nodes:
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    raw.extend(self._check_import(alias.name, f"import {alias.name}"))
+                    raw.extend(self._check_import(alias.name, 0, f"import {alias.name}"))
             elif isinstance(node, ast.ImportFrom):
                 module = node.module or ""
+                level = node.level or 0
                 names = ", ".join(a.name for a in node.names)
-                raw.extend(self._check_import(module, f"from {module} import {names}"))
+                prefix = "." * level
+                raw.extend(
+                    self._check_import(module, level, f"from {prefix}{module} import {names}")
+                )
+                # M2: inspect each imported *member* name, not just the module.
+                raw.extend(self._check_imported_members(module, level, node.names))
             elif isinstance(node, ast.Call):
-                raw.extend(self._check_call(node))
+                raw.extend(self._check_call(node, alias_map, builtin_aliases))
             elif isinstance(node, ast.Attribute):
                 raw.extend(self._check_attribute(node))
+            elif isinstance(node, ast.Name):
+                raw.extend(self._check_name(node, call_func_ids))
 
         # Dedup by (rule_id, matched_content), preserving encounter order.
         seen: set[tuple[str, str]] = set()
@@ -244,8 +388,76 @@ class CodeActionValidator:
                 findings.append(v)
         return findings
 
-    def _check_import(self, module: str, matched: str) -> list[Violation]:
+    @staticmethod
+    def _collect_aliases(nodes: list[ast.AST]) -> dict[str, str]:
+        """Map local binding → real root module for ``import x as y`` forms.
+
+        ``import os as o`` → ``{"o": "os"}``; ``import os.path as p`` →
+        ``{"p": "os"}``.  Used to resolve aliased dangerous calls.
+        """
+        aliases: dict[str, str] = {}
+        for node in nodes:
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = alias.name.split(".")[0]
+                    aliases[alias.asname or alias.name.split(".")[0]] = root
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                module_root = (node.module or "").split(".")[0]
+                for alias in node.names:
+                    # ``from os import system as s`` → s resolves to ``os.system``.
+                    bound = alias.asname or alias.name
+                    aliases[bound] = f"{module_root}.{alias.name}" if module_root else alias.name
+        return aliases
+
+    @staticmethod
+    def _collect_builtin_aliases(nodes: list[ast.AST]) -> dict[str, str]:
+        """Map a local name → the dangerous builtin it was assigned from.
+
+        ``e = eval`` → ``{"e": "eval"}``; ``rd = open`` → ``{"rd": "open"}``.
+        Used so a builtin laundered through a plain assignment is still resolved
+        to its real identity at the call site (builtin-aliasing bypass).
+        """
+        dangerous = CRITICAL_BUILTINS | HIGH_BUILTINS | MEDIUM_BUILTINS
+        aliases: dict[str, str] = {}
+        for node in nodes:
+            if (
+                isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in dangerous
+            ):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        aliases[target.id] = node.value.id
+        return aliases
+
+    def _check_name(self, node: ast.Name, call_func_ids: set[int]) -> list[Violation]:
+        """Flag a bare *reference* to a dynamic-execution builtin.
+
+        ``e = eval``, ``list(map(eval, …))``, ``[exec]`` — a load of
+        ``eval``/``exec``/``compile``/``__import__`` that is not itself the
+        callee of a call (those are handled in :meth:`_check_call`).  There is no
+        legitimate reason for sandboxed agent code to *reference* these names, so
+        any such load is a CRITICAL finding.
+        """
+        if not isinstance(node.ctx, ast.Load) or id(node) in call_func_ids:
+            return []
+        if node.id in CRITICAL_BUILTINS:
+            return [
+                self._violation(
+                    "CODE-EXEC",
+                    f"Reference to a dynamic-execution builtin is forbidden: {node.id}",
+                    Severity.CRITICAL,
+                    node.id,
+                )
+            ]
+        return []
+
+    def _check_import(self, module: str, level: int, matched: str) -> list[Violation]:
         if not module:
+            return []
+        # M3: a relative import (``from .os import x``) addresses the local
+        # package, not the absolute ``os`` — do not apply the absolute allowlist.
+        if level and level > 0:
             return []
         out: list[Violation] = []
         root = module.split(".")[0]
@@ -267,23 +479,75 @@ class CodeActionValidator:
                     matched,
                 )
             )
-        # Private submodule access (e.g. ``random._os``) even of an allowed root.
-        if any(part.startswith("_") for part in module.split(".")[1:]):
+        # L12: flag a private module anywhere in the dotted path, INCLUDING the
+        # root (``import _socket``), not just submodules of an allowed root.
+        if any(part.startswith("_") for part in module.split(".")):
             out.append(
                 self._violation(
                     "CODE-IMPORT-PRIVATE",
-                    f"Access to a private submodule is not permitted: {module}",
+                    f"Access to a private module is not permitted: {module}",
                     Severity.MEDIUM,
                     matched,
                 )
             )
         return out
 
-    def _check_call(self, node: ast.Call) -> list[Violation]:
+    def _check_imported_members(
+        self, module: str, level: int, names: list[ast.alias]
+    ) -> list[Violation]:
+        """M2: flag dangerous/private *members* pulled via ``from x import …``.
+
+        ``from builtins import __import__`` and ``from os import _exit`` are
+        invisible to a module-only check, so inspect each imported name.
+        """
+        out: list[Violation] = []
+        prefix = "." * (level or 0)
+        for alias in names:
+            name = alias.name
+            if name == "*":
+                continue
+            matched = f"from {prefix}{module} import {name}"
+            if name in CRITICAL_BUILTINS:
+                out.append(
+                    self._violation(
+                        "CODE-EXEC",
+                        f"Dynamic code execution builtin is forbidden: {name}",
+                        Severity.CRITICAL,
+                        matched,
+                    )
+                )
+            elif name in HIGH_DUNDERS:
+                out.append(
+                    self._violation(
+                        "CODE-DUNDER-ACCESS",
+                        f"Import of escape-vector attribute is forbidden: {name}",
+                        Severity.HIGH,
+                        matched,
+                    )
+                )
+            elif name.startswith("_"):
+                out.append(
+                    self._violation(
+                        "CODE-IMPORT-PRIVATE",
+                        f"Import of a private member is not permitted: {name}",
+                        Severity.MEDIUM,
+                        matched,
+                    )
+                )
+        return out
+
+    def _check_call(
+        self,
+        node: ast.Call,
+        alias_map: dict[str, str],
+        builtin_aliases: dict[str, str] | None = None,
+    ) -> list[Violation]:
         func = node.func
         if isinstance(func, ast.Name):
             name = func.id
-            if name in CRITICAL_BUILTINS:
+            # Resolve a builtin laundered through a local name (``rd = open``).
+            builtin = (builtin_aliases or {}).get(name, name)
+            if builtin in CRITICAL_BUILTINS:
                 return [
                     self._violation(
                         "CODE-EXEC",
@@ -292,7 +556,7 @@ class CodeActionValidator:
                         f"{name}(...)",
                     )
                 ]
-            if name in HIGH_BUILTINS:
+            if builtin in HIGH_BUILTINS:
                 return [
                     self._violation(
                         "CODE-DANGEROUS-BUILTIN",
@@ -301,18 +565,33 @@ class CodeActionValidator:
                         f"{name}(...)",
                     )
                 ]
-            if self.flag_medium_builtins and name in MEDIUM_BUILTINS:
-                return [
-                    self._violation(
-                        "CODE-INTROSPECTION",
-                        f"Introspection builtin can enable sandbox escape: {name}()",
-                        Severity.MEDIUM,
-                        f"{name}(...)",
-                    )
-                ]
+            if builtin in MEDIUM_BUILTINS:
+                # L2: getattr(o, "__globals__") is an escape vector, not noise —
+                # promote to HIGH when the target is a dunder string literal.
+                dunder = self._literal_dunder_arg(node) if builtin in _ATTR_BUILTINS else None
+                if dunder is not None:
+                    return [
+                        self._violation(
+                            "CODE-DUNDER-ACCESS",
+                            f"Escape-vector attribute via {name}(): {dunder}",
+                            Severity.HIGH,
+                            f"{name}(..., {dunder!r})",
+                        )
+                    ]
+                if self.flag_medium_builtins:
+                    return [
+                        self._violation(
+                            "CODE-INTROSPECTION",
+                            f"Introspection builtin can enable sandbox escape: {name}()",
+                            Severity.MEDIUM,
+                            f"{name}(...)",
+                        )
+                    ]
             return []
         dotted = _dotted_name(func)
-        if dotted is not None and dotted in self.dangerous_calls:
+        if dotted is None:
+            return []
+        if dotted in self.dangerous_calls:
             return [
                 self._violation(
                     "CODE-DANGEROUS-CALL",
@@ -321,7 +600,29 @@ class CodeActionValidator:
                     f"{dotted}(...)",
                 )
             ]
+        # L3: resolve an aliased root (``o.system`` where ``import os as o``).
+        head, _, rest = dotted.partition(".")
+        if rest and head in alias_map:
+            resolved = f"{alias_map[head]}.{rest}"
+            if resolved != dotted and resolved in self.dangerous_calls:
+                return [
+                    self._violation(
+                        "CODE-DANGEROUS-CALL",
+                        f"Dangerous call (via alias '{head}') is forbidden: {resolved}()",
+                        Severity.CRITICAL,
+                        f"{dotted}(...) -> {resolved}",
+                    )
+                ]
         return []
+
+    @staticmethod
+    def _literal_dunder_arg(node: ast.Call) -> str | None:
+        """Return a string-literal argument starting with ``__``, else ``None``."""
+        for arg in node.args:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                if arg.value.startswith("__"):
+                    return arg.value
+        return None
 
     def _check_attribute(self, node: ast.Attribute) -> list[Violation]:
         attr = node.attr
@@ -371,6 +672,7 @@ __all__ = [
     "CRITICAL_IMPORTS",
     "DANGEROUS_CALLS",
     "DEFAULT_AUTHORIZED_IMPORTS",
+    "DEFAULT_MAX_CODE_SIZE",
     "HIGH_BUILTINS",
     "HIGH_DUNDERS",
     "MEDIUM_BUILTINS",

@@ -82,6 +82,34 @@ def test_regex_fallback_positive_verb_still_scans_no_anchor_patterns() -> None:
 
 
 @pytest.mark.unit
+def test_regex_fallback_scans_no_anchor_pattern_without_keyword_or_anchor() -> None:
+    # F4 (the real fail-open): content carrying a no-anchor secret pattern but
+    # NO triggering keyword and NO anchor word was silently accepted on the
+    # pure-Python path, while the Aho-Corasick backend always scanned it.
+    engine = GovernanceEngine(_make_mixed_anchor_constitution(), strict=False)
+    _disable_rust_and_ac(engine)
+
+    # No "ssn"/"token" keyword and no "ghp" anchor anywhere in the text.
+    result = engine.validate("Customer record 123-45-6789 on file")
+
+    assert result.valid is False
+    assert {violation.rule_id for violation in result.violations} == {"NO-ANCHOR-SSN"}
+
+
+@pytest.mark.unit
+def test_regex_fallback_no_anchor_fix_does_not_overblock_clean_text() -> None:
+    # The fix must not over-block: text with no keyword, no anchor, and no
+    # matching pattern stays valid.
+    engine = GovernanceEngine(_make_mixed_anchor_constitution(), strict=False)
+    _disable_rust_and_ac(engine)
+
+    result = engine.validate("a perfectly ordinary sentence with nothing to flag")
+
+    assert result.valid is True
+    assert result.violations == []
+
+
+@pytest.mark.unit
 @pytest.mark.skip(reason="Engine zip(strict=True) rejects mismatched compiled_pats/patterns length")
 def test_invalid_regex_pattern_skipped_without_crash() -> None:
     """GovernanceEngine skips rules whose patterns contain invalid regex."""
