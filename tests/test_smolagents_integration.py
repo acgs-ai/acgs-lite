@@ -388,6 +388,53 @@ def test_wrap_is_idempotent_on_executor():
     assert agent.python_executor is first
 
 
+def test_wrap_with_different_governor_enforces_both_constitutions():
+    # #16: a SECOND governor wrapping an already-governed agent must still enforce
+    # its constitution at the executor gate. Skipping the re-wrap (because the
+    # executor was already a GovernedPythonExecutor) silently dropped the second
+    # governor's code-gate rules.
+    def const(kw: str) -> Constitution:
+        return Constitution(
+            id="c",
+            version="1.0.0",
+            rules=[
+                Rule(
+                    id="R",
+                    text=f"block {kw}",
+                    severity=Severity.CRITICAL,
+                    category="x",
+                    keywords=[kw],
+                    workflow_action=ViolationAction.BLOCK,
+                )
+            ],
+        )
+
+    agent = _FakeAgent()
+    SmolagentsGovernor(constitution=const("alphaword")).wrap(agent)
+    SmolagentsGovernor(constitution=const("betaword")).wrap(agent)
+    # Both governors' string rules are now enforced at the executor gate.
+    for kw in ("alphaword = 1", "betaword = 1"):
+        with pytest.raises(ConstitutionalViolationError):
+            agent.python_executor(kw)
+    # A code action matching neither constitution still runs.
+    assert agent.python_executor("gamma = 1") is not None
+
+
+def test_validate_code_fails_closed_on_non_string():
+    # #18/#30: the public validate_code must not leak a raw TypeError on non-str;
+    # #34: non-UTF-8 bytes must be blocked, not validated against a lossy decode.
+    gov = SmolagentsGovernor()
+    # Valid UTF-8 bytes are decoded and analyzed.
+    with pytest.raises(ConstitutionalViolationError) as exc:
+        gov.validate_code(b"import os")
+    assert exc.value.rule_id == "CODE-IMPORT-CRITICAL"
+    # Non-analyzable / non-UTF-8 inputs fail closed with CODE-UNANALYZABLE.
+    for bad in (123, ["import os"], None, b"\xff\xfe import os"):
+        with pytest.raises(ConstitutionalViolationError) as exc:
+            gov.validate_code(bad)  # type: ignore[arg-type]
+        assert exc.value.rule_id == "CODE-UNANALYZABLE", bad
+
+
 def test_wrap_initialises_none_hook_lists():
     class _Bare:
         def __init__(self):
