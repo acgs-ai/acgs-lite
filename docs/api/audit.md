@@ -20,11 +20,15 @@ The audit trail records every governance decision in a SHA-256 chained log. Any 
 ### Access the audit trail
 
 ```python
-from acgs_lite import GovernedAgent, Constitution
+from acgs_lite import GovernedAgent, Constitution, MACIRole
 from acgs_lite.audit import AuditLog
 
-agent = GovernedAgent(my_agent, constitution=Constitution.from_template("general"))
-result = agent.run("some request")
+agent = GovernedAgent(
+    my_agent,
+    constitution=Constitution.from_template("general"),
+    maci_role=MACIRole.EXECUTOR,
+)
+result = agent.run("some request", governance_action="execute")
 
 # The trail is automatically populated
 trail: AuditLog = agent.audit_log

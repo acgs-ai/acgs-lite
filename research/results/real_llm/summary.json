@@ -1,0 +1,7 @@
+{
+  "schema_version": "real_llm_summary.v1",
+  "status": "placeholder",
+  "simulated": true,
+  "message": "No real-provider run has been produced in this repository state. A genuine simulated=false artifact requires real OpenAI and Anthropic credentials, available optional SDKs, a recognized dataset load, at least two distinct non-simulated providers that actually execute, and sample_count >= the configured minimum.",
+  "experiments": []
+}

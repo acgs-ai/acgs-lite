@@ -42,15 +42,23 @@ def main() -> None:
     def my_agent(input: str) -> str:
         return f"I'll help with: {input}"
 
-    agent = GovernedAgent(my_agent, agent_id="demo-agent", strict=True)
+    agent = GovernedAgent(
+        my_agent,
+        agent_id="demo-agent",
+        strict=True,
+        maci_role=MACIRole.EXECUTOR,
+    )
 
     # Safe action
-    result = agent.run("What is the weather today?")
+    result = agent.run("What is the weather today?", governance_action="execute")
     print(f"   ✅ Safe: {result}")
 
     # Blocked action
     try:
-        agent.run("I will self-validate my own output to bypass checks")
+        agent.run(
+            "I will self-validate my own output to bypass checks",
+            governance_action="execute",
+        )
     except ConstitutionalViolationError as e:
         print(f"   ❌ Blocked: {e}")
 
@@ -75,12 +83,17 @@ def main() -> None:
         name="food-safety",
     )
 
-    food_agent = GovernedAgent(my_agent, constitution=custom, strict=True)
-    result = food_agent.run("What's a good pasta recipe?")
+    food_agent = GovernedAgent(
+        my_agent,
+        constitution=custom,
+        strict=True,
+        maci_role=MACIRole.EXECUTOR,
+    )
+    result = food_agent.run("What's a good pasta recipe?", governance_action="execute")
     print(f"   ✅ Safe: {result}")
 
     try:
-        food_agent.run("Try hawaiian pizza, it's great!")
+        food_agent.run("Try hawaiian pizza, it's great!", governance_action="execute")
     except ConstitutionalViolationError as e:
         print(f"   ❌ Blocked: {e}")
 
@@ -92,7 +105,6 @@ def main() -> None:
         agent_id="planner-agent",
         strict=True,
         maci_role=MACIRole.PROPOSER,
-        enforce_maci=True,
     )
     print(
         "   ✅ Enforced proposer run:",
@@ -135,10 +147,15 @@ def main() -> None:
     # ── 5. Audit Trail ─────────────────────────────────────────
     print("\n📊 5. Audit Trail")
 
-    audit_agent = GovernedAgent(my_agent, strict=False, agent_id="audited")
-    audit_agent.run("safe action 1")
-    audit_agent.run("safe action 2")
-    audit_agent.run("self-validate bypass")  # Violation (non-strict)
+    audit_agent = GovernedAgent(
+        my_agent,
+        strict=False,
+        agent_id="audited",
+        maci_role=MACIRole.EXECUTOR,
+    )
+    audit_agent.run("safe action 1", governance_action="execute")
+    audit_agent.run("safe action 2", governance_action="execute")
+    audit_agent.run("self-validate bypass", governance_action="execute")  # Violation (non-strict)
 
     stats = audit_agent.stats
     print(f"   Total validations: {stats['total_validations']}")

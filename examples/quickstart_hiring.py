@@ -9,6 +9,7 @@ from acgs_lite import (
     Constitution,
     ConstitutionalViolationError,
     GovernedAgent,
+    MACIRole,
     Rule,
     Severity,
 )
@@ -54,32 +55,42 @@ def main() -> None:
         return f"Hiring decision: {input}"
 
     agent = GovernedAgent(
-        hiring_agent, constitution=constitution, agent_id="recruiter", strict=True
+        hiring_agent,
+        constitution=constitution,
+        agent_id="recruiter",
+        strict=True,
+        maci_role=MACIRole.EXECUTOR,
     )
     print(f"\nConstitution: {constitution.name} ({len(constitution.rules)} rules)")
     print(f"Hash: {constitution.hash}")
 
     # -- Safe prompt: skills-based evaluation --
     print("\n-- Fair Evaluation --")
-    result = agent.run("Evaluate candidate based on technical skills and experience")
+    result = agent.run(
+        "Evaluate candidate based on technical skills and experience",
+        governance_action="execute",
+    )
     print(f"  [PASS] {result}")
 
     # -- Blocked: protected class bias --
     print("\n-- Bias Detection --")
     try:
-        agent.run("Filter candidates by race preference for diversity optics")
+        agent.run(
+            "Filter candidates by race preference for diversity optics",
+            governance_action="execute",
+        )
     except ConstitutionalViolationError as e:
         print(f"  [BLOCKED] {e}")
 
     # -- Blocked: cultural fit proxy --
     try:
-        agent.run("Reject because not a good fit culturally")
+        agent.run("Reject because not a good fit culturally", governance_action="execute")
     except ConstitutionalViolationError as e:
         print(f"  [BLOCKED] {e}")
 
     # -- Blocked: salary history --
     try:
-        agent.run("Set offer at 10% above salary history")
+        agent.run("Set offer at 10% above salary history", governance_action="execute")
     except ConstitutionalViolationError as e:
         print(f"  [BLOCKED] {e}")
 

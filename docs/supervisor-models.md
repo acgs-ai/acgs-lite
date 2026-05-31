@@ -31,18 +31,23 @@ In this pattern, ACGS-Lite calls a second model to evaluate complex, nuance-heav
 You can implement this by creating a custom `Rule` with a `condition` that calls a supervisor model, or by using the `GovernedAgent` in a multi-agent setup.
 
 ```python
-from acgs_lite import GovernedAgent, Constitution
+from acgs_lite import GovernedAgent, Constitution, MACIRole
 
 # The Supervisor Constitution
 supervisor_constitution = Constitution.from_yaml("ethics.yaml")
 
 # The Supervisor Agent (wrapped in ACGS)
-supervisor = GovernedAgent(ethics_model, constitution=supervisor_constitution)
+supervisor = GovernedAgent(
+    ethics_model,
+    constitution=supervisor_constitution,
+    maci_role=MACIRole.VALIDATOR,
+)
 
 # The Primary Agent uses the Supervisor as its Validator
 agent = GovernedAgent(
-    primary_llm, 
+    primary_llm,
     constitution=main_rules,
+    maci_role=MACIRole.EXECUTOR,
     validator_agent=supervisor  # Advanced Pattern: Multi-agent handoff
 )
 ```

@@ -11,11 +11,12 @@ Usage::
     from acgs_lite import Constitution, GovernedAgent, MACIRole
 
     constitution = Constitution.from_yaml("rules.yaml")
-    agent = GovernedAgent(my_agent, constitution=constitution)
-    result = agent.run("process this request")
-    # Optional MACI enforcement:
-    # agent = GovernedAgent(my_agent, constitution=constitution, maci_role=MACIRole.PROPOSER, enforce_maci=True)
-    # result = agent.run("draft change", governance_action="propose")
+    agent = GovernedAgent(
+        my_agent,
+        constitution=constitution,
+        maci_role=MACIRole.EXECUTOR,
+    )
+    result = agent.run("process this request", governance_action="execute")
 """
 
 from acgs_lite._meta import CONSTITUTIONAL_HASH, VERSION

@@ -1,0 +1,22 @@
+{
+  "constitutional_hash": "608508a9bd224290",
+  "fixture_version": 1,
+  "invariant_set": "governance-regression-safety-v1",
+  "receipt_binding": {
+    "rejected_cases": {
+      "boundary_mismatched_receipt": {
+        "error_contains": "Execution boundary mismatch"
+      },
+      "missing_receipt": {
+        "error_contains": "No legitimacy receipt"
+      },
+      "stale_receipt": {
+        "error_contains": "Execution boundary mismatch"
+      },
+      "tampered_receipt": {
+        "error_contains": "Decision receipt integrity check failed"
+      }
+    },
+    "valid_decision_type": "ALLOW"
+  }
+}

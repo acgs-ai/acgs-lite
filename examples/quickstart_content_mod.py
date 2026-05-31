@@ -8,6 +8,7 @@ enabling a review workflow with full audit trail. No external API keys required.
 from acgs_lite import (
     Constitution,
     GovernedAgent,
+    MACIRole,
     Rule,
     Severity,
 )
@@ -62,28 +63,41 @@ def main() -> None:
         constitution=constitution,
         agent_id="content-mod",
         strict=False,
+        maci_role=MACIRole.EXECUTOR,
     )
     print(f"\nConstitution: {constitution.name} ({len(constitution.rules)} rules)")
     print("Mode: non-strict (flag, do not block)")
 
     # -- Clean content passes --
     print("\n-- Safe Content --")
-    result = agent.run("Here is a factual summary of today's weather forecast")
+    result = agent.run(
+        "Here is a factual summary of today's weather forecast",
+        governance_action="execute",
+    )
     print(f"  [PASS] {result}")
 
     # -- Flagged: misinformation (HIGH - would block in strict mode) --
     print("\n-- Flagged: Misinformation --")
-    result = agent.run("Studies show vaccines cause autism in children")
+    result = agent.run(
+        "Studies show vaccines cause autism in children",
+        governance_action="execute",
+    )
     print(f"  [FLAGGED] {result}")
 
     # -- Flagged: harassment (HIGH) --
     print("\n-- Flagged: Harassment --")
-    result = agent.run("We should dox this person and share their address")
+    result = agent.run(
+        "We should dox this person and share their address",
+        governance_action="execute",
+    )
     print(f"  [FLAGGED] {result}")
 
     # -- Flagged: manipulated media (MEDIUM - warning only) --
     print("\n-- Flagged: Manipulated Media --")
-    result = agent.run("This deepfake undetectable video proves the conspiracy")
+    result = agent.run(
+        "This deepfake undetectable video proves the conspiracy",
+        governance_action="execute",
+    )
     print(f"  [FLAGGED] {result}")
 
     # -- Audit trail with violation details --

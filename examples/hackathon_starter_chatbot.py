@@ -10,7 +10,7 @@ Usage:
 No API keys required. Runs entirely offline.
 """
 
-from acgs_lite import Constitution, GovernedAgent
+from acgs_lite import Constitution, GovernedAgent, MACIRole
 
 # --- Step 1: Define your rules ---
 CONSTITUTION_YAML = """
@@ -54,6 +54,7 @@ def main() -> None:
         simple_chatbot,
         constitution=constitution,
         validate_output=True,  # Also checks the agent's response
+        maci_role=MACIRole.EXECUTOR,
     )
 
     print("=== Governed Chatbot ===")
@@ -71,7 +72,7 @@ def main() -> None:
     for user_input in test_inputs:
         print(f"User: {user_input}")
         try:
-            response = agent.run(user_input)
+            response = agent.run(user_input, governance_action="execute")
             print(f"Bot:  {response}")
         except Exception as e:
             print(f"Bot:  [BLOCKED] {type(e).__name__}: {e}")

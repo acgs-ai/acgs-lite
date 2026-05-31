@@ -1,16 +1,16 @@
-# ACGS Governance Sidecar for Claude Code
+# ACGS Governance Hook for Claude Code
 
 This directory contains the Claude Code `PreToolUse` hook that can send tool-call
-text to an ACGS-compatible governance sidecar before Claude Code executes it.
+text to the bundled ACGS-Lite FastAPI governance route before Claude Code executes it.
 
 ## Overview
 
 The hook intercepts `Bash`, `Write`, `Edit`, and `MultiEdit` tool calls, extracts
 the action text, calls `ACGS_CHECK_URL`, and blocks the call (exit 2) if the
 response denies the action. By default `ACGS_CHECK_URL` is
-`${ACGS_BASE_URL}/x402/check`, which is intended for an external
-hackathon/sidecar gateway; this package's bundled FastAPI app currently exposes
-`/health` and `POST /validate`, not a built-in `/x402/check` route.
+`${ACGS_BASE_URL}/integrations/claude-code/check`, a route bundled by
+`acgs_lite.server.create_governance_app()`. A deprecated local compatibility
+alias remains available at `GET /x402/check?action=...` for older callers.
 
 > **Fail-closed default:** If ACGS is not running, returns malformed data, or the `/health` endpoint does not respond within 1 second, the hook exits 2 and blocks the tool call. Development-only fail-open behavior requires the explicit escape hatch `ACGS_FAIL_OPEN=1`.
 
@@ -66,7 +66,8 @@ Read-only tools (`Read`, `Glob`, `Grep`, `LS`) are skipped unconditionally.
 |----------------------|---------|---------|
 | `ACGS_BASE_URL` | `http://localhost:8000` | Base URL used to derive the health and check endpoints |
 | `ACGS_HEALTH_URL` | `${ACGS_BASE_URL}/health` | Health endpoint checked before enforcement |
-| `ACGS_CHECK_URL` | `${ACGS_BASE_URL}/x402/check` | Governance decision endpoint served by your sidecar/gateway |
+| `ACGS_CHECK_URL` | `${ACGS_BASE_URL}/integrations/claude-code/check` | Bundled Claude Code governance decision endpoint |
+| `ACGS_CHECK_API_KEY` | `${ACGS_API_KEY}` when set | API key forwarded as `X-API-Key` to protected ACGS servers |
 | `ACGS_HEALTH_TIMEOUT_SECONDS` | `1` | Health-check timeout |
 | `ACGS_CHECK_TIMEOUT_SECONDS` | `3` | Governance-check timeout |
 | `ACGS_FAIL_OPEN` | `0` | Set to `1`, `true`, `yes`, or `on` to allow when ACGS is unavailable |
@@ -81,15 +82,19 @@ To opt into fail-open behavior for local testing, set:
 export ACGS_FAIL_OPEN=1
 ```
 
-## Governance sidecar contract
+## Bundled governance route contract
 
-The hook calls `GET ${ACGS_CHECK_URL}?action=<text>` after a successful health
-check. The default URL, `http://localhost:8000/x402/check`, is a hackathon
-sidecar convention rather than a route implemented by
-`acgs_lite.server.create_governance_app()` today. You can either:
+The hook calls `POST ${ACGS_CHECK_URL}` after a successful health check and sends
+the original Claude Code PreToolUse payload as JSON:
 
-- run an external gateway that exposes `GET /x402/check` and translates to your ACGS validation policy; or
-- set `ACGS_CHECK_URL` to any compatible endpoint that accepts the `action` query parameter and returns the decision shape below.
+```json
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo hello"
+  }
+}
+```
 
 Compatible decision response:
 
@@ -102,6 +107,11 @@ Compatible decision response:
 }
 ```
 
+The hook exits 0 only when `compliant` is `true` and `decision` is exactly
+`"allow"` after case normalization. Any other decision, malformed JSON, HTTP
+error, auth failure, or unavailable server blocks the tool call unless
+`ACGS_FAIL_OPEN=1` is explicitly set.
+
 ## Example output when a violation is caught
 
 When Claude Code attempts a `Bash` call that violates a constitutional rule, the hook prints to stderr and the tool call is blocked:
@@ -112,8 +122,8 @@ Tool 'Bash' blocked. Run 'acgs-lite assess' for details.
 ```
 
 Claude Code surfaces the stderr output to the user and aborts the tool call.
-Audit persistence depends on the sidecar/gateway behind `ACGS_CHECK_URL`; the
-shell hook itself does not write an audit log.
+Audit persistence is handled by the ACGS-Lite server behind `ACGS_CHECK_URL`;
+the shell hook itself does not write an audit log.
 
 ## Local smoke checks
 
@@ -124,15 +134,17 @@ bash -n integrations/claude_code/acgs-governance-preuse.sh
 python -m pytest tests/test_claude_code_integration.py -q --import-mode=importlib
 ```
 
-If your sidecar is running on the default base URL, verify its public health
-endpoint and compatible decision endpoint:
+If the bundled ACGS-Lite server is running on the default base URL, verify its
+public health endpoint and compatible decision endpoint:
 
 ```bash
 curl http://localhost:8000/health
-curl "http://localhost:8000/x402/check?action=echo+hello"
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"tool_name":"Bash","tool_input":{"command":"echo hello"}}' \
+  http://localhost:8000/integrations/claude-code/check
 ```
 
-For the bundled FastAPI governance app, use `create_governance_app()` from
-`acgs_lite.server`; its built-in decision endpoint is `POST /validate`, so it
-needs a thin adapter before it can satisfy the hook's default `GET /x402/check`
-contract.
+For older local callers, `GET /x402/check?action=echo+hello` is available as a
+deprecated compatibility alias. New integrations should use
+`POST /integrations/claude-code/check`.

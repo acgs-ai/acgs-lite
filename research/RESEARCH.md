@@ -116,6 +116,44 @@
 | X4 | G2 | MACI adds <100ms latency per episode | Script created |
 | X5 | G3 | ACGS logs export to PROV-JSON with >95% coverage | Script created |
 | X6 | G3 | Diff audit detects drift between model versions | Script created |
+| Real LLM Harness | G1/G3 | Core invariant can be evaluated on real providers with real `AuditLog` evidence | Harness created; no empirical artifact yet because API keys are external |
+
+## Real LLM + Real AuditLog Harness
+
+`research/real_llm/` adds an opt-in runner for real-provider experiments. It
+records each provider execution through the real `acgs_lite.audit.AuditLog`,
+writes per-experiment `*_results.json`, exports audit JSON/JSONL evidence, and
+updates `research/results/real_llm/summary.json`.
+
+The harness enforces the honesty floor before any artifact may be marked
+`simulated:false`:
+
+- at least two distinct non-simulated providers must actually execute;
+- `sample_count` must meet the configured minimum, default `30`;
+- the recognized dataset adapter must load rather than fall back;
+- deterministic mock providers and unavailable providers force
+  `simulated:true`;
+- `--fail-if-simulated` exits non-zero when those conditions are not met.
+
+Real runs require external credentials and optional SDKs, for example:
+
+```bash
+export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY=...
+export OPENAI_MODEL=...
+export ANTHROPIC_MODEL=...
+
+python -m research.real_llm.runner \
+  --provider openai:${OPENAI_MODEL} \
+  --provider anthropic:${ANTHROPIC_MODEL} \
+  --dataset humaneval \
+  --limit 30 \
+  --fail-if-simulated
+```
+
+No real-provider artifact is committed here. The committed
+`research/results/real_llm/summary.json` is a placeholder marked
+`simulated:true` and documents the missing credential-gated step.
 
 ## 14-Day Study Plan
 

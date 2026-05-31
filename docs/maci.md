@@ -66,13 +66,20 @@ if decision.approved:
 
 ```python
 from acgs import GovernedAgent, MACIRole, Constitution
+
 constitution = Constitution.from_yaml("rules.yaml")
 agent = GovernedAgent(
-    my_agent, constitution=constitution,
-    maci_role=MACIRole.PROPOSER, enforce_maci=True,
+    my_agent,
+    constitution=constitution,
+    maci_role=MACIRole.PROPOSER,
 )
 result = agent.run("draft change", governance_action="propose")
 ```
+
+`GovernedAgent` enforces MACI by default. If `maci_role` or
+`governance_action` is missing, execution is denied before the wrapped callable
+runs. Use `enforce_maci=False` only for an explicit advisory-mode evaluation
+where no side effect is allowed.
 
 Actions are classified by risk level: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
 Higher risk levels trigger stricter validation and escalation paths.

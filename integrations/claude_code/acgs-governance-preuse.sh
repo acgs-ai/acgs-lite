@@ -2,17 +2,18 @@
 # Claude Code PreToolUse governance hook for ACGS-Lite.
 #
 # Reads the Claude Code hook payload from stdin, extracts the text that would be
-# executed or written, and asks the local ACGS x402 /check endpoint whether to
-# allow it. Exit 2 blocks the tool call in Claude Code.
+# executed or written, and asks the bundled local ACGS Claude Code check endpoint
+# whether to allow it. Exit 2 blocks the tool call in Claude Code.
 
 set -uo pipefail
 
 ACGS_BASE_URL="${ACGS_BASE_URL:-http://localhost:8000}"
-ACGS_CHECK_URL="${ACGS_CHECK_URL:-${ACGS_BASE_URL%/}/x402/check}"
+ACGS_CHECK_URL="${ACGS_CHECK_URL:-${ACGS_BASE_URL%/}/integrations/claude-code/check}"
 ACGS_HEALTH_URL="${ACGS_HEALTH_URL:-${ACGS_BASE_URL%/}/health}"
 ACGS_HEALTH_TIMEOUT_SECONDS="${ACGS_HEALTH_TIMEOUT_SECONDS:-1}"
 ACGS_CHECK_TIMEOUT_SECONDS="${ACGS_CHECK_TIMEOUT_SECONDS:-3}"
 ACGS_FAIL_OPEN="${ACGS_FAIL_OPEN:-0}"
+ACGS_CHECK_API_KEY="${ACGS_CHECK_API_KEY:-${ACGS_API_KEY:-}}"
 
 fail_open_enabled() {
   case "${ACGS_FAIL_OPEN}" in
@@ -42,10 +43,9 @@ require_command curl
 
 payload_file="$(mktemp "${TMPDIR:-/tmp}/acgs-claude-payload.XXXXXX")"
 extracted_file="$(mktemp "${TMPDIR:-/tmp}/acgs-claude-extracted.XXXXXX")"
-action_file="$(mktemp "${TMPDIR:-/tmp}/acgs-claude-action.XXXXXX")"
 response_file="$(mktemp "${TMPDIR:-/tmp}/acgs-claude-response.XXXXXX")"
 decision_file="$(mktemp "${TMPDIR:-/tmp}/acgs-claude-decision.XXXXXX")"
-trap 'rm -f "${payload_file}" "${extracted_file}" "${action_file}" "${response_file}" "${decision_file}"' EXIT
+trap 'rm -f "${payload_file}" "${extracted_file}" "${response_file}" "${decision_file}"' EXIT
 
 python3 -c 'import sys; from pathlib import Path; Path(sys.argv[1]).write_text(sys.stdin.read(), encoding="utf-8")' "${payload_file}"
 
@@ -60,9 +60,20 @@ try:
 except json.JSONDecodeError:
     print("parse_error", file=sys.stderr)
     raise SystemExit(2)
+if not isinstance(data, dict):
+    print("parse_error", file=sys.stderr)
+    raise SystemExit(2)
 
 tool_name = data.get("tool_name") or data.get("tool") or data.get("name") or ""
-tool_input = data.get("tool_input") or data.get("input") or {}
+tool_input = data.get("tool_input")
+if tool_input is None:
+    tool_input = data.get("input")
+if not isinstance(tool_name, str) or not tool_name:
+    print("parse_error", file=sys.stderr)
+    raise SystemExit(2)
+if not isinstance(tool_input, dict):
+    print("parse_error", file=sys.stderr)
+    raise SystemExit(2)
 
 read_only_tools = {"Read", "Glob", "Grep", "LS"}
 if tool_name in read_only_tools:
@@ -71,23 +82,50 @@ if tool_name in read_only_tools:
 
 action = ""
 if tool_name == "Bash":
-    action = str(tool_input.get("command") or "")
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        print("parse_error", file=sys.stderr)
+        raise SystemExit(2)
+    action = command
 elif tool_name == "Write":
-    action = str(tool_input.get("content") or "")
+    content = tool_input.get("content")
+    if not isinstance(content, str):
+        print("parse_error", file=sys.stderr)
+        raise SystemExit(2)
+    action = content
 elif tool_name == "Edit":
-    action = str(tool_input.get("new_string") or "")
+    new_string = tool_input.get("new_string")
+    if not isinstance(new_string, str):
+        print("parse_error", file=sys.stderr)
+        raise SystemExit(2)
+    action = new_string
 elif tool_name == "MultiEdit":
-    edits = tool_input.get("edits") or []
-    action = "\n".join(str(edit.get("new_string") or "") for edit in edits if isinstance(edit, dict))
+    edits = tool_input.get("edits")
+    if not isinstance(edits, list):
+        print("parse_error", file=sys.stderr)
+        raise SystemExit(2)
+    parts = []
+    for edit in edits:
+        if not isinstance(edit, dict) or not isinstance(edit.get("new_string"), str):
+            print("parse_error", file=sys.stderr)
+            raise SystemExit(2)
+        parts.append(edit["new_string"])
+    action = "\n".join(parts)
 else:
-    action = str(
-        tool_input.get("command")
-        or tool_input.get("content")
-        or tool_input.get("new_string")
-        or ""
-    )
+    for key in ("command", "content", "new_string"):
+        value = tool_input.get(key)
+        if isinstance(value, str):
+            action = value
+            break
+    if not action:
+        print("parse_error", file=sys.stderr)
+        raise SystemExit(2)
 
-print(json.dumps({"tool_name": tool_name, "action": action, "skip": not action}))
+if not action.strip():
+    print("parse_error", file=sys.stderr)
+    raise SystemExit(2)
+
+print(json.dumps({"tool_name": tool_name, "action": action, "skip": False}))
 PY
 extract_status=$?
 
@@ -104,14 +142,6 @@ from pathlib import Path
 print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")).get("tool_name", ""))
 PY
 )"
-python3 - "${extracted_file}" "${action_file}" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-Path(sys.argv[2]).write_text(data.get("action", ""), encoding="utf-8")
-PY
 skip_check="$(
   python3 - "${extracted_file}" <<'PY'
 import json
@@ -130,13 +160,18 @@ if ! curl -fsS --max-time "${ACGS_HEALTH_TIMEOUT_SECONDS}" "${ACGS_HEALTH_URL}" 
   allow_when_unavailable "${ACGS_HEALTH_URL} did not return healthy"
 fi
 
-check_response="$(
-  curl -fsS \
-    --max-time "${ACGS_CHECK_TIMEOUT_SECONDS}" \
-    -G \
-    --data-urlencode "action@${action_file}" \
-    "${ACGS_CHECK_URL}"
-)"
+curl_args=(
+  -fsS
+  --max-time "${ACGS_CHECK_TIMEOUT_SECONDS}"
+  -X POST
+  -H "Content-Type: application/json"
+)
+if [[ -n "${ACGS_CHECK_API_KEY}" ]]; then
+  curl_args+=(-H "X-API-Key: ${ACGS_CHECK_API_KEY}")
+fi
+curl_args+=(--data-binary "@${payload_file}" "${ACGS_CHECK_URL}")
+
+check_response="$(curl "${curl_args[@]}")"
 check_status=$?
 
 if [[ ${check_status} -ne 0 ]]; then
@@ -155,10 +190,16 @@ try:
 except json.JSONDecodeError:
     print(json.dumps({"status": "parse_error"}))
     raise SystemExit(0)
+if not isinstance(data, dict):
+    print(json.dumps({"status": "parse_error"}))
+    raise SystemExit(0)
 
 compliant = data.get("compliant")
-decision = str(data.get("decision", "")).lower()
-blocked = compliant is False or decision in {"deny", "block", "blocked", "reject", "rejected"}
+decision = str(data.get("decision", "")).strip().lower()
+if compliant is True and decision == "allow":
+    blocked = False
+else:
+    blocked = True
 
 violation = data.get("first_violation")
 if isinstance(violation, dict):
@@ -174,7 +215,11 @@ elif violation:
     detail = str(violation)
 else:
     rule_id = str(data.get("rule_id") or "unknown-rule")
-    detail = str(data.get("message") or data.get("reason") or "constitutional violation detected")
+    detail = str(
+        data.get("message")
+        or data.get("reason")
+        or "governance decision was not explicit ALLOW"
+    )
 
 print(json.dumps({"status": "blocked" if blocked else "allowed", "rule_id": rule_id, "detail": detail}))
 PY
