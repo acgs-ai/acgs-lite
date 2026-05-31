@@ -1,0 +1,49 @@
+# GitHub Actions Template for ACGS-Lite Governance Verification
+# Save this to .github/workflows/acgs-governance.yml to run checks on every pull request.
+
+name: ACGS Governance Verification
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  verify-governance:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install acgs-lite[all]
+
+    - name: Lint governance constitutions
+      run: |
+        # Verify that all constitution YAML templates are syntactically valid and free of security anomalies
+        acgs lint constitution.yaml
+
+    - name: Run governance test suite
+      run: |
+        # Run standard governance simulation tests to verify fail-closed intercepts hold up
+        acgs test --rules constitution.yaml
+
+    - name: Generate EU AI Act Compliance Report
+      run: |
+        # Automatically generate compliance audit trails to store as workflow artifacts
+        acgs report --md --framework eu-ai-act > eu-ai-act-assessment.md
+
+    - name: Upload compliance artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: compliance-assessment
+        path: eu-ai-act-assessment.md
