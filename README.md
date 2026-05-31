@@ -9,7 +9,6 @@
 [![GitHub stars](https://img.shields.io/github/stars/dislovelhl/acgs-lite?style=social)](https://github.com/dislovelhl/acgs-lite/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/dislovelhl/acgs-lite?style=social)](https://github.com/dislovelhl/acgs-lite/network/members)
 [![Star History](https://img.shields.io/badge/star%20history-chart-yellow?style=social)](https://star-history.com/#dislovelhl/acgs-lite)
-[![Featured in Awesome LLM Security](https://awesome.re/badge-flat2.svg)](https://github.com/beyefendi/awesome-llm-security)
 
 
 **acgs-lite** is a lightweight constitutional governance runtime for agent
@@ -88,16 +87,16 @@ operational controls.
 
 <img width="1280" height="680" alt="ACGS_Lite" src="https://github.com/user-attachments/assets/0d6deeef-40fe-4e8e-9dc0-537744162dff" />
 
-## ❤️ Community favorites
+## Recommended starting points
 
-If you found ACGS-Lite through [Awesome LLM Security](https://github.com/beyefendi/awesome-llm-security), these are the most shared starting points:
+Start here for the shortest local verification paths:
 
 - **AI-agent install verify** — [`examples/agent_quickstart/`](./examples/agent_quickstart/) runs a self-verifying suite: `GovernedCallable` + MACI + AuditLog in one script, exits 0 on success
 - **Goal v1.0 membrane** — [`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py) shows ALLOW / DENY / TRANSFORM decisions, receipts, executor refusal, and audit evidence
-- **Fastest proof** — [`examples/basic_governance/`](./examples/basic_governance/) shows safe requests passing and unsafe ones blocked before execution
-- **Best audit demo** — [`examples/audit_trail/`](./examples/audit_trail/) shows the tamper-evident decision chain
-- **Favorite infrastructure path** — [`examples/mcp_agent_client.py`](./examples/mcp_agent_client.py) runs governance as shared MCP-compatible infrastructure
-- **Favorite compliance proof** — `acgs assess --framework eu-ai-act` maps controls to real regulatory requirements
+- **Minimal proof** — [`examples/basic_governance/`](./examples/basic_governance/) shows safe requests passing and unsafe ones blocked before execution
+- **Audit trail demo** — [`examples/audit_trail/`](./examples/audit_trail/) shows the tamper-evident decision chain
+- **Shared infrastructure path** — [`examples/mcp_agent_client.py`](./examples/mcp_agent_client.py) runs governance as shared MCP-compatible infrastructure
+- **Compliance mapping example** — `acgs assess --framework eu-ai-act` maps controls to regulatory requirements for review
 
 ## Hero demo
 
@@ -514,14 +513,9 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 
 ---
 
-## 🏭 Used in production at...
+## 🏭 Production users
 
-> **Are you running acgs-lite in production?** Open a PR or issue to add your organization here.
-> Early adopters shape the roadmap — we prioritize hardening the layers you actually use.
-
-| Organization / Project | Use case | Since |
-|------------------------|----------|-------|
-| *(your org here)* | *(e.g., pre-execution guard for OpenAI function calls)* | *(e.g., v2.9)* |
+No independently confirmed production users yet.
 
 ---
 

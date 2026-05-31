@@ -26,6 +26,14 @@ from pathlib import Path
 from typing import Any
 
 
+def _simulation_metadata(seed: int) -> dict[str, object]:
+    return {
+        "label": f"SIMULATION (seed={seed}), not empirical benchmark",
+        "seed": seed,
+        "empirical_benchmark": False,
+    }
+
+
 class SingleAgentGovernance:
     """Baseline: single agent with no role checks."""
 
@@ -133,6 +141,7 @@ def run_experiment(num_episodes: int, seed: int) -> dict[str, Any]:
     deltas.sort()
 
     return {
+        "simulation": _simulation_metadata(seed),
         "episodes": num_episodes,
         "seed": seed,
         "single": {

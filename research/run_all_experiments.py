@@ -20,6 +20,14 @@ import sys
 from pathlib import Path
 
 
+def _simulation_metadata(seed: int) -> dict[str, object]:
+    return {
+        "label": f"SIMULATION (seed={seed}), not empirical benchmark",
+        "seed": seed,
+        "empirical_benchmark": False,
+    }
+
+
 def _run(script: str, extra_args: list[str] | None = None) -> dict[str, object]:
     cmd = [sys.executable, script]
     if extra_args:
@@ -65,6 +73,7 @@ def main() -> int:
     )
 
     summary = {
+        "simulation": _simulation_metadata(args.seed),
         "experiments": results,
         "all_passed": all_passed,
         "seed": args.seed,

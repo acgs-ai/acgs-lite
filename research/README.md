@@ -34,42 +34,45 @@ python run_all_experiments.py --seed 42
 
 ## Experiment Results (seed=42)
 
+These are simulation outputs from deterministic harnesses. Do not cite them as
+empirical benchmarks.
+
 ### X1 — Constitutional pass@k
-- pass@1 baseline: 0.63, filtered: 0.63 (delta 0.0)
-- pass@100 baseline: 0.80, filtered: 0.80 (delta 0.0)
-- Status: PASS (thresholds met, but proxy problems don't trigger secret filter — needs real HumanEval)
+- SIMULATION (seed=42), not empirical benchmark: pass@1 baseline: 0.63, filtered: 0.63 (delta 0.0)
+- SIMULATION (seed=42), not empirical benchmark: pass@100 baseline: 0.80, filtered: 0.80 (delta 0.0)
+- SIMULATION (seed=42), not empirical benchmark: Status: PASS (thresholds met, but proxy problems don't trigger secret filter — needs real HumanEval)
 
 ### X2 — SWE Secrets Resolution
-- Overall delta: -5% (within 15% threshold)
-- Secret issues harder: 71% vs 86% resolve rate
-- Status: PASS
+- SIMULATION (seed=42), not empirical benchmark: Overall delta: -5% (within 15% threshold)
+- SIMULATION (seed=42), not empirical benchmark: Secret issues harder: 71% vs 86% resolve rate
+- SIMULATION (seed=42), not empirical benchmark: Status: PASS
 
 ### X3 — MACI Decision Quality
-- Single-agent false approvals: 9
-- MACI false approvals: 0 (100% reduction, >50% threshold)
-- Disagreement rate: 13% (below 20% threshold)
-- Status: PARTIAL (reduction passes, disagreement misses)
+- SIMULATION (seed=42), not empirical benchmark: Single-agent false approvals: 9
+- SIMULATION (seed=42), not empirical benchmark: MACI false approvals: 0 (100% reduction, >50% threshold)
+- SIMULATION (seed=42), not empirical benchmark: Disagreement rate: 13% (below 20% threshold)
+- SIMULATION (seed=42), not empirical benchmark: Status: PARTIAL (reduction passes, disagreement misses)
 
 ### X4 — MACI Latency
-- Median delta: ~0.84ms (well below 100ms)
-- p99 delta: ~3.3ms (well below 200ms)
-- Status: PASS
+- SIMULATION (seed=42), not empirical benchmark: Median delta: ~0.84ms (well below 100ms)
+- SIMULATION (seed=42), not empirical benchmark: p99 delta: ~3.3ms (well below 200ms)
+- SIMULATION (seed=42), not empirical benchmark: Status: PASS
 
 ### X5 — PROV-JSON Export
-- 50 entries mapped, 0 errors
-- Coverage: 110% (all fields + extra prov annotations)
-- Status: PASS
+- SIMULATION (seed=42), not empirical benchmark: 50 entries mapped, 0 errors
+- SIMULATION (seed=42), not empirical benchmark: Coverage: 110% (all fields + extra prov annotations)
+- SIMULATION (seed=42), not empirical benchmark: Status: PASS
 
 ### X6 — Model Drift Detection
-- Drift detected: 3/10 prompts
-- Explainability: 100%
-- Status: PASS
+- SIMULATION (seed=42), not empirical benchmark: Drift detected: 3/10 prompts
+- SIMULATION (seed=42), not empirical benchmark: Explainability: 100%
+- SIMULATION (seed=42), not empirical benchmark: Status: PASS
 
 ## Compliance Anchors
 
-- **NIST AI RMF 1.0**: Audit logs require traceability and tamper-evidence — satisfied via `audit.py` chain hashes (X5 validates PROV mapping)
-- **EU AI Act 2024/1689**: Technical docs + post-market monitoring required — X2/X6 provide benchmark templates
-- **MACI Separation of Powers**: `maci.py` enforces proposer/validator/auditor roles — X3/X4 quantify effectiveness and cost
+- **NIST AI RMF 1.0**: Audit logs require traceability and tamper-evidence; X5 is a simulation harness for PROV mapping.
+- **EU AI Act 2024/1689**: Technical docs + post-market monitoring required; X2/X6 are simulation templates, not empirical benchmarks.
+- **MACI Separation of Powers**: `maci.py` enforces proposer/validator/auditor roles; X3/X4 estimate effectiveness and cost in simulation only.
 
 ## Next Steps
 
