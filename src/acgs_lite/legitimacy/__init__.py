@@ -1,4 +1,9 @@
-"""Fail-closed legitimacy contracts for governed execution."""
+"""Stable fail-closed legitimacy contracts for governed execution.
+
+The public names exported here form the Runtime Legitimacy Kernel surface:
+canonical decision taxonomy helpers, immutable decision receipts, execution
+boundary normalization, and receipt verification before side effects.
+"""
 
 from acgs_lite.legitimacy.decide import (
     CANONICAL_DECISION_STATES,

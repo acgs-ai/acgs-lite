@@ -44,6 +44,8 @@ blocked, receiptless execution is refused, and audit evidence is replay-checked.
 
 Start with [GOAL.md](./GOAL.md) for the Goal v1.0 product boundary and
 [ROADMAP.md](./ROADMAP.md) for the implementation milestones.
+The stable Runtime Legitimacy Kernel public API is documented in
+[`docs/api/legitimacy.md`](./docs/api/legitimacy.md).
 
 Non-goals:
 

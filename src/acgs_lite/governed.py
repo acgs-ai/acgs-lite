@@ -639,6 +639,7 @@ class GovernedCallable:
     def __call__(self, func: Callable[..., T]) -> Callable[..., T]:
         engine = self.engine
         agent_id = self.agent_id
+        audit_log = self.audit_log
 
         # SMT / Z3 integration
         from acgs_lite.z3_verify import (
@@ -671,11 +672,17 @@ class GovernedCallable:
                     kwargs.pop("decision_receipt", kwargs.pop("acgs_receipt", None)),
                 )
                 human_approval = kwargs.pop("human_approval", None)
-                actual_call = normalize_actual_call(fallback_method=func.__name__, kwargs=kwargs)
+                actual_call = normalize_actual_call(
+                    fallback_method=func.__name__,
+                    args=args,
+                    kwargs=kwargs,
+                    func=func,
+                )
                 validate_receipt_for_execution(
                     receipt,
                     actual_call=actual_call,
                     human_approval=human_approval,
+                    audit_log=audit_log,
                 )
 
                 # Z3 Runtime boundary check
@@ -705,11 +712,17 @@ class GovernedCallable:
                     kwargs.pop("decision_receipt", kwargs.pop("acgs_receipt", None)),
                 )
                 human_approval = kwargs.pop("human_approval", None)
-                actual_call = normalize_actual_call(fallback_method=func.__name__, kwargs=kwargs)
+                actual_call = normalize_actual_call(
+                    fallback_method=func.__name__,
+                    args=args,
+                    kwargs=kwargs,
+                    func=func,
+                )
                 validate_receipt_for_execution(
                     receipt,
                     actual_call=actual_call,
                     human_approval=human_approval,
+                    audit_log=audit_log,
                 )
 
                 # Z3 Runtime boundary check
