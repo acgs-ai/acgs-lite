@@ -579,3 +579,28 @@ def test_wrap_does_not_double_append_hooks():
     gov.wrap(agent)
     assert len(agent.final_answer_checks) == 1
     assert len(agent.step_callbacks) == 1
+
+
+def test_wrap_attaches_to_dict_keyed_step_callbacks():
+    # #9/#21: smolagents step_callbacks can be a dict keyed by step type. Such a
+    # dict was previously skipped (logged), leaving step actions un-audited. The
+    # governance hook is now attached to each registered step-type list, and a
+    # tuple value is coerced in place.
+    class _DictCallbackAgent:
+        def __init__(self):
+            self.python_executor = _FakeExecutor()
+            self.final_answer_checks: list = []
+            self.step_callbacks = {"ActionStep": [], "PlanningStep": (object(),)}
+
+    agent = _DictCallbackAgent()
+    gov = SmolagentsGovernor()
+    gov.wrap(agent)
+    # Every registered step-type list now carries the governance callback.
+    assert any(getattr(h, "_acgs_governor", None) is not None for h in agent.step_callbacks["ActionStep"])
+    planning = agent.step_callbacks["PlanningStep"]
+    assert isinstance(planning, list)  # tuple coerced in place
+    assert any(getattr(h, "_acgs_governor", None) is not None for h in planning)
+    # Idempotent: re-wrapping the same governor does not double-attach.
+    before = {k: len(v) for k, v in agent.step_callbacks.items()}
+    gov.wrap(agent)
+    assert {k: len(v) for k, v in agent.step_callbacks.items()} == before
