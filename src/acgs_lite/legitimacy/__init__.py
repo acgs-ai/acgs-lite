@@ -25,20 +25,44 @@ from acgs_lite.legitimacy.receipt import (
     ExecutionBoundary,
     to_receipt_dict,
 )
+from acgs_lite.legitimacy.replay_verify import (
+    DecisionEvaluator,
+    ReplayInputs,
+    ReplayVerification,
+    replay_and_verify,
+)
+from acgs_lite.legitimacy.signing import (
+    Ed25519ReceiptSigner,
+    ReceiptSigner,
+    ReceiptSigningUnavailable,
+    SignedReceipt,
+    sign_receipt,
+    verify_signature,
+)
 
 __all__ = [
     "BASELINE_CONSTRAINT_MARKER",
     "CANONICAL_DECISION_STATES",
     "ActualCall",
+    "DecisionEvaluator",
     "DecisionReceipt",
     "DecisionState",
+    "Ed25519ReceiptSigner",
     "ExecutionBoundary",
     "LegitimacyInvariantError",
+    "ReceiptSigner",
+    "ReceiptSigningUnavailable",
+    "ReplayInputs",
+    "ReplayVerification",
+    "SignedReceipt",
     "call_matches",
     "canonicalize_decision_state",
     "is_allow_state",
     "normalize_actual_call",
+    "replay_and_verify",
     "route_ambiguous_decision",
+    "sign_receipt",
     "to_receipt_dict",
     "validate_receipt_for_execution",
+    "verify_signature",
 ]
