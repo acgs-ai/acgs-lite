@@ -72,20 +72,35 @@ _LABEL_OUTPUT = "output"  # step observations / tool output
 # Keyword names through which a smolagents executor may receive a code action.
 _CODE_KWARGS: tuple[str, ...] = ("code", "code_action", "source")
 
+# Code-carrier types the gate must recognise. ``_gate`` decodes every bytes-like
+# form (bytes/bytearray/memoryview); recognising fewer here than ``_gate`` accepts
+# would let a forwarded call slip an unrecognised carrier past the gate ungoverned.
+_CODE_CARRIER_TYPES: tuple[type, ...] = (str, bytes, bytearray, memoryview)
 
-def _extract_code_arg(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | bytes | None:
+
+def _extract_code_arg(
+    args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> str | bytes | bytearray | memoryview | None:
     """Return the code action of an executor call, if the call carries one.
 
-    A smolagents executor receives the code action as its first positional
-    argument (or, defensively, via a ``code``/``code_action``/``source``
-    keyword).  A call with no str/bytes argument is not code execution
-    (``send_variables(dict)``, ``send_tools(list)``) and is delegated unchanged.
+    A smolagents executor receives the code action as a positional argument (or,
+    defensively, via a ``code``/``code_action``/``source`` keyword).  A call with
+    no code-carrier argument is not code execution (``send_variables(dict)``,
+    ``send_tools(list)``) and is delegated unchanged.
+
+    Recognises every bytes-like carrier ``_gate`` can decode — str, bytes,
+    bytearray, memoryview — so a forwarded call cannot smuggle one past the gate
+    (a ``bytearray`` once returned ``None`` here while ``_gate`` happily decoded
+    it, a fail-open bypass of the executor gate). Scans *all* positional args, not
+    just the first, so a code action passed positionally behind a leading non-code
+    argument is still gated.
     """
-    if args and isinstance(args[0], (str, bytes)):
-        return args[0]
+    for value in args:
+        if isinstance(value, _CODE_CARRIER_TYPES):
+            return value
     for key in _CODE_KWARGS:
         value = kwargs.get(key)
-        if isinstance(value, (str, bytes)):
+        if isinstance(value, _CODE_CARRIER_TYPES):
             return value
     return None
 
@@ -143,13 +158,16 @@ class GovernedPythonExecutor:
         return an invalid result instead of raising.
 
         Non-string actions are normalised here so the analyzer's fail-closed
-        guarantee is realised at the live gate, not just in ``analyze()``: bytes
-        are decoded, and any other non-string type is blocked outright. Without
-        this the engine would crash on ``action[:500]`` / ``action.lower()``
-        before the AST validator's ``CODE-UNANALYZABLE`` guard could run.
+        guarantee is realised at the live gate, not just in ``analyze()``: every
+        bytes-like carrier (bytes/bytearray/memoryview) is decoded, and any other
+        non-string type is blocked outright. Without this the engine would crash
+        on ``action[:500]`` / ``action.lower()`` before the AST validator's
+        ``CODE-UNANALYZABLE`` guard could run. The accepted bytes-like set must
+        stay in sync with ``_extract_code_arg`` so the forwarded path and this
+        gate never disagree on what counts as a code carrier.
         """
         if not isinstance(code_action, str):
-            if isinstance(code_action, (bytes, bytearray)):
+            if isinstance(code_action, (bytes, bytearray, memoryview)):
                 code_action = bytes(code_action).decode("utf-8", "replace")
             else:
                 raise ConstitutionalViolationError(

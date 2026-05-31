@@ -222,6 +222,45 @@ def test_executor_decodes_and_governs_bytes_code_action():
     assert inner.calls == []
 
 
+def test_executor_gates_bytearray_and_memoryview_on_forwarded_path():
+    # Adversarial (governance-branch-review #1): _extract_code_arg once accepted
+    # only (str, bytes) while _gate decoded bytearray, so a bytearray code action
+    # on a FORWARDED method (run_code_raise_errors) skipped the gate entirely and
+    # ran ungoverned -- a fail-open bypass of the executor gate. Every bytes-like
+    # carrier must be gated on the forwarded path exactly as on direct __call__.
+    class _RealisticExec:
+        def __init__(self):
+            self.ran: list = []
+            self.state: dict = {}
+
+        def __call__(self, code):
+            return self.run_code_raise_errors(code)
+
+        def run_code_raise_errors(self, code, return_final_answer=False):
+            self.ran.append(code)
+            return ("out", "logs", False)
+
+    dangerous = DANGEROUS_CODE.encode()
+    for carrier in (bytearray(dangerous), memoryview(dangerous)):
+        inner = _RealisticExec()
+        executor = SmolagentsGovernor().python_executor(inner)
+        # Forwarded execution method must gate the bytes-like action (the bypass).
+        with pytest.raises(ConstitutionalViolationError):
+            executor.run_code_raise_errors(carrier)
+        assert inner.ran == []
+        # Direct __call__ path gates it too (control).
+        with pytest.raises(ConstitutionalViolationError):
+            executor(carrier)
+        assert inner.ran == []
+
+    # Safe bytes-like code still reaches the inner executor through forwarding.
+    inner = _RealisticExec()
+    executor = SmolagentsGovernor().python_executor(inner)
+    executor.run_code_raise_errors(bytearray(SAFE_CODE.encode()))
+    assert len(inner.ran) == 1
+    assert bytes(inner.ran[0]).decode() == SAFE_CODE
+
+
 def test_executor_delegates_unknown_attributes():
     inner = _FakeExecutor()
     executor = GovernedPythonExecutor(inner, SmolagentsGovernor())

@@ -280,6 +280,24 @@ class TestForwardedExecutionGoverned:
         governed = GovernedSwarmsAgent(agent)
         assert governed.agent_name == "Researcher"
 
+    def test_bytes_like_task_on_forwarded_method_is_gated(self):
+        """A task smuggled as bytes/bytearray must not slip past the gate.
+
+        Regression for governance-branch-review #1 applied to the agent-adapter
+        forwarding helper: the prompt extractor decodes bytes-like carriers, so a
+        forwarded execution call cannot run an ungoverned task by passing bytes.
+        """
+        from acgs_lite.integrations.swarms import GovernedSwarmsAgent
+
+        for carrier in (b"please DROP TABLE users now", bytearray(b"please DROP TABLE users")):
+            agent = FakeSwarmsAgentExtra()
+            governed = GovernedSwarmsAgent(
+                agent, constitution=self._blocking_constitution(), strict=True
+            )
+            with pytest.raises(ConstitutionalViolationError):
+                governed.run_batched(carrier)
+            assert agent.batched_calls == []  # fail-closed: never reached the agent
+
 
 # --- Import Guard Tests ----------------------------------------------------
 

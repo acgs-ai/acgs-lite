@@ -40,21 +40,42 @@ _FORWARD_PROMPT_KWARGS = (
 )
 
 
-def _extract_forwarded_prompt(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
-    """Return the task/prompt string of a forwarded execution call, if present.
+def _coerce_prompt(value: Any) -> str | None:
+    """Return *value* as text if it is a task/prompt carrier, else ``None``.
 
-    Agent execution entry points take the task as the first positional argument
-    (or via a ``task``/``prompt``/``query``/… keyword). A call carrying no string
-    payload is configuration, not an agent action (``set_temperature(0.5)``,
+    Recognises ``str`` and every bytes-like form (bytes/bytearray/memoryview),
+    decoding the latter so a task smuggled as bytes cannot slip past the
+    forwarded gate ungoverned. Non-text payloads (dicts, numbers, tools) are not
+    agent actions and return ``None``.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", "replace")
+    return None
+
+
+def _extract_forwarded_prompt(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
+    """Return the task/prompt of a forwarded execution call, if present.
+
+    Agent execution entry points take the task as a positional argument (or via a
+    ``task``/``prompt``/``query``/… keyword). A call carrying no text payload is
+    configuration, not an agent action (``set_temperature(0.5)``,
     ``add_tool(tool)``, ``run(data={...})``), and is forwarded unchanged so the
     fail-closed gate governs execution without blocking benign setup.
+
+    Scans *all* positional args (not just the first) and decodes bytes-like
+    carriers, so a task passed behind a leading non-text argument or smuggled as
+    bytes is still validated rather than slipping past ungoverned.
     """
-    if args and isinstance(args[0], str):
-        return args[0]
+    for value in args:
+        text = _coerce_prompt(value)
+        if text is not None:
+            return text
     for key in _FORWARD_PROMPT_KWARGS:
-        value = kwargs.get(key)
-        if isinstance(value, str):
-            return value
+        text = _coerce_prompt(kwargs.get(key))
+        if text is not None:
+            return text
     return None
 
 
