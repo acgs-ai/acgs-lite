@@ -5,19 +5,30 @@ Runnable quickstarts covering the core runtime-governance and MACI patterns in `
 
 ## Canonical demo path
 
-If you only try three things, do them in this order:
+If you only try four things, do them in this order:
 
-### 1. Block an unsafe action
-Run [`basic_governance/`](./basic_governance/) first.
+### 1. Check a side effect before execution
+Run [`governed_execution_membrane.py`](./governed_execution_membrane.py) first.
 
 ```bash
 pip install acgs-lite
+python examples/governed_execution_membrane.py
+```
+
+This shows the Goal v1.0 path: LLM reasoning -> constitutional check -> decision
+receipt -> governed execution. The executor refuses to run without a valid
+receipt.
+
+### 2. Block an unsafe action
+Run [`basic_governance/`](./basic_governance/) first.
+
+```bash
 python examples/basic_governance/main.py
 ```
 
 This is the fastest proof that `acgs-lite` is real: safe requests pass, harmful requests are blocked, and PII-like input is denied.
 
-### 2. Inspect the audit evidence
+### 3. Inspect the audit evidence
 Run [`audit_trail/`](./audit_trail/).
 
 ```bash
@@ -26,7 +37,7 @@ python examples/audit_trail/main.py
 
 This shows that governance decisions are not just transient checks, they become tamper-evident evidence.
 
-### 3. Run governance as infrastructure
+### 4. Run governance as infrastructure
 Run [`mcp_agent_client.py`](./mcp_agent_client.py).
 
 ```bash
@@ -51,6 +62,7 @@ python examples/mcp_agent_client.py
 
 | Example | What it teaches | Difficulty |
 |---------|----------------|------------|
+| [`governed_execution_membrane.py`](governed_execution_membrane.py) | Goal v1.0 side-effect membrane: ALLOW / DENY / TRANSFORM, receipts, executor refusal, audit evidence | ⭐ Beginner |
 | [`agent_quickstart/`](agent_quickstart/) | **AI-agent install verify**: `GovernedCallable` + MACI + AuditLog in one script; exits 0 on success | ⭐ Beginner |
 | [`mcp_agent_client.py`](mcp_agent_client.py) | **MCP Governance Hub**: Connect an agent to a centralized safety server | ⭐⭐ Intermediate |
 | [`basic_governance/`](basic_governance/) | Wrap any callable with a `Constitution` + `Rule` objects | ⭐ Beginner |
@@ -72,7 +84,7 @@ python examples/mcp_agent_client.py
 ## Learning path
 
 ```text
-agent_quickstart  →  basic_governance  →  audit_trail  →  mcp_agent_client
+governed_execution_membrane  →  basic_governance  →  audit_trail  →  mcp_agent_client
                               ↓
                       maci_separation   →  compliance_eu_ai_act  →  mock_stub_testing
 ```

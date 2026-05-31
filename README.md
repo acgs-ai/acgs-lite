@@ -1,4 +1,4 @@
-# ACGS-Lite: Constitutional AI Governance for Agents
+# ACGS-Lite: Constitutional Governance Membrane for Agent Execution
 
 [![PyPI](https://img.shields.io/pypi/v/acgs-lite?color=blue&style=for-the-badge)](https://pypi.org/project/acgs-lite/)
 [![Python](https://img.shields.io/pypi/pyversions/acgs-lite?style=for-the-badge)](https://pypi.org/project/acgs-lite/)
@@ -12,27 +12,54 @@
 [![Featured in Awesome LLM Security](https://awesome.re/badge-flat2.svg)](https://github.com/beyefendi/awesome-llm-security)
 
 
-<img width="1280" height="680" alt="ACGS_Lite" src="https://github.com/user-attachments/assets/0d6deeef-40fe-4e8e-9dc0-537744162dff" />
+**acgs-lite** is a lightweight constitutional governance runtime for agent
+execution. It is not an agent framework. Agent frameworks keep responsibility
+for reasoning, planning, model calls, memory, and tool selection; `acgs-lite`
+sits between that reasoning and real-world side effects.
 
-# **Fail-closed legitimacy for agent action.**
+Core invariant:
 
-**acgs-lite** is a fail-closed legitimacy layer for agent action. It receives a declared goal and proposed method, resolves authority, constraints, policy version, and execution boundary before execution, then returns one governed decision and one replayable receipt. If authority, constraints, policy version, execution boundary, or receipt integrity cannot be proven before execution, ACGS blocks execution.
+> No valid constitutional authorization, no side effect.
 
-ACGS makes agent action decisions explicit, authorized, constrained, transformable, deniable, bounded, and replayable before execution.
+The governed execution flow is:
+
+```text
+LLM reasoning → constitutional check → decision receipt → governed execution
+```
+
+Use `acgs-lite` before executing tools, workflows, API calls, file operations,
+transactions, or other side effects. It checks the proposed action against a
+versioned constitution, returns an explicit decision, issues a receipt the
+executor can verify, and records audit evidence for later inspection.
+
+Try the membrane locally:
+
+```bash
+pip install acgs-lite
+python examples/governed_execution_membrane.py
+```
+
+The example keeps side effects in memory, but exercises the adoption wedge:
+ALLOW executes with a valid receipt, TRANSFORM redacts before execution, DENY is
+blocked, receiptless execution is refused, and audit evidence is replay-checked.
+
+Start with [GOAL.md](./GOAL.md) for the Goal v1.0 product boundary and
+[ROADMAP.md](./ROADMAP.md) for the implementation milestones.
 
 Non-goals:
 
 - ACGS does not approve raw goals as executable authority.
 - ACGS does not replace human review for decisions that require structured approval.
-- ACGS does not implement the goal interpreter, compliant path planner, replay verifier, case-ledger feedback loop, or cross-org federation in the legitimacy MVP.
+- ACGS does not own the agent planner, model runtime, memory layer, or tool
+  orchestration loop.
 
-For every governed call, ACGS guarantees:
+For every governed side-effect path, ACGS aims to provide:
 
 ```text
-1. Exactly one decision from the taxonomy below
+1. One explicit decision
 2. A replayable receipt emitted before execution
 3. An execution boundary the executor must match
-4. Fail-closed on any missing/unverifiable input
+4. Fail-closed behavior on missing or unverifiable inputs
 ```
 
 Decision taxonomy:
@@ -48,17 +75,25 @@ DENY_GOAL
 HARD_DENY
 ```
 
-The [`examples/phoenix_acgs_governed_agent/`](./examples/phoenix_acgs_governed_agent/) example is the reference implementation of `request -> decision -> receipt -> bounded execution`. Its `governance.decision.*` span attributes are experimental.
+The minimal side-effect membrane example is
+[`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py).
+The Phoenix example under
+[`examples/phoenix_acgs_governed_agent/`](./examples/phoenix_acgs_governed_agent/)
+shows `request -> decision -> receipt -> bounded execution` telemetry; its
+`governance.decision.*` span attributes are experimental.
 
-**Current status:** Stable core (v2.10.1) • CI-backed test suite.
+**Current status:** v2.10.1 package with a CI-backed test suite. Production
+deployment properties depend on your constitution, storage, authentication, and
+operational controls.
 
-**Star this repo** if you want more open-source infrastructure for governed, production-safe agents. Early stars materially help discovery.
+<img width="1280" height="680" alt="ACGS_Lite" src="https://github.com/user-attachments/assets/0d6deeef-40fe-4e8e-9dc0-537744162dff" />
 
 ## ❤️ Community favorites
 
 If you found ACGS-Lite through [Awesome LLM Security](https://github.com/beyefendi/awesome-llm-security), these are the most shared starting points:
 
 - **AI-agent install verify** — [`examples/agent_quickstart/`](./examples/agent_quickstart/) runs a self-verifying suite: `GovernedCallable` + MACI + AuditLog in one script, exits 0 on success
+- **Goal v1.0 membrane** — [`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py) shows ALLOW / DENY / TRANSFORM decisions, receipts, executor refusal, and audit evidence
 - **Fastest proof** — [`examples/basic_governance/`](./examples/basic_governance/) shows safe requests passing and unsafe ones blocked before execution
 - **Best audit demo** — [`examples/audit_trail/`](./examples/audit_trail/) shows the tamper-evident decision chain
 - **Favorite infrastructure path** — [`examples/mcp_agent_client.py`](./examples/mcp_agent_client.py) runs governance as shared MCP-compatible infrastructure
