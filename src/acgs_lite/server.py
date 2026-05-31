@@ -457,7 +457,7 @@ def create_governance_app(
                 content=_claude_code_blocked_response(
                     reason="constitutional_denial",
                     message=str(exc),
-                    rule_id=exc.rule_id,
+                    rule_id=exc.rule_id or "UNKNOWN",
                     tool_name=tool_name,
                     action=action,
                     agent_id=agent_id,
