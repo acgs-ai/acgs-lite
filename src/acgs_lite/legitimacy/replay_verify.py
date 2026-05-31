@@ -67,17 +67,18 @@ def replay_and_verify(
     signed: SignedReceipt,
     evaluator: DecisionEvaluator,
     *,
-    expected_public_key: str | None = None,
+    expected_public_key: str,
 ) -> ReplayVerification:
     """Verify a signed receipt's authenticity, then re-derive and confirm its verdict.
 
-    The verdict is only re-derived once the receipt is proven authentic and intact;
-    an inauthentic receipt is not trusted enough to feed an evaluator. Pass
-    ``expected_public_key`` to pin verification to a key the caller already trusts.
+    ``expected_public_key`` is required and must be the membrane's trusted public
+    key: authenticity cannot be established against the receipt's own embedded key
+    alone. The verdict is only re-derived once the receipt is proven authentic and
+    intact; an inauthentic receipt is not trusted enough to feed an evaluator.
     """
     receipt = signed.receipt
     hash_valid = receipt.verify_hash()
-    signature_valid = signed.verify(expected_public_key=expected_public_key)
+    signature_valid = signed.verify(expected_public_key)
 
     mismatches: list[str] = []
     rederived: DecisionState | None = None

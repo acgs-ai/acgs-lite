@@ -9,6 +9,8 @@ reproduces -- on top of verifying the receipt's hash and asymmetric signature.
 
 from __future__ import annotations
 
+import json
+
 from acgs_lite.legitimacy import (
     DecisionReceipt,
     Ed25519ReceiptSigner,
@@ -21,6 +23,7 @@ from acgs_lite.legitimacy import (
 )
 
 _SEED = bytes(range(32))
+_PUB = Ed25519ReceiptSigner.from_seed(_SEED).public_key_hex()
 
 
 def _signed(*, decision_type: str = "ALLOW") -> SignedReceipt:
@@ -57,7 +60,7 @@ def _faithful_evaluator(decision: str):
 def test_faithful_replay_reproduces_verdict() -> None:
     signed = _signed(decision_type="ALLOW")
 
-    result = replay_and_verify(signed, _faithful_evaluator("ALLOW"))
+    result = replay_and_verify(signed, _faithful_evaluator("ALLOW"), expected_public_key=_PUB)
 
     assert isinstance(result, ReplayVerification)
     assert result.ok is True
@@ -73,7 +76,7 @@ def test_replay_accepts_legacy_decision_aliases() -> None:
     signed = _signed(decision_type="DENY_GOAL")
 
     # Evaluator returns a legacy alias that canonicalizes to the recorded state.
-    result = replay_and_verify(signed, lambda _inputs: "deny")
+    result = replay_and_verify(signed, lambda _inputs: "deny", expected_public_key=_PUB)
 
     assert result.verdict_reproduced is True
     assert result.rederived_decision == "DENY_GOAL"
@@ -83,7 +86,7 @@ def test_replay_detects_decision_divergence() -> None:
     signed = _signed(decision_type="ALLOW")
 
     # A drifted policy would now block what the receipt recorded as allowed.
-    result = replay_and_verify(signed, _faithful_evaluator("HARD_DENY"))
+    result = replay_and_verify(signed, _faithful_evaluator("HARD_DENY"), expected_public_key=_PUB)
 
     assert result.ok is False
     assert result.verdict_reproduced is False
@@ -102,7 +105,7 @@ def test_replay_fails_on_invalid_signature() -> None:
         signed_at=signed.signed_at,
     )
 
-    result = replay_and_verify(forged, _faithful_evaluator("ALLOW"))
+    result = replay_and_verify(forged, _faithful_evaluator("ALLOW"), expected_public_key=_PUB)
 
     assert result.ok is False
     assert result.signature_valid is False
@@ -115,7 +118,9 @@ def test_replay_fails_on_tampered_hash() -> None:
     signed = _signed(decision_type="ALLOW")
     object.__setattr__(signed.receipt, "decision_type", "TRANSFORM_REQUIRED")
 
-    result = replay_and_verify(signed, _faithful_evaluator("TRANSFORM_REQUIRED"))
+    result = replay_and_verify(
+        signed, _faithful_evaluator("TRANSFORM_REQUIRED"), expected_public_key=_PUB
+    )
 
     assert result.ok is False
     assert result.hash_valid is False
@@ -128,11 +133,34 @@ def test_replay_surfaces_evaluator_errors() -> None:
     def broken(_inputs: ReplayInputs) -> str:
         raise RuntimeError("policy bundle unavailable")
 
-    result = replay_and_verify(signed, broken)
+    result = replay_and_verify(signed, broken, expected_public_key=_PUB)
 
     assert result.ok is False
     assert result.verdict_reproduced is False
     assert any("evaluator_error" in m for m in result.mismatches)
+
+
+def test_replay_treats_unknown_evaluator_state_as_failure() -> None:
+    signed = _signed(decision_type="ALLOW")
+
+    # An evaluator returning a state outside the canonical taxonomy must fail the
+    # replay (via canonicalize raising) rather than crash or silently pass.
+    result = replay_and_verify(signed, lambda _inputs: "MAYBE_ALLOW", expected_public_key=_PUB)
+
+    assert result.ok is False
+    assert result.rederived_decision is None
+    assert any("evaluator_error" in m for m in result.mismatches)
+
+
+def test_replay_through_json_wire_reproduces_verdict() -> None:
+    signed = _signed(decision_type="DENY_GOAL")
+
+    # The real verifier deserializes from the wire before replaying.
+    restored = SignedReceipt.from_dict(json.loads(json.dumps(signed.to_dict())))
+    result = replay_and_verify(restored, lambda _inputs: "DENY_GOAL", expected_public_key=_PUB)
+
+    assert result.ok is True
+    assert result.verdict_reproduced is True
 
 
 def test_replay_pins_expected_public_key() -> None:
