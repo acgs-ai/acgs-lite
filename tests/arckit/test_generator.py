@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from acgs_lite import Constitution, GovernedAgent
+from acgs_lite import Constitution, GovernedAgent, MACIRole
 from acgs_lite.arckit.generator import _dedupe_rules, build_constitution
 from acgs_lite.arckit.parser import parse_project
 from acgs_lite.errors import ConstitutionalViolationError
@@ -181,6 +181,13 @@ def test_int_002_governed_agent_blocks_dpia_matched_action(tmp_path) -> None:
     target = tmp_path / "constitution.yaml"
     manifest.write_yaml(target)
     constitution = Constitution.from_yaml(target)
-    agent = GovernedAgent(lambda value: value, constitution=constitution)
+    agent = GovernedAgent(
+        lambda value: value,
+        constitution=constitution,
+        maci_role=MACIRole.EXECUTOR,
+    )
     with pytest.raises(ConstitutionalViolationError):
-        agent.run("leak email address and social security number")
+        agent.run(
+            "leak email address and social security number",
+            governance_action="execute",
+        )

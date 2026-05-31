@@ -138,6 +138,7 @@ def e2e_governed_agent(e2e_constitution: Constitution) -> GovernedAgent:
         agent_id="e2e-agent-01",
         strict=True,
         validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
     )
 
 
@@ -154,7 +155,10 @@ class TestFullGovernanceFlow:
         self, e2e_governed_agent: GovernedAgent
     ) -> None:
         """Safe action passes validation and produces audit trail."""
-        result = e2e_governed_agent.run("summarize quarterly report")
+        result = e2e_governed_agent.run(
+            "summarize quarterly report",
+            governance_action="execute",
+        )
 
         assert result == "processed: summarize quarterly report"
         stats = e2e_governed_agent.stats
@@ -184,14 +188,17 @@ class TestFullGovernanceFlow:
     ) -> None:
         """Actions containing critical keywords are blocked."""
         with pytest.raises(ConstitutionalViolationError) as exc_info:
-            e2e_governed_agent.run("I will self-validate and bypass validation")
+            e2e_governed_agent.run(
+                "I will self-validate and bypass validation",
+                governance_action="execute",
+            )
 
         assert exc_info.value.severity == "critical"
 
     async def test_pii_pattern_blocks_execution(self, e2e_governed_agent: GovernedAgent) -> None:
         """SSN patterns in input are blocked by regex rules."""
         with pytest.raises(ConstitutionalViolationError):
-            e2e_governed_agent.run("My SSN is 123-45-6789")
+            e2e_governed_agent.run("My SSN is 123-45-6789", governance_action="execute")
 
     async def test_output_validation_blocks_unsafe_output(
         self, e2e_constitution: Constitution
@@ -202,9 +209,10 @@ class TestFullGovernanceFlow:
             constitution=e2e_constitution,
             agent_id="malicious-test",
             validate_output=True,
+            maci_role=MACIRole.EXECUTOR,
         )
         with pytest.raises(ConstitutionalViolationError):
-            agent.run("tell me something")
+            agent.run("tell me something", governance_action="execute")
 
     async def test_engine_validation_result_structure(self, e2e_engine: GovernanceEngine) -> None:
         """ValidationResult has expected fields when violations occur."""
@@ -251,8 +259,9 @@ class TestFullGovernanceFlow:
             AsyncFakeAgent(),
             constitution=e2e_constitution,
             agent_id="async-agent",
+            maci_role=MACIRole.EXECUTOR,
         )
-        result = await agent.arun("safe async request")
+        result = await agent.arun("safe async request", governance_action="execute")
         assert result == "async-processed: safe async request"
 
     async def test_governed_agent_with_callable(self, e2e_constitution: Constitution) -> None:
@@ -265,8 +274,9 @@ class TestFullGovernanceFlow:
             my_func,
             constitution=e2e_constitution,
             agent_id="callable-agent",
+            maci_role=MACIRole.EXECUTOR,
         )
-        result = agent.run("hello world")
+        result = agent.run("hello world", governance_action="execute")
         assert result == "func:hello world"
 
     async def test_validation_result_serialization(self, e2e_engine: GovernanceEngine) -> None:
@@ -532,7 +542,7 @@ class TestConstitutionalHashIntegrity:
         self, e2e_governed_agent: GovernedAgent, e2e_constitution: Constitution
     ) -> None:
         """GovernedAgent.stats includes the constitutional hash."""
-        e2e_governed_agent.run("safe action")
+        e2e_governed_agent.run("safe action", governance_action="execute")
         stats = e2e_governed_agent.stats
         assert stats["constitutional_hash"] == e2e_constitution.hash
 
@@ -752,9 +762,7 @@ class TestIntegratedGovernanceFlow:
             agent_id="proposer-agent",
             maci_role=MACIRole.PROPOSER,
         )
-        # Agent can still run (governance engine validates action content,
-        # not MACI role — MACI role is metadata for enforcer checks)
-        result = agent.run("draft a proposal for review")
+        result = agent.run("draft a proposal for review", governance_action="propose")
         assert "processed:" in result
 
     async def test_multiple_agents_governed_independently(
@@ -765,16 +773,18 @@ class TestIntegratedGovernanceFlow:
             FakeAgent(),
             constitution=e2e_constitution,
             agent_id="agent-a",
+            maci_role=MACIRole.EXECUTOR,
         )
         agent_b = GovernedAgent(
             FakeAgent(),
             constitution=e2e_constitution,
             agent_id="agent-b",
+            maci_role=MACIRole.EXECUTOR,
         )
 
-        agent_a.run("request one")
-        agent_a.run("request two")
-        agent_b.run("request three")
+        agent_a.run("request one", governance_action="execute")
+        agent_a.run("request two", governance_action="execute")
+        agent_b.run("request three", governance_action="execute")
 
         assert agent_a.stats["total_validations"] >= 2
         assert agent_b.stats["total_validations"] >= 1

@@ -203,14 +203,18 @@ If you want the full example path, go to [`examples/README.md`](./examples/READM
 
 ---
 
-## 🚀 5-Line Quickstart
+## 🚀 Quickstart
 
 ```python
-from acgs_lite import Constitution, GovernedAgent
+from acgs_lite import Constitution, GovernedAgent, MACIRole
 
 constitution = Constitution.from_yaml("constitution.yaml")
-agent = GovernedAgent(my_llm_agent, constitution=constitution)
-result = agent.run("Process this high-risk transaction")
+agent = GovernedAgent(
+    my_llm_agent,
+    constitution=constitution,
+    maci_role=MACIRole.EXECUTOR,
+)
+result = agent.run("Process this high-risk transaction", governance_action="execute")
 ```
 
 Rules in YAML (`constitution.yaml`):
@@ -454,7 +458,7 @@ assert log.verify_chain(), "Audit log tampered!"
 | **Missing constitution** | Engine refuses to initialize; no degraded-mode passthrough |
 | **Rule match** | Action is blocked unless the rule explicitly sets `workflow_action: warn` |
 | **Audit write failure** | Logged at warning level; does not unblock the action |
-| **MACI misconfiguration** | Warning raised at startup; enforcement is advisory unless `enforce_maci=True` |
+| **MACI misconfiguration** | Governed execution denies before side effects unless a role and per-call `governance_action` are present |
 | **MCP server strict-mode** | MCP tools call `validate(strict=False)` per request and do not mutate `engine.strict`; exceptions cannot leave strict mode permanently disabled |
 
 > **Note:** The MCP integration above is non-mutating: it passes `validate(strict=False)` per call
@@ -483,7 +487,7 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 | `GovernanceEngine` — rule validation | ✅ **Stable** | Core hot path; Aho-Corasick matcher, fail-closed exceptions |
 | `Constitution` — YAML loading, rule parsing | ✅ **Stable** | Hash-pinned; schema-validated |
 | `Rule`, `Severity`, `ValidationResult` | ✅ **Stable** | Stable data model; additive changes only |
-| `MACIEnforcer` — role separation | ✅ **Stable** | Role checks are enforced; pass `enforce_maci=True` for hard failures |
+| `MACIEnforcer` — role separation | ✅ **Stable** | Role checks are enforced by default in `GovernedAgent`; pass a MACI role plus per-call `governance_action` |
 | `AuditLog` — SHA-256 chained trail | ✅ **Stable** | Thread-safe append-only; chain verification tested |
 | `GovernedAgent` — drop-in wrapper | ✅ **Stable** | Synchronous and async paths covered |
 | OpenAI / Anthropic / LangChain adapters | ✅ **Stable** | Thin validated wrappers; covers completions and streaming |

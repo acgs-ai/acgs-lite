@@ -13,19 +13,23 @@ The standard `GovernedAgent` path provides deterministic input/output validation
 3. An execution boundary the executor must match
 4. Fail-closed behavior on missing or unverifiable receipt proof
 
-## 5-Line Quickstart
+## Quickstart
 
 ```python
-from acgs_lite import Constitution, GovernedAgent
+from acgs_lite import Constitution, GovernedAgent, MACIRole
 
 # 1. Load rules from your Constitution
 constitution = Constitution.from_yaml("rules.yaml")
 
-# 2. Wrap your existing agent
-agent = GovernedAgent(my_llm_agent, constitution=constitution)
+# 2. Wrap your existing agent with an explicit MACI execution role
+agent = GovernedAgent(
+    my_llm_agent,
+    constitution=constitution,
+    maci_role=MACIRole.EXECUTOR,
+)
 
-# 3. Execute through deterministic validation
-result = agent.run("Process this request")
+# 3. Execute through deterministic validation with per-call authorization
+result = agent.run("Process this request", governance_action="execute")
 ```
 
 ## Compliance Mapping Examples

@@ -15,9 +15,10 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from acgs_lite import Constitution, Rule, Severity
+from acgs_lite import Constitution, MACIEnforcer, MACIRole, Rule, Severity
 from acgs_lite.audit import AuditLog
 from acgs_lite.engine import GovernanceEngine
+from acgs_lite.errors import GovernanceError
 from acgs_lite.legitimacy import (
     ActualCall,
     DecisionReceipt,
@@ -141,10 +142,22 @@ class ConstitutionalMembrane:
 class ReceiptCheckingExecutor:
     """Executor that performs no side effect until receipt validation passes."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, agent_id: str = "tool-executor") -> None:
+        self.agent_id = agent_id
+        self.maci = MACIEnforcer()
+        self.maci.assign_role(agent_id, MACIRole.EXECUTOR)
         self.outbox: list[ProposedAction] = []
 
-    def execute(self, action: ProposedAction, receipt: DecisionReceipt | None) -> str:
+    def execute(
+        self,
+        action: ProposedAction,
+        receipt: DecisionReceipt | None,
+        *,
+        governance_action: str | None,
+    ) -> str:
+        if not governance_action:
+            raise GovernanceError("governance_action is required before execution")
+        self.maci.check(self.agent_id, governance_action)
         validate_receipt_for_execution(
             receipt,
             actual_call=ActualCall(
@@ -193,14 +206,18 @@ def run_demo() -> dict[str, object]:
     denied_blocked = False
     for decision in decisions:
         try:
-            executor.execute(decision.action, decision.receipt)
+            executor.execute(
+                decision.action,
+                decision.receipt,
+                governance_action="execute",
+            )
         except LegitimacyInvariantError:
             if decision.state == "DENY":
                 denied_blocked = True
 
     receiptless_blocked = False
     try:
-        executor.execute(proposals[0], None)
+        executor.execute(proposals[0], None, governance_action="execute")
     except LegitimacyInvariantError:
         receiptless_blocked = True
 

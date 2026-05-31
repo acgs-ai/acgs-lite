@@ -82,21 +82,27 @@ class GovernedAgent:
 
     Validates inputs and outputs against the constitution. Structured outputs
     and keyword arguments are normalized before validation. Produces full audit
-    trails. MACI role metadata is descriptive by default and becomes enforced
-    only when `enforce_maci=True` is paired with `governance_action=...`.
+    trails. MACI role checks are enforced by default: callers must provide an
+    explicit ``maci_role`` when constructing the wrapper and a permitted
+    ``governance_action`` on every execution. Passing ``enforce_maci=False`` is
+    an explicit advisory-mode opt-out for non-side-effecting evaluation flows.
 
     Usage::
 
         from acgs_lite import Constitution, GovernedAgent, MACIRole
 
         constitution = Constitution.from_yaml("rules.yaml")
-        agent = GovernedAgent(my_agent, constitution=constitution)
-        result = agent.run("process this request")
+        agent = GovernedAgent(
+            my_agent,
+            constitution=constitution,
+            maci_role=MACIRole.EXECUTOR,
+        )
+        result = agent.run("process this request", governance_action="execute")
 
     With default constitution::
 
-        agent = GovernedAgent(my_agent)
-        result = agent.run("do something safe")
+        agent = GovernedAgent(my_agent, maci_role=MACIRole.EXECUTOR)
+        result = agent.run("do something safe", governance_action="execute")
 
     With custom constitution::
 
@@ -106,7 +112,8 @@ class GovernedAgent:
             Rule(id="R1", text="No PII", severity=Severity.CRITICAL,
                  keywords=["ssn", "social security"]),
         ])
-        agent = GovernedAgent(my_agent, constitution=rules)
+        agent = GovernedAgent(my_agent, constitution=rules, maci_role=MACIRole.EXECUTOR)
+        result = agent.run("review custom constitution", governance_action="execute")
     """
 
     def __init__(
@@ -118,7 +125,7 @@ class GovernedAgent:
         strict: bool = True,
         validate_output: bool = True,
         maci_role: MACIRole | None = None,
-        enforce_maci: bool = False,
+        enforce_maci: bool = True,
         max_retries: int = 0,
         circuit_breaker: GovernanceCircuitBreaker | None = None,
         cdp_backend: Any | None = None,
@@ -157,14 +164,11 @@ class GovernedAgent:
 
         if maci_role:
             self.maci.assign_role(agent_id, maci_role)
-        if self.enforce_maci and self.maci_role is None:
-            raise ValueError("enforce_maci=True requires an explicit maci_role")
         if maci_role is not None and not self.enforce_maci:
             warnings.warn(
                 "maci_role is set but enforce_maci=False — role separation is "
-                "advisory only. The default will change to enforce_maci=True in "
-                "acgs-lite 3.0. Pass enforce_maci=True now (with governance_action "
-                "on every run) to opt in early and silence this warning.",
+                "advisory only. GovernedAgent enforces MACI by default; pass "
+                "enforce_maci=False only for explicit non-side-effecting evaluation flows.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -172,9 +176,14 @@ class GovernedAgent:
     def _check_maci(self, governance_action: str | None) -> None:
         if not self.enforce_maci:
             return
+        if self.maci_role is None:
+            raise GovernanceError(
+                "GovernedAgent with MACI enforcement requires an explicit maci_role",
+                rule_id="MACI-ROLE",
+            )
         if not governance_action:
             raise GovernanceError(
-                "GovernedAgent with enforce_maci=True requires governance_action",
+                "GovernedAgent with MACI enforcement requires governance_action",
                 rule_id="MACI-ACTION",
             )
         self.maci.check(self.agent_id, governance_action)
@@ -309,7 +318,7 @@ class GovernedAgent:
     def run(self, input: str, *, governance_action: str | None = None, **kwargs: Any) -> Any:
         """Run the wrapped agent with governance.
 
-        1. Optionally enforce MACI role boundaries (`enforce_maci=True`)
+        1. Enforce MACI role boundaries by default
         2. Validate the primary input and serialized keyword arguments
         3. Execute the agent
         4. Validate serialized output (if enabled)
@@ -326,7 +335,7 @@ class GovernedAgent:
         if self._circuit_breaker is not None:
             self._circuit_breaker.check()
 
-        # Step 1: Enforce MACI boundary, when enabled
+        # Step 1: Enforce MACI boundary before any wrapped side effect
         self._check_maci(governance_action)
         execution_kwargs, governance_kwargs = self._prepare_execution_kwargs(kwargs)
 
@@ -524,7 +533,7 @@ class GovernedAgent:
         **kwargs: Any,
     ) -> Any:
         """Async version of run() with output-violation retry support."""
-        # Step 1: Enforce MACI boundary, when enabled
+        # Step 1: Enforce MACI boundary before any wrapped side effect
         self._check_maci(governance_action)
         execution_kwargs, governance_kwargs = self._prepare_execution_kwargs(kwargs)
 
