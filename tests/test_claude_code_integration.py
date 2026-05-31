@@ -8,6 +8,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / "integrations" / "claude_code" / "acgs-governance-preuse.sh"
 
@@ -127,6 +129,37 @@ def test_constitutional_violation_blocks_tool_call(tmp_path: Path) -> None:
     assert "SEC-001" in result.stderr
     assert "No hardcoded secrets" in result.stderr
     assert "Tool 'Bash' blocked" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        "TRANSFORM_REQUIRED",
+        "REPLAN_REQUIRED",
+        "STRUCTURED_REVIEW_REQUIRED",
+        "DENY_OPERATION_WITH_ALTERNATIVE",
+        "DENY_GOAL",
+        "HARD_DENY",
+    ],
+)
+def test_canonical_non_executable_decisions_block_tool_call(tmp_path: Path, decision: str) -> None:
+    body = json.dumps(
+        {
+            "compliant": True,
+            "decision": decision,
+            "rule_id": "LEGITIMACY-INVARIANT",
+            "reason": "No valid constitutional authorization, no side effect.",
+        }
+    )
+    result = _run_hook(
+        {"tool_name": "Bash", "tool_input": {"command": "touch /tmp/acgs-side-effect"}},
+        tmp_path,
+        body=body,
+    )
+
+    assert result.returncode == 2
+    assert "LEGITIMACY-INVARIANT" in result.stderr
+    assert "No valid constitutional authorization" in result.stderr
 
 
 def test_multiedit_payload_is_sent_to_check_endpoint(tmp_path: Path) -> None:

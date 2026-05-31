@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from acgs_lite.audit import AuditEntry, AuditLog
+from acgs_lite.constitution import Constitution, Rule, Severity
+from acgs_lite.engine import GovernanceEngine
 from acgs_lite.governed import GovernedCallable
 from acgs_lite.legitimacy import (
     DecisionReceipt,
@@ -66,6 +70,11 @@ def test_missing_receipt_blocks_execution() -> None:
     assert calls == []
 
 
+def test_invalid_receipt_type_blocks_execution() -> None:
+    with pytest.raises(LegitimacyInvariantError, match="Invalid legitimacy receipt type"):
+        validate_receipt_for_execution("not-a-receipt")  # type: ignore[arg-type]
+
+
 def test_missing_authority_basis_fails_closed() -> None:
     with pytest.raises(ValueError, match="authority_basis"):
         _receipt(authority_basis="")
@@ -118,6 +127,26 @@ def test_execution_boundary_mismatch_blocks() -> None:
     assert calls == []
 
 
+def test_argument_substitution_outside_receipt_subjects_blocks() -> None:
+    receipt = DecisionReceipt.create(
+        request_id="req-subject",
+        goal="Email an authorized customer",
+        proposed_method="send_email",
+        decision_type="ALLOW",
+        authority_basis="role:operator",
+        matched_constraints=("customer-contact-policy",),
+        policy_version="policy-v1",
+        execution_boundary=_boundary("send_email", subjects=("customer-123",)),
+    )
+    substituted_call = normalize_actual_call(
+        fallback_method="send_email",
+        kwargs={"scope": "tenant-a", "subjects": ("customer-999",)},
+    )
+
+    with pytest.raises(LegitimacyInvariantError, match="boundary mismatch"):
+        validate_receipt_for_execution(receipt, actual_call=substituted_call)
+
+
 def test_human_approval_without_structure_invalid() -> None:
     receipt = _receipt(required_controls=("HUMAN_APPROVAL",))
     actual_call = normalize_actual_call(
@@ -129,9 +158,53 @@ def test_human_approval_without_structure_invalid() -> None:
         validate_receipt_for_execution(receipt, actual_call=actual_call)
 
 
-@pytest.mark.xfail(reason="Full replay verifier is explicitly deferred from the MVP")
-def test_replay_failure_marks_goal_incomplete() -> None:
-    raise NotImplementedError("Replay verifier follow-up")
+def test_missing_constitution_file_fails_closed(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="Constitution file not found"):
+        Constitution.from_yaml(tmp_path / "missing-constitution.yaml")
+
+
+def test_malformed_constitution_fails_closed() -> None:
+    with pytest.raises(ValueError, match="rules"):
+        Constitution.from_yaml_str("name: malformed\nrules: not-a-list\n")
+
+
+def test_denied_action_produces_audit_evidence() -> None:
+    constitution = Constitution.from_rules(
+        [
+            Rule(
+                id="no-wire-transfer",
+                text="Block wire transfers without approval",
+                severity=Severity.CRITICAL,
+                keywords=["wire transfer"],
+            )
+        ],
+        name="side-effect-policy",
+    )
+    audit_log = AuditLog()
+    engine = GovernanceEngine(
+        constitution,
+        audit_log=audit_log,
+        strict=False,
+        audit_mode="full",
+    )
+
+    result = engine.validate("wire transfer $1000", agent_id="runtime")
+
+    assert result.valid is False
+    denied_entries = audit_log.query(agent_id="runtime", entry_type="validation", valid=False)
+    assert len(denied_entries) == 1
+    assert denied_entries[0].violations == ["no-wire-transfer"]
+    assert audit_log.verify_chain() is True
+
+
+def test_replay_rejects_tampered_audit_evidence() -> None:
+    audit_log = AuditLog()
+    audit_log.record(AuditEntry(id="ev-1", type="validation", action="allowed", valid=True))
+    audit_log.record(AuditEntry(id="ev-2", type="validation", action="denied", valid=False))
+
+    audit_log._entries[0].action = "tampered"  # deliberate integrity probe
+
+    assert audit_log.verify_chain() is False
 
 
 def test_unknown_decision_type_fails_closed() -> None:

@@ -157,8 +157,37 @@ except json.JSONDecodeError:
     raise SystemExit(0)
 
 compliant = data.get("compliant")
-decision = str(data.get("decision", "")).lower()
-blocked = compliant is False or decision in {"deny", "block", "blocked", "reject", "rejected"}
+decision = str(data.get("decision", "")).strip().lower()
+executable_decisions = {
+    "allow",
+    "allowed",
+    "allow_with_controls",
+    "audit_only",
+    "conditional",
+}
+non_executable_decisions = {
+    "deny",
+    "block",
+    "blocked",
+    "reject",
+    "rejected",
+    "require_review",
+    "review",
+    "escalate",
+    "transform_required",
+    "replan_required",
+    "structured_review_required",
+    "deny_operation_with_alternative",
+    "deny_goal",
+    "hard_deny",
+}
+if compliant is False or decision in non_executable_decisions:
+    blocked = True
+elif compliant is True and decision in executable_decisions:
+    blocked = False
+else:
+    print(json.dumps({"status": "parse_error"}))
+    raise SystemExit(0)
 
 violation = data.get("first_violation")
 if isinstance(violation, dict):
