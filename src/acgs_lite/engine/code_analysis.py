@@ -617,8 +617,16 @@ class CodeActionValidator:
 
     @staticmethod
     def _literal_dunder_arg(node: ast.Call) -> str | None:
-        """Return a string-literal argument starting with ``__``, else ``None``."""
-        for arg in node.args:
+        """Return a string-literal dunder argument (``__…``), else ``None``.
+
+        Scans positional *and* keyword arguments: ``setattr(o, name='__dict__', …)``
+        smuggles the dunder through the ``name=`` keyword, so inspecting only
+        ``node.args`` would let it fall through to MEDIUM ``CODE-INTROSPECTION``
+        instead of being promoted to HIGH ``CODE-DUNDER-ACCESS``.
+        """
+        candidates: list[ast.expr] = list(node.args)
+        candidates.extend(kw.value for kw in node.keywords)
+        for arg in candidates:
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 if arg.value.startswith("__"):
                     return arg.value

@@ -264,6 +264,22 @@ def test_aliased_getattr_dunder_is_high():
     assert any(v.severity is Severity.HIGH for v in findings)
 
 
+def test_keyword_argument_dunder_is_high():
+    # Adversarial (verify-governance-fixes / L2-L3): a dunder smuggled through a
+    # KEYWORD argument must still promote to HIGH CODE-DUNDER-ACCESS. Scanning
+    # only positional args let setattr(o, name='__dict__', ...) fall through to
+    # MEDIUM CODE-INTROSPECTION and slip past the executor gate.
+    for code in (
+        "setattr(o, name='__dict__', value=1)",
+        "setattr(o, '__class__', value=type)",
+        "delattr(o, name='__weakref__')",
+    ):
+        findings = CodeActionValidator().analyze(code)
+        ids = _ids(findings)
+        assert "CODE-DUNDER-ACCESS" in ids, f"{code!r} -> {ids}"
+        assert any(v.severity is Severity.HIGH for v in findings), code
+
+
 def test_direct_exec_call_not_double_flagged():
     # A plain eval('1') yields exactly one CODE-EXEC (from the call), not also a
     # duplicate bare-name finding.

@@ -110,14 +110,18 @@ def _coerce_answer_text(value: Any) -> str:
 
     Strings pass through.  Mappings/sequences are JSON-serialised (sorted, with
     a ``str`` fallback) so their *content* is visible to substring/regex rules
-    rather than an opaque ``repr`` (L9).  Any object whose ``__str__`` raises
+    rather than an opaque ``repr`` (L9).  ``ensure_ascii=False`` keeps non-ASCII
+    content readable at the same fidelity as a plain string — with the default
+    ``ensure_ascii=True`` a forbidden non-ASCII keyword inside a structured answer
+    (``{"plan": "go to the café now"}`` -> ``café``) would be escaped past
+    substring matching and evade the check.  Any object whose ``__str__`` raises
     falls back to ``repr`` and finally to ``""`` so coercion never raises (M5).
     """
     if isinstance(value, str):
         return value
     if isinstance(value, (dict, list, tuple)):
         try:
-            return json.dumps(value, default=str, sort_keys=True)
+            return json.dumps(value, default=str, sort_keys=True, ensure_ascii=False)
         except Exception:  # noqa: BLE001 - best-effort; fall through to str()
             pass
     try:

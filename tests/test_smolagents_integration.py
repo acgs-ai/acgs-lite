@@ -441,6 +441,30 @@ def test_final_answer_check_serialises_structured_answer():
     assert check({"plan": "use the forbiddenphrase"}) is False
 
 
+def test_final_answer_check_matches_non_ascii_in_structured_answer():
+    # Adversarial (verify-governance-fixes / M5-L9): a non-ASCII forbidden keyword
+    # inside a structured answer must be matchable. With json.dumps' default
+    # ensure_ascii=True it would serialise to "café" and slip past substring
+    # matching; ensure_ascii=False exposes it at plain-string fidelity.
+    rule = Rule(
+        id="TEST-NONASCII",
+        text="café is not allowed",
+        severity=Severity.CRITICAL,
+        category="safety",
+        keywords=["café"],
+        workflow_action=ViolationAction.BLOCK,
+    )
+    const = Constitution(id="nonascii-const", version="1.0.0", rules=[rule])
+    check = SmolagentsGovernor(constitution=const).final_answer_check()
+    # Plain string is caught (control)...
+    assert check("go to the café now") is False
+    # ...and so is the same content wrapped in a structured answer.
+    assert check({"plan": "go to the café now"}) is False
+    assert check(["meet at the café"]) is False
+    # A clean structured answer is still accepted.
+    assert check({"plan": "summarise the report"}) is True
+
+
 def test_step_callback_never_raises_on_halt_rule():
     # M1: step callbacks are non-blocking even when a HALT rule matches.
     gov = SmolagentsGovernor(constitution=_const_with_rule(ViolationAction.HALT))
