@@ -394,37 +394,62 @@ def _first_str_attr(obj: Any, names: tuple[str, ...]) -> str | None:
     return None
 
 
+def _append_to_seq(seq: list, hook: Any) -> None:
+    """Append *hook* to *seq* unless an equivalent governor hook is already there."""
+    marker = getattr(hook, "_acgs_governor", None)
+    if marker is not None and any(getattr(h, "_acgs_governor", None) == marker for h in seq):
+        return  # already governed by this governor; do not double-append
+    seq.append(hook)
+
+
 def _append_hook(agent: Any, attr: str, hook: Any) -> None:
-    """Append *hook* to a smolagents list/None hook attribute, idempotently.
+    """Append *hook* to a smolagents list/None/tuple/dict hook attribute.
 
     ``step_callbacks`` may be a list, ``None``, a tuple, or a dict keyed by step
     type.  Lists and ``None`` are handled directly; a tuple (or other sequence)
     is coerced to a list so governance is actually attached rather than silently
-    dropped (M4).  A dict cannot be keyed without importing smolagents types, so
-    we skip it and log.  Hooks tagged with the same governor id are not appended
-    twice (L8).
+    dropped (M4).  A dict (smolagents' per-step-type form) is handled best-effort:
+    the hook is attached to every registered step-type list, so step actions are
+    still audited rather than silently skipped (#9/#21) — step types not present
+    in the dict are not covered, so register the hook explicitly for full coverage.
+    Hooks tagged with the same governor id are not appended twice (L8).
     """
     existing = getattr(agent, attr, None)
     if existing is None:
         setattr(agent, attr, [hook])
         return
     if isinstance(existing, list):
-        seq = existing
-    elif isinstance(existing, tuple):
+        _append_to_seq(existing, hook)
+        return
+    if isinstance(existing, tuple):
         seq = list(existing)
         setattr(agent, attr, seq)
-    else:
-        logger.warning(
-            "Cannot attach governance to agent.%s of type %s; "
-            "pass the hook explicitly when constructing the agent.",
-            attr,
-            type(existing).__name__,
-        )
+        _append_to_seq(seq, hook)
         return
-    marker = getattr(hook, "_acgs_governor", None)
-    if marker is not None and any(getattr(h, "_acgs_governor", None) == marker for h in seq):
-        return  # already governed by this governor; do not double-append
-    seq.append(hook)
+    if isinstance(existing, dict):
+        # Attach to each registered step-type list (best-effort) rather than
+        # silently dropping governance for a dict-keyed step_callbacks.
+        attached = False
+        for key, value in list(existing.items()):
+            if isinstance(value, (list, tuple)):
+                seq = list(value) if isinstance(value, tuple) else value
+                if isinstance(value, tuple):
+                    existing[key] = seq
+                _append_to_seq(seq, hook)
+                attached = True
+        if not attached:
+            logger.warning(
+                "Could not attach governance to agent.%s: dict has no list-valued "
+                "step-type entries; pass the hook explicitly when constructing the agent.",
+                attr,
+            )
+        return
+    logger.warning(
+        "Cannot attach governance to agent.%s of type %s; "
+        "pass the hook explicitly when constructing the agent.",
+        attr,
+        type(existing).__name__,
+    )
 
 
 def build_governed_code_agent(
