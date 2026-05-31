@@ -164,17 +164,28 @@ class SignedReceipt:
     signature: str
     signed_at: str
 
-    def verify(self, *, expected_public_key: str | None = None) -> bool:
-        """True iff the receipt payload, hash, and signature all check out.
+    def verify(self, expected_public_key: str) -> bool:
+        """Verify authenticity against a public key the caller already trusts.
 
-        Pass ``expected_public_key`` to additionally pin the signature to a key the
-        caller already trusts -- otherwise a forged receipt signed by an attacker's
-        own key would verify against its own embedded public key.
+        Authenticity REQUIRES a trust anchor: a valid signature alone only proves
+        *someone* signed the receipt, not that the governing membrane did. Pass the
+        membrane's known public key (from a key store or out-of-band distribution).
+        Verification fails closed unless that key matches the receipt's signing key
+        AND the hash and signature both check out. For the unpinned self-consistency
+        check use :meth:`verify_integrity` -- but never treat it as authenticity.
         """
-        if expected_public_key is not None and not hmac.compare_digest(
-            expected_public_key, self.public_key
-        ):
+        if not hmac.compare_digest(expected_public_key, self.public_key):
             return False
+        return self.verify_integrity()
+
+    def verify_integrity(self) -> bool:
+        """True iff the payload, hash, and signature are internally consistent.
+
+        This proves the receipt is well-formed and was signed by whoever holds
+        ``self.public_key`` -- it does NOT prove that key belongs to the membrane.
+        It is necessary but not sufficient for authenticity; pair it with a
+        trusted-key comparison (see :meth:`verify`) before trusting a decision.
+        """
         if not self.receipt.verify_hash():
             return False
         try:
@@ -200,14 +211,19 @@ class SignedReceipt:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SignedReceipt:
-        return cls(
-            receipt=_receipt_from_dict(data["receipt"]),
-            algorithm=data["algorithm"],
-            key_id=data["key_id"],
-            public_key=data["public_key"],
-            signature=data["signature"],
-            signed_at=data["signed_at"],
-        )
+        # from_dict is the untrusted-wire entry point; a malformed payload must fail
+        # closed with a domain error, not leak a bare KeyError to the caller.
+        try:
+            return cls(
+                receipt=_receipt_from_dict(data["receipt"]),
+                algorithm=data["algorithm"],
+                key_id=data["key_id"],
+                public_key=data["public_key"],
+                signature=data["signature"],
+                signed_at=data["signed_at"],
+            )
+        except (KeyError, TypeError) as exc:
+            raise ValueError(f"malformed signed-receipt payload: {exc}") from exc
 
 
 def sign_receipt(
