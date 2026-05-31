@@ -19,6 +19,7 @@ from acgs_lite.audit import AuditLog
 from acgs_lite.constitution import Constitution
 from acgs_lite.engine import GovernanceEngine
 from acgs_lite.engine.types import ValidationResult
+from acgs_lite.errors import ConstitutionalViolationError
 
 logger = logging.getLogger(__name__)
 
@@ -81,19 +82,42 @@ class GovernedBase:
         text: str,
         *,
         label: str = "output",
+        context: dict[str, Any] | None = None,
     ) -> ValidationResult | None:
         """Validate *text* non-strictly and log warnings on violation.
 
         Returns the :class:`ValidationResult` when validation ran, or
-        ``None`` when *text* was empty/falsy and validation was skipped.
+        ``None`` when *text* was empty/falsy and validation was skipped, or when
+        the engine raised on an absolute-HALT rule (see below).
+
+        Non-blocking contract: this helper must **never** raise.  ``strict=False``
+        suppresses ordinary blocking violations, but the engine still raises
+        :class:`ConstitutionalViolationError` for ``HALT`` rules regardless of
+        strictness (HALT is absolute at the engine layer).  Integration hooks
+        that document themselves as non-blocking rely on this method swallowing
+        that exception — so we catch it, log, and return ``None`` rather than let
+        a HALT rule tear down a caller's loop.
+
+        *context* is forwarded to :meth:`GovernanceEngine.validate` so callers can
+        opt produced content into context-gated validators (e.g. pass
+        ``{"action_type": "code"}`` to run the AST code validator on step code).
         """
         if not text:
             return None
-        result = self.engine.validate(
-            text,
-            agent_id=f"{self.agent_id}:{label}",
-            strict=False,
-        )
+        try:
+            result = self.engine.validate(
+                text,
+                agent_id=f"{self.agent_id}:{label}",
+                context=context,
+                strict=False,
+            )
+        except ConstitutionalViolationError as exc:
+            logger.warning(
+                "%s governance HALT (suppressed; non-blocking hook): rule=%s",
+                label,
+                exc.rule_id,
+            )
+            return None
         if not result.valid:
             logger.warning(
                 "%s governance violations: %s",
