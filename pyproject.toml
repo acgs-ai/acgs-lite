@@ -99,6 +99,7 @@ include = ["acgs*", "acgs_lite*"]
 
 [tool.setuptools.package-data]
 acgs_lite = ["provider_capabilities_manifest.json"]
+"acgs_lite.agents" = ["agent_capabilities_manifest.json"]
 "acgs_lite.arckit" = ["templates/*.md"]
 
 [tool.ruff]

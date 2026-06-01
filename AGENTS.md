@@ -61,6 +61,35 @@ python -m mkdocs build
 | Docs | `docs/`, especially `docs/api/` |
 | Tests | `tests/` |
 | Shared utilities | `src/acgs_lite/audit.py`, `src/acgs_lite/maci.py` |
+| Agent discovery | `agent-index.json`, `src/acgs_lite/agents/`, `docs/api/agents.md` |
+
+## Agent Discovery
+
+When a task needs a specialist, route it to the right agent rather than improvising.
+`agent-index.json` (repo root, companion to this file) is the canonical,
+machine-readable index of this repo's coding agents/skills. It is authored in the
+**same `AgentCapabilityProfile` schema** the library's `AgentRegistry` consumes
+(`src/acgs_lite/agents/`), so the index is both human-browsable and loadable at
+runtime:
+
+```python
+from acgs_lite.agents import AgentRegistry
+
+registry = AgentRegistry.from_manifest("agent-index.json")
+for profile, score in registry.candidates_for("review this branch for governance regressions"):
+    print(profile.agent_id, score)   # governance-branch-review ranks first
+```
+
+Rules:
+
+- **Every new coding agent or skill must be added to `agent-index.json`.**
+  A specialist that is not in the index cannot be discovered or routed to. The
+  drift guard `tests/test_agent_index.py` loads the index through the registry and
+  fails if any entry is malformed — keep entries schema-valid.
+- For *governed runtime* selection (fail-closed, receipted, MACI-respecting), use
+  `GovernedAgentSelector` instead of the bare registry. See `docs/api/agents.md`.
+- Each entry's `agent_id` should match the invocable skill/agent name so a ranked
+  candidate maps directly to something callable.
 
 ## Conventions
 

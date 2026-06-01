@@ -1,0 +1,80 @@
+[
+  {
+    "agent_id": "governance-branch-review",
+    "name": "Governance Branch Review",
+    "description": "Governance-aware adaptive review of the current branch versus a base ref: maps changes, fans out ACGS-Lite-specific dimension reviewers, adversarially verifies findings, and emits a constitutional-invariant scorecard.",
+    "capabilities": ["review", "governance", "audit", "regression", "branch", "scorecard"],
+    "domains": ["governance", "review"],
+    "skills": ["branch-review", "constitutional-invariants", "optional-integration-review"],
+    "tags": ["pre-pr", "governance-critical"],
+    "support_level": "maintained",
+    "stability": "stable",
+    "is_active": true,
+    "metadata": {"trigger": "Reviewing ACGS-Lite branch changes before a PR"}
+  },
+  {
+    "agent_id": "verify-governance-fixes",
+    "name": "Verify Governance Fixes",
+    "description": "Adversarially verifies that applied governance fixes actually close their findings by writing and executing concrete bypass attempts against the installed code.",
+    "capabilities": ["verify", "audit", "security", "bypass", "governance"],
+    "domains": ["governance", "security"],
+    "skills": ["bypass-attempt", "fix-verification"],
+    "tags": ["post-fix", "governance-critical"],
+    "support_level": "maintained",
+    "stability": "stable",
+    "is_active": true,
+    "metadata": {"trigger": "After applying governance-branch-review fixes"}
+  },
+  {
+    "agent_id": "security-review",
+    "name": "Security Review",
+    "description": "Reviews code for exploitable vulnerabilities, input validation gaps, auth/authz issues, hardcoded secrets, and OWASP concerns.",
+    "capabilities": ["review", "security", "audit", "vulnerability"],
+    "domains": ["security"],
+    "skills": ["security-audit", "owasp"],
+    "tags": ["pre-pr", "security"],
+    "support_level": "maintained",
+    "stability": "stable",
+    "is_active": true,
+    "metadata": {}
+  },
+  {
+    "agent_id": "ce-code-review",
+    "name": "Code Review",
+    "description": "Structured code review using tiered persona agents, confidence-gated findings, and a merge/dedup pipeline for changes before a PR.",
+    "capabilities": ["review", "correctness", "maintainability", "testing"],
+    "domains": ["review"],
+    "skills": ["persona-review", "diff-review"],
+    "tags": ["pre-pr"],
+    "support_level": "maintained",
+    "stability": "stable",
+    "is_active": true,
+    "metadata": {}
+  },
+  {
+    "agent_id": "ce-plan",
+    "name": "Technical Planning",
+    "description": "Creates structured implementation plans for multi-step software features: decisions, files, dependencies, and enumerated test scenarios.",
+    "capabilities": ["plan", "architecture", "design", "decompose"],
+    "domains": ["planning"],
+    "skills": ["implementation-plan", "test-scenarios"],
+    "tags": ["pre-implementation"],
+    "support_level": "maintained",
+    "stability": "stable",
+    "is_active": true,
+    "metadata": {}
+  },
+  {
+    "agent_id": "ce-debug",
+    "name": "Debug",
+    "description": "Systematically finds root causes and fixes bugs: reproduces failures, traces errors, and investigates test failures or issue-tracker reports.",
+    "capabilities": ["debug", "root-cause", "fix", "investigate"],
+    "domains": ["debugging"],
+    "skills": ["repro", "stack-trace-analysis"],
+    "tags": ["bug"],
+    "support_level": "maintained",
+    "stability": "stable",
+    "is_active": true,
+    "metadata": {}
+  }
+]
