@@ -94,6 +94,10 @@ Rules:
 ## Conventions
 
 - Python 3.10+.
+- For file search / grep in this git-indexed repo, prefer the **`fff` MCP tools**
+  (`ffgrep`, `fffind`, `fff-multi-grep`) over the default search tools — they share
+  a warm frecency-ranked index and are far faster for repeated queries. Fall back to
+  the built-in tools if the `fff` MCP server is not connected.
 - Keep integrations optional through extras and lazy imports.
 - Do not import optional SDKs at module import time.
 - Constitutional hash `608508a9bd224290` is part of the validation flow.
