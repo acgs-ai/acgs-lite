@@ -98,6 +98,7 @@ nav:
       - Runtime Legitimacy Kernel: api/legitimacy.md
       - GovernedAgent: api/governed_agent.md
       - Agent Discovery: api/agents.md
+      - Adaptive Policy Generation: api/policygen.md
       - MACI: api/maci.md
       - Audit Trail: api/audit.md
       - Compliance: api/compliance.md
