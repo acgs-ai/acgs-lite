@@ -436,7 +436,5 @@ class TestPublicAPI:
             assert hasattr(acgs_lite, name), name
 
     def test_stability_is_beta(self) -> None:
-        from acgs_lite import stability
-
-        assert stability("AdaptivePolicyGenerator") == "beta"
-        assert stability("PreContextBuilder") == "beta"
+        assert acgs_lite.stability("AdaptivePolicyGenerator") == "beta"
+        assert acgs_lite.stability("PreContextBuilder") == "beta"
