@@ -113,12 +113,12 @@ def analyze(obs: list[ToolObservation]) -> dict[str, Any]:
         for o in session_obs:
             if o.tool_type in PRODUCTION_TOOLS:
                 edits += 1
-            elif o.tool_type == "test" or (
-                o.metadata.get("command", "").startswith(("pytest", "make test"))
-            ):
-                if edits > 0:
-                    edit_test_cycles.append(edits)
-                    edits = 0
+            elif (
+                o.tool_type == "test"
+                or o.metadata.get("command", "").startswith(("pytest", "make test"))
+            ) and edits > 0:
+                edit_test_cycles.append(edits)
+                edits = 0
 
     grep_count = tool_counts.get("grep", 0)
     rg_count = tool_counts.get("rg", 0)

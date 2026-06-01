@@ -121,9 +121,8 @@ class RuntimeComplianceChecker:
             refs.append("SOC2 CC7.1")
 
         # Domain-level inference
-        if domain in ("healthcare", "medical", "clinical"):
-            if "HIPAA §164.502" not in refs:
-                refs.append("HIPAA §164.502")
+        if domain in ("healthcare", "medical", "clinical") and "HIPAA §164.502" not in refs:
+            refs.append("HIPAA §164.502")
 
         return refs
 
