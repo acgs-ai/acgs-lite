@@ -115,7 +115,7 @@ def test_constitutional_hash_matches_versioned_invariant_fixture() -> None:
 
     assert acgs_lite.__constitutional_hash__ == CONSTITUTIONAL_HASH
     assert Constitution.default().hash == CONSTITUTIONAL_HASH
-    assert CONSTITUTIONAL_HASH == expected["constitutional_hash"]
+    assert expected["constitutional_hash"] == CONSTITUTIONAL_HASH
 
 
 def test_valid_receipt_binding_still_allows_matching_execution_boundary() -> None:
