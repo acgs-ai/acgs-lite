@@ -603,9 +603,14 @@ class Rule(BaseModel):
         Supported value formats:
             - scalar: ``{"env": "production"}`` — equality check
             - dict with ``op``: ``{"env": {"op": "in", "value": ["prod", "staging"]}}``
+            - dict with fail-closed missing-context behavior:
+              ``{"env": {"op": "in", "value": ["prod"], "missing": "match"}}``
 
         Supported ``op`` values: ``equals``, ``not_equals``, ``contains``,
         ``in``, ``not_in``.
+
+        ``env`` and ``environment`` are treated as aliases. Their string values
+        are stripped and lower-cased before comparison.
 
         Args:
             context: Arbitrary context dict (e.g., from validate() call).
@@ -617,12 +622,30 @@ class Rule(BaseModel):
             return True
         for key, spec in self.condition.items():
             ctx_val = context.get(key)
+            if ctx_val is None and key == "env":
+                ctx_val = context.get("environment")
+            elif ctx_val is None and key == "environment":
+                ctx_val = context.get("env")
+            if key in {"env", "environment"} and isinstance(ctx_val, str):
+                ctx_val = ctx_val.strip().lower()
             if isinstance(spec, dict):
                 op = spec.get("op", "equals")
                 expected = spec.get("value")
+                if ctx_val is None and spec.get("missing") == "match":
+                    continue
+                if key in {"env", "environment"}:
+                    if isinstance(expected, str):
+                        expected = expected.strip().lower()
+                    elif isinstance(expected, list | tuple | set):
+                        expected = [
+                            value.strip().lower() if isinstance(value, str) else value
+                            for value in expected
+                        ]
             else:
                 op = "equals"
                 expected = spec
+                if key in {"env", "environment"} and isinstance(expected, str):
+                    expected = expected.strip().lower()
             if (
                 op == "equals"
                 and ctx_val != expected

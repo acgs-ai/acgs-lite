@@ -92,8 +92,8 @@ def _referenced_python_modules(command: str) -> list[str]:
     return modules
 
 
-def python_module_exists(module: str, base: Path) -> bool:
-    """Return whether a ``python -m`` target is discoverable from this checkout.
+def _python_module_status(module: str, base: Path) -> tuple[bool, str | None]:
+    """Return whether a ``python -m`` target is discoverable, plus error evidence.
 
     Prefer a source-tree path check for ``src/`` modules so validation does not import
     package ``__init__`` files or optional dependencies. Fall back to ``find_spec`` for
@@ -103,13 +103,19 @@ def python_module_exists(module: str, base: Path) -> bool:
     module_path = Path(*parts)
     src_root = base / "src"
     if (src_root / module_path.with_suffix(".py")).exists():
-        return True
+        return True, None
     if (src_root / module_path / "__init__.py").exists():
-        return True
+        return True, None
     try:
-        return importlib.util.find_spec(module) is not None
-    except (ImportError, ModuleNotFoundError, ValueError):
-        return False
+        return importlib.util.find_spec(module) is not None, None
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def python_module_exists(module: str, base: Path) -> bool:
+    """Return whether a ``python -m`` target is discoverable from this checkout."""
+    exists, _detail = _python_module_status(module, base)
+    return exists
 
 
 def load_registry(path: Path) -> dict:
@@ -184,10 +190,12 @@ def validate(root: Path | None = None) -> list[str]:
                 if not (base / script).exists():
                     problems.append(f"tool '{name}' {field} references missing script '{script}'")
             for module in _referenced_python_modules(command):
-                if not python_module_exists(module, base):
-                    problems.append(
-                        f"tool '{name}' {field} references missing python module '{module}'"
-                    )
+                exists, detail = _python_module_status(module, base)
+                if not exists:
+                    message = f"tool '{name}' {field} references missing python module '{module}'"
+                    if detail:
+                        message += f" ({detail})"
+                    problems.append(message)
 
         owner = str(tool.get("owner_module", ""))
         if owner and ("/" in owner or owner in {"Makefile", "pyproject.toml"}):

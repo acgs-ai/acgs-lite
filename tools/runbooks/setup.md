@@ -18,7 +18,9 @@ export OPENAI_API_KEY=test-key-for-unit-tests
 export ANTHROPIC_API_KEY=test-key-for-unit-tests
 ```
 
-`.env.example` lists the full (placeholder) set; `make setup` copies it to `.env.test`.
+`.env.example` lists the full (placeholder) set. `make setup` is an alias for
+`dev-setup`, which copies `.env.example` to `.env.test` only when `.env.test` does not
+already exist.
 
 ## Verify
 

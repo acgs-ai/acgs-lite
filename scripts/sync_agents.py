@@ -64,7 +64,6 @@ _REQUIRED_METADATA_LIST_KEYS = (
     "expected_artifacts",
     "failure_modes",
 )
-_REQUIRED_METADATA_KEYS = _REQUIRED_METADATA_STRING_KEYS + _REQUIRED_METADATA_LIST_KEYS
 
 
 def repo_root() -> Path:
@@ -161,7 +160,12 @@ def render_yaml(manifest: dict[str, Any]) -> str:
     """Render a manifest to deterministic YAML with the generated banner."""
     if yaml is None:  # pragma: no cover - guarded by caller.
         raise RuntimeError("PyYAML is required to render agent manifests")
-    body = yaml.safe_dump(manifest, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    body = yaml.safe_dump(
+        manifest,
+        sort_keys=False,
+        default_flow_style=False,
+        allow_unicode=True,
+    )
     return GENERATED_BANNER + body
 
 

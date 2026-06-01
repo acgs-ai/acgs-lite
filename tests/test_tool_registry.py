@@ -69,3 +69,33 @@ tools:
     problems = validate_tools.validate(tmp_path)
 
     assert any("missing python module" in problem for problem in problems)
+
+
+def test_tool_registry_reports_find_spec_exception_detail(tmp_path: Path, monkeypatch) -> None:
+    validate_tools = _load_validate_tools_module()
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "Makefile").write_text("demo:\n\t@true\n", encoding="utf-8")
+    (tmp_path / "tools" / "registry.yaml").write_text(
+        """
+version: 1
+tools:
+  - name: broken-module
+    purpose: Broken module command.
+    command: python3 -m broken.cli run
+    validation: make demo
+    owner_module: Makefile
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    def raise_runtime_error(module: str):
+        raise RuntimeError(f"cannot inspect {module}")
+
+    monkeypatch.setattr(validate_tools.importlib.util, "find_spec", raise_runtime_error)
+
+    problems = validate_tools.validate(tmp_path)
+
+    assert problems == [
+        "tool 'broken-module' command references missing python module 'broken.cli' "
+        "(RuntimeError: cannot inspect broken.cli)"
+    ]

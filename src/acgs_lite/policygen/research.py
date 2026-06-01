@@ -50,10 +50,35 @@ class PolicyRequirement:
     workflow_action: ViolationAction | None = None
     source: str = ""
     prod_only: bool = False
+    sources: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.sources:
+            sources = tuple(
+                dict.fromkeys(source.strip() for source in self.sources if source.strip())
+            )
+            object.__setattr__(
+                self,
+                "sources",
+                sources,
+            )
+            object.__setattr__(self, "source", ", ".join(sources))
+        elif self.source:
+            sources = tuple(source.strip() for source in self.source.split(",") if source.strip())
+            object.__setattr__(
+                self,
+                "sources",
+                sources,
+            )
+            object.__setattr__(self, "source", ", ".join(sources))
 
     def fingerprint(self) -> str:
         """Normalized text key used to de-duplicate requirements."""
         return _WS.sub(" ", self.text.strip().lower())
+
+    def provenance_sources(self) -> tuple[str, ...]:
+        """Return structured provenance sources with scalar ``source`` fallback."""
+        return self.sources
 
 
 @dataclass(slots=True, frozen=True)
@@ -77,6 +102,7 @@ class ResearchReport:
                     "patterns": list(r.patterns),
                     "tags": list(r.tags),
                     "source": r.source,
+                    "sources": list(r.provenance_sources()),
                     "prod_only": r.prod_only,
                 }
                 for r in self.requirements
@@ -91,15 +117,23 @@ class ResearchReport:
 
 _RISK_AREA_KB: dict[str, dict[str, Any]] = {
     "pii": {
-        "text": "Agents must not expose, log, or transmit personally identifiable information (PII).",
+        "text": (
+            "Agents must not expose, log, or transmit personally identifiable information (PII)."
+        ),
         "severity": Severity.CRITICAL,
         "category": "data-protection",
         "keywords": ["ssn", "social security", "credit card number", "date of birth", "passport"],
-        "patterns": [r"\b\d{3}-\d{2}-\d{4}\b", r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"],
+        "patterns": [
+            r"\b\d{3}-\d{2}-\d{4}\b",
+            r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b",
+        ],
         "tags": ["privacy"],
     },
     "secrets": {
-        "text": "Agents must not read, log, or transmit secrets, credentials, API keys, or private keys.",
+        "text": (
+            "Agents must not read, log, or transmit secrets, credentials, API keys, or "
+            "private keys."
+        ),
         "severity": Severity.CRITICAL,
         "category": "security",
         "keywords": ["api key", "secret key", "password", "private key", "access token"],
@@ -114,7 +148,9 @@ _RISK_AREA_KB: dict[str, dict[str, Any]] = {
         "tags": ["safety"],
     },
     "financial": {
-        "text": "Agents must not initiate financial transactions or move funds without authorization.",
+        "text": (
+            "Agents must not initiate financial transactions or move funds without authorization."
+        ),
         "severity": Severity.CRITICAL,
         "category": "financial",
         "keywords": ["transfer funds", "wire transfer", "payment", "refund", "charge card"],
@@ -122,7 +158,9 @@ _RISK_AREA_KB: dict[str, dict[str, Any]] = {
         "prod_only": True,
     },
     "data-deletion": {
-        "text": "Agents must not delete, drop, or truncate data or schema without explicit approval.",
+        "text": (
+            "Agents must not delete, drop, or truncate data or schema without explicit approval."
+        ),
         "severity": Severity.CRITICAL,
         "category": "data-integrity",
         "keywords": ["delete from", "drop table", "truncate", "rm -rf", "destroy"],
@@ -130,7 +168,9 @@ _RISK_AREA_KB: dict[str, dict[str, Any]] = {
         "prod_only": True,
     },
     "production-deploy": {
-        "text": "Agents must not deploy to production or mutate live infrastructure without approval.",
+        "text": (
+            "Agents must not deploy to production or mutate live infrastructure without approval."
+        ),
         "severity": Severity.HIGH,
         "category": "operations",
         "keywords": ["deploy production", "kubectl apply", "terraform apply", "force push"],
@@ -153,7 +193,9 @@ _RISK_AREA_KB: dict[str, dict[str, Any]] = {
         "tags": ["security"],
     },
     "transparency": {
-        "text": "Agents must disclose automated decision-making and provide explanations on request.",
+        "text": (
+            "Agents must disclose automated decision-making and provide explanations on request."
+        ),
         "severity": Severity.MEDIUM,
         "category": "transparency",
         "keywords": ["automated decision", "disclose", "explanation"],
@@ -172,14 +214,19 @@ _RISK_AREA_KB: dict[str, dict[str, Any]] = {
 _FRAMEWORK_KB: dict[str, tuple[dict[str, Any], ...]] = {
     "eu-ai-act": (
         {
-            "text": "High-risk AI systems must operate under a documented risk-management system (EU AI Act Art.9).",
+            "text": (
+                "High-risk AI systems must operate under a documented risk-management "
+                "system (EU AI Act Art.9)."
+            ),
             "severity": Severity.HIGH,
             "category": "compliance",
             "keywords": ["risk management", "high-risk"],
             "tags": ["eu-ai-act"],
         },
         {
-            "text": "High-risk AI systems must ensure effective human oversight (EU AI Act Art.14).",
+            "text": (
+                "High-risk AI systems must ensure effective human oversight (EU AI Act Art.14)."
+            ),
             "severity": Severity.HIGH,
             "category": "oversight",
             "keywords": ["human oversight"],
@@ -187,7 +234,10 @@ _FRAMEWORK_KB: dict[str, tuple[dict[str, Any], ...]] = {
             "workflow_action": ViolationAction.REQUIRE_HUMAN_REVIEW,
         },
         {
-            "text": "Maintain automatic logs ensuring traceability of system operation (EU AI Act Art.12).",
+            "text": (
+                "Maintain automatic logs ensuring traceability of system operation "
+                "(EU AI Act Art.12)."
+            ),
             "severity": Severity.MEDIUM,
             "category": "transparency",
             "keywords": ["logging", "traceability"],
@@ -196,7 +246,9 @@ _FRAMEWORK_KB: dict[str, tuple[dict[str, Any], ...]] = {
     ),
     "gdpr": (
         {
-            "text": "Process personal data only with a lawful basis and explicit consent (GDPR Art.6).",
+            "text": (
+                "Process personal data only with a lawful basis and explicit consent (GDPR Art.6)."
+            ),
             "severity": Severity.HIGH,
             "category": "data-protection",
             "keywords": ["lawful basis", "consent", "personal data"],
@@ -219,7 +271,9 @@ _FRAMEWORK_KB: dict[str, tuple[dict[str, Any], ...]] = {
             "tags": ["soc2"],
         },
         {
-            "text": "Production changes must follow a documented change-management process (SOC2 CC8).",
+            "text": (
+                "Production changes must follow a documented change-management process (SOC2 CC8)."
+            ),
             "severity": Severity.HIGH,
             "category": "operations",
             "keywords": ["change management", "deploy"],
@@ -229,14 +283,19 @@ _FRAMEWORK_KB: dict[str, tuple[dict[str, Any], ...]] = {
     ),
     "hipaa": (
         {
-            "text": "Protected health information (PHI) must be encrypted and access-audited (HIPAA Security Rule).",
+            "text": (
+                "Protected health information (PHI) must be encrypted and access-audited "
+                "(HIPAA Security Rule)."
+            ),
             "severity": Severity.CRITICAL,
             "category": "data-protection",
             "keywords": ["phi", "health information", "encrypt"],
             "tags": ["hipaa"],
         },
         {
-            "text": "Disclosures of PHI require minimum-necessary justification (HIPAA Privacy Rule).",
+            "text": (
+                "Disclosures of PHI require minimum-necessary justification (HIPAA Privacy Rule)."
+            ),
             "severity": Severity.HIGH,
             "category": "data-protection",
             "keywords": ["phi disclosure", "minimum necessary"],
@@ -256,6 +315,7 @@ def _spec_to_requirement(spec: Mapping[str, Any], *, source: str) -> PolicyRequi
         tags=tuple(spec.get("tags", ())),
         workflow_action=spec.get("workflow_action"),
         source=source,
+        sources=(source,),
         prod_only=bool(spec.get("prod_only", False)),
     )
 
@@ -317,6 +377,7 @@ class PolicyResearcher:
             patterns=tuple(rule.patterns),
             tags=("custom",),
             source="custom",
+            sources=("custom",),
         )
 
     @staticmethod
@@ -336,6 +397,9 @@ class PolicyResearcher:
                 order.append(fp)
                 continue
             severity = max(existing.severity, req.severity, key=_severity_rank)
+            sources = tuple(
+                dict.fromkeys((*existing.provenance_sources(), *req.provenance_sources()))
+            )
             by_fp[fp] = PolicyRequirement(
                 text=existing.text,
                 severity=severity,
@@ -344,7 +408,8 @@ class PolicyResearcher:
                 patterns=tuple(dict.fromkeys((*existing.patterns, *req.patterns))),
                 tags=tuple(dict.fromkeys((*existing.tags, *req.tags))),
                 workflow_action=existing.workflow_action or req.workflow_action,
-                source=existing.source,
+                source=", ".join(sources),
+                sources=sources,
                 prod_only=existing.prod_only or req.prod_only,
             )
         return [by_fp[fp] for fp in order]

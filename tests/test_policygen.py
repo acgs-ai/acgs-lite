@@ -11,15 +11,18 @@ from pathlib import Path
 
 import pytest
 
-from acgs_lite import Constitution
+import acgs_lite
 from acgs_lite.constitution.core import Severity
 from acgs_lite.constitution.rule import ViolationAction
+from acgs_lite.engine import GovernanceEngine
 from acgs_lite.policygen import (
     AdaptivePolicyGenerator,
     DomainRiskLevel,
+    PolicyRequirement,
     PolicyResearcher,
     PreContext,
     PreContextBuilder,
+    ResearchReport,
 )
 
 # -- PreContextBuilder ------------------------------------------------------------
@@ -44,6 +47,40 @@ class TestPreContextBuilder:
         assert "gdpr" in pc.frameworks
         assert "soc2" in pc.frameworks
 
+    def test_infer_detects_plural_secret_aliases(self) -> None:
+        pc = (
+            PreContextBuilder(
+                "Support Bot",
+                description="Handles API keys and access tokens for users.",
+            )
+            .infer()
+            .build()
+        )
+        assert "secrets" in pc.risk_areas
+
+    def test_infer_matches_aliases_as_words_not_substrings(self) -> None:
+        pc = (
+            PreContextBuilder(
+                "Authoring Assistant",
+                description="Creates executive summaries without touching auth or exec features.",
+            )
+            .infer()
+            .build()
+        )
+        assert "authentication" in pc.risk_areas
+        assert "code-execution" in pc.risk_areas
+
+        pc = (
+            PreContextBuilder(
+                "Authoring Assistant",
+                description="Creates executive summaries for documentation.",
+            )
+            .infer()
+            .build()
+        )
+        assert "authentication" not in pc.risk_areas
+        assert "code-execution" not in pc.risk_areas
+
     def test_alias_normalization_and_dedupe(self) -> None:
         pc = (
             PreContextBuilder("X")
@@ -58,9 +95,18 @@ class TestPreContextBuilder:
         pc = PreContextBuilder("Clinical healthcare triage").infer().build()
         assert pc.risk_level is DomainRiskLevel.HIGH
 
+    def test_high_risk_domain_classification_uses_word_boundaries(self) -> None:
+        pc = PreContextBuilder("Medicality notes").infer().build()
+        assert pc.risk_level is DomainRiskLevel.MINIMAL
+
     def test_two_high_impact_areas_is_high_risk(self) -> None:
         pc = PreContextBuilder("Ops Bot").add_risk_area("pii", "secrets").infer().build()
         assert pc.risk_level is DomainRiskLevel.HIGH
+
+    def test_high_impact_aliases_are_normalized_before_classification(self) -> None:
+        pc = PreContextBuilder("Ops Bot").add_risk_area("payment", "personal data").infer().build()
+        assert pc.risk_level is DomainRiskLevel.HIGH
+        assert pc.risk_areas == ("financial", "pii")
 
     def test_transparency_only_is_limited(self) -> None:
         pc = PreContextBuilder("Notes Bot").add_risk_area("transparency").infer().build()
@@ -127,6 +173,61 @@ class TestPolicyResearcher:
         pc = PreContext(domain="X", risk_areas=("pii", "pii"))
         report = PolicyResearcher().research(pc)
         assert len(report.requirements) == 1
+        assert report.requirements[0].source == "risk-area:pii"
+
+    def test_dedupe_preserves_unique_sources(self) -> None:
+        req = PolicyResearcher._dedupe(
+            [
+                PolicyRequirement(
+                    text="Agents must keep auditable records.",
+                    severity=Severity.MEDIUM,
+                    category="audit",
+                    source="risk-area:pii",
+                ),
+                PolicyRequirement(
+                    text="Agents must keep auditable records.",
+                    severity=Severity.HIGH,
+                    category="audit",
+                    source="framework:gdpr",
+                ),
+            ]
+        )[0]
+        assert req.severity is Severity.HIGH
+        assert req.source == "risk-area:pii, framework:gdpr"
+        assert req.sources == ("risk-area:pii", "framework:gdpr")
+
+        report = ResearchReport(domain="X", requirements=(req,))
+        serialized = report.to_dict()["requirements"][0]
+        assert serialized["source"] == "risk-area:pii, framework:gdpr"
+        assert serialized["sources"] == ["risk-area:pii", "framework:gdpr"]
+
+    def test_policy_requirement_positional_prod_only_abi_is_preserved(self) -> None:
+        req = PolicyRequirement(
+            "Agents must not mutate production.",
+            Severity.CRITICAL,
+            "operations",
+            (),
+            (),
+            (),
+            None,
+            "legacy:source",
+            True,
+        )
+
+        assert req.prod_only is True
+        assert req.sources == ("legacy:source",)
+
+    def test_policy_requirement_normalizes_explicit_sources(self) -> None:
+        req = PolicyRequirement(
+            text="Agents must keep auditable records.",
+            severity=Severity.MEDIUM,
+            category="audit",
+            source="ignored-when-sources-present",
+            sources=(" risk-area:pii ", "", "risk-area:pii", "framework:gdpr"),
+        )
+
+        assert req.provenance_sources() == ("risk-area:pii", "framework:gdpr")
+        assert req.source == "risk-area:pii, framework:gdpr"
 
     def test_optional_llm_provider_is_used_for_custom(self) -> None:
         class StubProvider:
@@ -156,7 +257,7 @@ def _high_risk_prod() -> PreContext:
 class TestAdaptiveGenerator:
     def test_generates_valid_roundtripping_yaml(self) -> None:
         policy = AdaptivePolicyGenerator().generate(_high_risk_prod())
-        reloaded = Constitution.from_yaml_str(policy.yaml)
+        reloaded = acgs_lite.Constitution.from_yaml_str(policy.yaml)
         assert reloaded.hash == policy.constitution.hash
         assert len(reloaded.rules) == len(policy.constitution.rules) >= 1
 
@@ -191,7 +292,73 @@ class TestAdaptiveGenerator:
         )
         policy = AdaptivePolicyGenerator().generate(pc)
         rule = policy.constitution.rules[0]
-        assert rule.condition == {"env": "production"}
+        assert rule.condition == {
+            "env": {"op": "in", "value": ["production", "prod", "live"], "missing": "match"}
+        }
+
+    def test_production_only_rule_is_conditioned_outside_production(self) -> None:
+        pc = (
+            PreContextBuilder("X", environment="staging")
+            .add_risk_area("data-deletion")  # prod_only in KB
+            .build()
+        )
+        policy = AdaptivePolicyGenerator().generate(pc)
+        rule = policy.constitution.rules[0]
+        assert rule.condition == {
+            "env": {"op": "in", "value": ["production", "prod", "live"], "missing": "match"}
+        }
+        assert rule.condition_matches({"env": "production"})
+        assert rule.condition_matches({"env": "prod"})
+        assert rule.condition_matches({"env": "live"})
+        assert rule.condition_matches({"env": "PROD"})
+        assert rule.condition_matches({"env": " prod "})
+        assert rule.condition_matches({"environment": "prod"})
+        assert rule.condition_matches({"environment": "Production"})
+        assert not rule.condition_matches({"env": "staging"})
+        assert not rule.condition_matches({"environment": "staging"})
+        assert rule.condition_matches({})
+        assert rule.workflow_action is ViolationAction.BLOCK_AND_NOTIFY
+
+    def test_production_only_rule_matches_environment_context_in_engine(self) -> None:
+        pc = (
+            PreContextBuilder("X", environment="staging")
+            .add_risk_area("data-deletion")  # prod_only in KB
+            .build()
+        )
+        policy = AdaptivePolicyGenerator().generate(pc)
+
+        result = GovernanceEngine(policy.constitution).validate(
+            "delete from users",
+            context={"environment": "prod"},
+            strict=False,
+        )
+
+        assert not result.valid
+        assert result.violations
+        result = GovernanceEngine(policy.constitution).validate(
+            "delete from users",
+            context={"environment": "Production"},
+            strict=False,
+        )
+        assert not result.valid
+        assert result.violations
+
+    def test_production_only_rule_fails_closed_when_environment_missing(self) -> None:
+        pc = (
+            PreContextBuilder("X", environment="staging")
+            .add_risk_area("data-deletion")  # prod_only in KB
+            .build()
+        )
+        policy = AdaptivePolicyGenerator().generate(pc)
+
+        result = GovernanceEngine(policy.constitution).validate(
+            "delete from users",
+            context={},
+            strict=False,
+        )
+
+        assert not result.valid
+        assert result.violations
 
     def test_production_critical_uses_block_and_notify(self) -> None:
         pc = PreContextBuilder("X", environment="production").add_risk_area("pii").build()
@@ -217,6 +384,26 @@ class TestAdaptiveGenerator:
         policy = AdaptivePolicyGenerator().generate(_high_risk_prod())
         assert all(r.provenance for r in policy.constitution.rules)
 
+    def test_comma_separated_provenance_is_recorded_as_multiple_entries(self) -> None:
+        class StubResearcher(PolicyResearcher):
+            def research(self, precontext: PreContext) -> ResearchReport:
+                return ResearchReport(
+                    domain=precontext.domain,
+                    requirements=(
+                        PolicyRequirement(
+                            text="Agents must keep auditable records.",
+                            severity=Severity.MEDIUM,
+                            category="audit",
+                            source="risk-area:pii, framework:gdpr",
+                            sources=("risk-area:pii", "framework:gdpr"),
+                        ),
+                    ),
+                )
+
+        pc = PreContextBuilder("X").build()
+        policy = AdaptivePolicyGenerator(researcher=StubResearcher()).generate(pc)
+        assert policy.constitution.rules[0].provenance == ["risk-area:pii", "framework:gdpr"]
+
     def test_summary_counts(self) -> None:
         policy = AdaptivePolicyGenerator().generate(_high_risk_prod())
         assert policy.summary["rule_count"] == len(policy.constitution.rules)
@@ -227,7 +414,7 @@ class TestAdaptiveGenerator:
         path = AdaptivePolicyGenerator().write_yaml(_high_risk_prod(), out)
         assert path == out
         # The written file loads as a constitution.
-        loaded = Constitution.from_yaml(str(out))
+        loaded = acgs_lite.Constitution.from_yaml(str(out))
         assert len(loaded.rules) >= 1
 
 
@@ -236,8 +423,6 @@ class TestAdaptiveGenerator:
 
 class TestPublicAPI:
     def test_top_level_imports(self) -> None:
-        import acgs_lite
-
         for name in (
             "AdaptivePolicyGenerator",
             "PreContextBuilder",

@@ -12,7 +12,8 @@ valid acgs-lite constitution YAML, *adapting* the output to the pre-context:
   HIGH rules to CRITICAL; an UNACCEPTABLE domain escalates everything one step).
 - **Enforcement action** hardens in production (blocking CRITICAL rules become
   ``block_and_notify``).
-- **Activation conditions** gate production-only requirements on ``env=production``.
+- **Activation conditions** gate production-only requirements on production env aliases
+  (``production``, ``prod``, and ``live``).
 - **Permission ceiling** tightens with risk (``permissive`` -> ``standard`` ->
   ``strict``).
 
@@ -34,7 +35,7 @@ from typing import Any
 from acgs_lite.constitution import Constitution, Severity
 from acgs_lite.constitution.rule import ViolationAction
 from acgs_lite.constitution.templates import ConstitutionBuilder
-from acgs_lite.policygen.context import DomainRiskLevel, PreContext
+from acgs_lite.policygen.context import PRODUCTION_ENV_VALUES, DomainRiskLevel, PreContext
 from acgs_lite.policygen.research import PolicyRequirement, PolicyResearcher, ResearchReport
 
 _SEVERITY_ORDER: tuple[Severity, ...] = (
@@ -114,10 +115,15 @@ class AdaptivePolicyGenerator:
         rationale: list[str] = []
         for counter, req in enumerate(report.requirements, start=1):
             severity = self._adapt_severity(req.severity, precontext.risk_level)
-            workflow = self._adapt_workflow(req, severity, is_prod=is_prod)
+            workflow = self._adapt_workflow(req, severity, is_prod=is_prod or req.prod_only)
             rule_id = f"{prefix}-{_category_code(req.category)}-{counter:03d}"
-            condition = {"env": "production"} if (req.prod_only and is_prod) else {}
-            tags = tuple(dict.fromkeys((*req.tags, *((precontext.domain.lower(),)))))
+            condition = (
+                {"env": {"op": "in", "value": list(PRODUCTION_ENV_VALUES), "missing": "match"}}
+                if req.prod_only
+                else {}
+            )
+            tags = tuple(dict.fromkeys((*req.tags, precontext.domain.lower())))
+            provenance = list(req.provenance_sources())
             builder.add_rule(
                 rule_id,
                 req.text,
@@ -129,7 +135,7 @@ class AdaptivePolicyGenerator:
                 tags=list(tags),
                 priority=_PRIORITY_BY_SEVERITY[severity],
                 condition=condition,
-                provenance=[req.source] if req.source else [],
+                provenance=provenance,
             )
             rationale.append(
                 f"{rule_id}: {req.source or 'custom'} -> {severity.value}"

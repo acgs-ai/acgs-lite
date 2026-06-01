@@ -22,6 +22,7 @@ Constitutional Hash: 608508a9bd224290
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
@@ -50,6 +51,7 @@ _RISK_RANK: dict[DomainRiskLevel, int] = {
     DomainRiskLevel.HIGH: 2,
     DomainRiskLevel.UNACCEPTABLE: 3,
 }
+PRODUCTION_ENV_VALUES = ("production", "prod", "live")
 
 # Canonical risk-area vocabulary. Aliases map free-form terms onto a stable key so
 # the researcher's knowledge base can be addressed deterministically.
@@ -63,7 +65,11 @@ _RISK_AREA_ALIASES: dict[str, str] = {
     "credential": "secrets",
     "credentials": "secrets",
     "api key": "secrets",
+    "api keys": "secrets",
+    "access token": "secrets",
+    "access tokens": "secrets",
     "token": "secrets",
+    "tokens": "secrets",
     "code execution": "code-execution",
     "code-execution": "code-execution",
     "exec": "code-execution",
@@ -142,6 +148,11 @@ def _normalize_terms(values: tuple[str, ...], aliases: Mapping[str, str]) -> tup
     return tuple(out)
 
 
+def _contains_alias(haystack: str, alias: str) -> bool:
+    """Return whether ``alias`` appears as a complete token/phrase in ``haystack``."""
+    return re.search(rf"\b{re.escape(alias)}\b", haystack) is not None
+
+
 @dataclass(slots=True, frozen=True)
 class PreContext:
     """The assembled, normalized research brief for policy generation."""
@@ -158,7 +169,7 @@ class PreContext:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def is_production(self) -> bool:
-        return self.environment.strip().lower() in {"production", "prod", "live"}
+        return self.environment.strip().lower() in PRODUCTION_ENV_VALUES
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -237,21 +248,22 @@ class PreContextBuilder:
         """
         haystack = f"{self._domain} {self._description}".lower()
         for alias, canonical in _RISK_AREA_ALIASES.items():
-            if alias in haystack and canonical not in self._risk_areas:
+            if _contains_alias(haystack, alias) and canonical not in self._risk_areas:
                 self._risk_areas.append(canonical)
         for alias, canonical in _FRAMEWORK_ALIASES.items():
-            if alias in haystack and canonical not in self._frameworks:
+            if _contains_alias(haystack, alias) and canonical not in self._frameworks:
                 self._frameworks.append(canonical)
         if self._risk_level is None:
             self._risk_level = self._classify_risk(haystack)
         return self
 
     def _classify_risk(self, haystack: str) -> DomainRiskLevel:
-        if any(domain in haystack for domain in _HIGH_RISK_DOMAINS):
+        if any(_contains_alias(haystack, domain) for domain in _HIGH_RISK_DOMAINS):
             return DomainRiskLevel.HIGH
         # Several high-impact risk areas present -> treat as high risk.
         high_impact = {"pii", "secrets", "code-execution", "financial", "data-deletion"}
-        if len(high_impact.intersection(self._risk_areas)) >= 2:
+        normalized_risk_areas = _normalize_terms(tuple(self._risk_areas), _RISK_AREA_ALIASES)
+        if len(high_impact.intersection(normalized_risk_areas)) >= 2:
             return DomainRiskLevel.HIGH
         if self._risk_areas or self._frameworks:
             return DomainRiskLevel.LIMITED
@@ -272,4 +284,4 @@ class PreContextBuilder:
         )
 
 
-__all__ = ["DomainRiskLevel", "PreContext", "PreContextBuilder"]
+__all__ = ["DomainRiskLevel", "PRODUCTION_ENV_VALUES", "PreContext", "PreContextBuilder"]
