@@ -229,6 +229,16 @@ for _s in _openshell_syms:
         _s,
         "pip install acgs-lite",
     )
+from acgs_lite.agents import (
+    AgentCapabilityProfile,
+    AgentRegistry,
+    AgentSelection,
+    GovernedAgentSelector,
+    NoEligibleAgentError,
+    SelectionDeniedError,
+    get_agent_registry,
+    reset_agent_registry,
+)
 from acgs_lite.provenance import ProvenanceNode, ProvenanceRecord
 from acgs_lite.scoring import ConstitutionalImpactScorer, RuleBasedScorer, score_impact
 from acgs_lite.trajectory import (
@@ -264,6 +274,15 @@ def set_license(key: str) -> LicenseInfo:
 __constitutional_hash__ = CONSTITUTIONAL_HASH
 
 __all__ = [
+    # Governed agent discovery (registry + selector)
+    "AgentCapabilityProfile",
+    "AgentRegistry",
+    "AgentSelection",
+    "GovernedAgentSelector",
+    "NoEligibleAgentError",
+    "SelectionDeniedError",
+    "get_agent_registry",
+    "reset_agent_registry",
     # Core
     "Constitution",
     "ConstitutionBuilder",
@@ -546,6 +565,15 @@ _STABILITY_BETA: frozenset[str] = frozenset(
         "LicenseInfo",
         "LicenseManager",
         "Tier",
+        # Governed agent discovery (registry + selector)
+        "AgentCapabilityProfile",
+        "AgentRegistry",
+        "AgentSelection",
+        "GovernedAgentSelector",
+        "NoEligibleAgentError",
+        "SelectionDeniedError",
+        "get_agent_registry",
+        "reset_agent_registry",
     }
 )
 

@@ -97,6 +97,7 @@ nav:
       - Governance Engine: api/engine.md
       - Runtime Legitimacy Kernel: api/legitimacy.md
       - GovernedAgent: api/governed_agent.md
+      - Agent Discovery: api/agents.md
       - MACI: api/maci.md
       - Audit Trail: api/audit.md
       - Compliance: api/compliance.md
