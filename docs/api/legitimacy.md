@@ -134,6 +134,53 @@ Receipts and audit logs are complementary:
 - the audit log proves the governance trail has not been tampered with;
 - either proof becoming missing or unverifiable is a fail-closed condition.
 
+## Signed, Replay-Verifiable Receipts (optional)
+
+The `receipt_hash` proves a receipt was not *altered*. It does not prove *who*
+issued it — anyone who can recompute the hash can mint a fresh one. The optional
+`crypto` extra (`pip install "acgs-lite[crypto]"`) binds the receipt's commitment
+to an Ed25519 signature so an independent party, holding only the signer's public
+key, can establish authenticity and replay the decision.
+
+```python
+from acgs_lite.legitimacy import Ed25519ReceiptSigner, sign_receipt, replay_and_verify
+
+signer = Ed25519ReceiptSigner.generate()        # or .from_seed(...) for determinism
+signed = sign_receipt(receipt, signer)          # -> SignedReceipt
+trusted_pubkey = signer.public_key_hex()
+
+signed.verify(trusted_pubkey)                    # authenticity (REQUIRES a trusted key)
+signed.verify_integrity()                        # self-consistency only — NOT authenticity
+
+result = replay_and_verify(signed, evaluator, expected_public_key=trusted_pubkey)
+result.ok                                        # signature + hash + verdict all reproduce
+```
+
+Public names (require the `crypto` extra at runtime):
+
+- `Ed25519ReceiptSigner` — `generate()`, `from_seed(bytes)`, `from_private_bytes(bytes)`,
+  `public_key_hex()`, `sign_receipt(receipt)`.
+- `SignedReceipt` — `verify(expected_public_key)`, `verify_integrity()`,
+  `to_dict()` / `from_dict()` for the wire.
+- `sign_receipt(receipt, signer)`, `verify_signature(algorithm, public_key, message, signature)`.
+- `replay_and_verify(signed, evaluator, *, expected_public_key)` -> `ReplayVerification`
+  (`hash_valid`, `signature_valid`, `verdict_reproduced`, `recorded_decision`,
+  `rederived_decision`, `mismatches`, `ok`). The `evaluator` receives a
+  `ReplayInputs` and returns a decision state.
+
+Boundaries (fail closed, by design):
+
+- `verify(expected_public_key)` requires a trust anchor the caller already holds;
+  an unpinned signature only proves *someone* signed it. `verify_integrity()`
+  exists for the self-consistency check and must never be treated as authenticity.
+- Signing requires `cryptography`; without it, signer construction and
+  verification raise `ReceiptSigningUnavailable` rather than degrading to a
+  symmetric scheme.
+- The signing key is held in process memory. Back `Ed25519ReceiptSigner` with a
+  KMS/HSM before relying on receipts for non-repudiation.
+- Receipts carry no nonce or timestamp in the signed bytes; enforce `request_id`
+  uniqueness at the application layer to prevent replay of a valid receipt.
+
 ## Failure Contract
 
 `validate_receipt_for_execution()` raises `LegitimacyInvariantError` before

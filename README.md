@@ -31,6 +31,13 @@ transactions, or other side effects. It checks the proposed action against a
 versioned constitution, returns an explicit decision, issues a receipt the
 executor can verify, and records audit evidence for later inspection.
 
+A tamper-evident audit log proves a record was not *altered*. With the optional
+`crypto` extra, `acgs-lite` goes further: every decision receipt can be
+**Ed25519-signed and independently replay-verifiable**, so a third party holding
+only the signer's public key can prove *who* decided and re-derive the
+ALLOW / DENY / TRANSFORM verdict — without trusting the operator. See
+[Signed, Replay-Verifiable Receipts](#signed-replay-verifiable-receipts).
+
 Try the membrane locally:
 
 ```bash
@@ -457,6 +464,49 @@ for entry in log.entries:
 assert log.verify_chain(), "Audit log tampered!"
 ```
 
+### Signed, Replay-Verifiable Receipts
+
+A tamper-evident audit log proves a record was not *altered*. A signed,
+replay-verifiable receipt additionally proves *who* decided and that the verdict
+*re-derives* — without trusting the operator. `acgs-lite` provides both.
+
+Every `DecisionReceipt` already commits to its full payload through a SHA-256
+`receipt_hash`. With the optional `crypto` extra you can bind that commitment to
+an Ed25519 signature, so an independent party — holding only the signer's public
+key — can verify the receipt's authenticity and re-derive its decision from the
+recorded inputs:
+
+```python
+# pip install "acgs-lite[crypto]"
+from acgs_lite.legitimacy import Ed25519ReceiptSigner, sign_receipt, replay_and_verify
+
+signer = Ed25519ReceiptSigner.generate()       # bring your own key store / KMS
+signed = sign_receipt(receipt, signer)         # Ed25519 over the receipt commitment
+trusted_pubkey = signer.public_key_hex()       # distributed out-of-band to verifiers
+
+# An auditor, holding only the trusted public key, verifies authenticity...
+assert signed.verify(trusted_pubkey)
+
+# ...and re-derives the recorded verdict from the inputs (not just the hash):
+result = replay_and_verify(signed, policy_evaluator, expected_public_key=trusted_pubkey)
+assert result.ok   # signature valid, hash intact, AND the verdict reproduced
+```
+
+Honest boundaries:
+
+- Signing is **optional** (`crypto` extra, Ed25519 via `cryptography`). The core
+  membrane and audit log do not require it.
+- Verification **requires a trusted public key**. `verify(expected_public_key)`
+  is mandatory; `verify_integrity()` only checks self-consistency and is *not*
+  authenticity.
+- The signing key is held in process memory. For production non-repudiation,
+  back `Ed25519ReceiptSigner` with your own KMS/HSM.
+- Receipts carry no anti-replay nonce; enforce `request_id` uniqueness at the
+  application layer.
+
+See [`docs/api/legitimacy.md`](./docs/api/legitimacy.md) for the full receipt and
+replay-verification API.
+
 ---
 
 ## 🔒 Safety Defaults
@@ -500,6 +550,7 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 | `Rule`, `Severity`, `ValidationResult` | ✅ **Stable** | Stable data model; additive changes only |
 | `MACIEnforcer` — role separation | ✅ **Stable** | Role checks are enforced by default in `GovernedAgent`; pass a MACI role plus per-call `governance_action` |
 | `AuditLog` — SHA-256 chained trail | ✅ **Stable** | Thread-safe append-only; chain verification tested |
+| Signed receipts (`SignedReceipt`, `replay_and_verify`) | 🔶 **Beta** | Optional `crypto` extra; Ed25519 over the receipt commitment + verdict replay; tested; in-memory key (bring your own KMS) |
 | `GovernedAgent` — drop-in wrapper | ✅ **Stable** | Synchronous and async paths covered |
 | OpenAI / Anthropic / LangChain adapters | ✅ **Stable** | Thin validated wrappers; covers completions and streaming |
 | Constitution lifecycle API (HTTP) | 🔶 **Beta** | Draft/review/activate/rollback endpoints are functional; API may evolve |
