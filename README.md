@@ -109,6 +109,10 @@ supported-version, scope, and disclosure-window policy is in
 
 Start here for the shortest local verification paths:
 
+- **Agent readiness gate** — `python3 scripts/agent_ready.py --run-tests`
+  verifies the repo `agent-index.json` loads through `AgentRegistry`, confirms
+  the governance-review route ranks first, and runs the focused agent-discovery
+  tests without requiring `make`
 - **AI-agent install verify** — [`examples/agent_quickstart/`](./examples/agent_quickstart/) runs a self-verifying suite: `GovernedCallable` + MACI + AuditLog in one script, exits 0 on success
 - **Goal v1.0 membrane** — [`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py) shows ALLOW / DENY / TRANSFORM decisions, receipts, executor refusal, and audit evidence
 - **Minimal proof** — [`examples/basic_governance/`](./examples/basic_governance/) shows safe requests passing and unsafe ones blocked before execution

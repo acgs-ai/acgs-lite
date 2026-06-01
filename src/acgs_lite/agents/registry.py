@@ -131,9 +131,7 @@ class AgentRegistry:
         matches, the result is ``[]`` and the governed selector fails closed rather
         than picking an unsuitable agent.
         """
-        return self.rank_profiles(
-            self.list_profiles(active_only=active_only), task, domain=domain
-        )
+        return self.rank_profiles(self.list_profiles(active_only=active_only), task, domain=domain)
 
     def clear(self) -> None:
         """Remove all registered profiles."""

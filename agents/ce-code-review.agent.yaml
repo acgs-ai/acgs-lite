@@ -1,0 +1,40 @@
+# GENERATED FILE — do not edit by hand.
+# Source of truth: agent-index.json (repo root). Regenerate with: make agents-sync
+agent_id: ce-code-review
+name: Code Review
+description: Structured code review using tiered persona agents, confidence-gated
+  findings, and a merge/dedup pipeline for changes before a PR.
+support_level: maintained
+stability: stable
+is_active: true
+capabilities:
+- review
+- correctness
+- maintainability
+- testing
+domains:
+- review
+skills:
+- persona-review
+- diff-review
+tags:
+- pre-pr
+role: reviewer
+purpose: General correctness/maintainability/testing review of a change before a PR.
+scope: Read-only review of the current diff. Emits findings; may post PR comments
+  when asked.
+required_tools:
+- git
+inputs:
+- current diff or PR number
+outputs:
+- confidence-gated, deduped findings
+safety_constraints:
+- do not apply changes unless explicitly asked
+execution_command: /code-review
+validation_checks:
+- make check
+expected_artifacts:
+- review findings
+failure_modes:
+- empty diff -> nothing to review

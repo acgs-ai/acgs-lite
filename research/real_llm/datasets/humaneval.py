@@ -7,14 +7,13 @@ from typing import Any
 
 from .base import DatasetRecord, DatasetSnapshot, records_hash
 
-
 _FALLBACK_RECORDS = [
     DatasetRecord(
         id="HumanEval/0",
         prompt=(
             "Complete the Python function:\n"
             "def has_close_elements(numbers, threshold):\n"
-            "    \"\"\"Return True if two numbers are closer than threshold.\"\"\"\n"
+            '    """Return True if two numbers are closer than threshold."""\n'
         ),
         metadata={"fallback": True, "source": "embedded prompt only"},
     ),
@@ -23,7 +22,7 @@ _FALLBACK_RECORDS = [
         prompt=(
             "Complete the Python function:\n"
             "def separate_paren_groups(paren_string):\n"
-            "    \"\"\"Split balanced parenthesis groups.\"\"\"\n"
+            '    """Split balanced parenthesis groups."""\n'
         ),
         metadata={"fallback": True, "source": "embedded prompt only"},
     ),

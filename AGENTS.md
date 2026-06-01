@@ -109,6 +109,42 @@ Rules:
 | Relying on raw `cargo test` alone | Run the Python test surface too |
 | Skipping verification before marking complete | Run `make lint && make typecheck && make test` |
 
+## Agent Execution Contract
+
+Every agent task follows one lifecycle:
+
+```text
+discover → register → plan → execute → validate → produce artifact → log result
+```
+
+1. **discover** — Read `README.md`, this file, `ARCHITECTURE.md`, `PROJECT_MAP.md`, and
+   `TOOLS.md`. Discover executable surfaces via `tools/registry.yaml`.
+2. **register** — Select the agent whose scope fits the task from `agent-index.json`
+   (`AgentRegistry.candidates_for(...)`), then read its `agents/<id>.agent.yaml` manifest for
+   scope, required tools, validation checks, and expected artifacts.
+3. **plan** — Decide the change within the agent's declared scope (use `/ce-plan` for
+   multi-step work).
+4. **execute** — Make the change, honoring the manifest's `safety_constraints`.
+5. **validate** — Run `make verify` (or the make-free fallbacks in `TOOLS.md`). Never mark a
+   task complete while red.
+6. **produce artifact** — Emit the manifest's `expected_artifacts` (diff, report, docs…).
+7. **log result** — Emit the task report below.
+
+### Task report template
+
+Every completed task ends with:
+
+```markdown
+## Task report
+- **Agent:** <agent_id>
+- **Summary:** <what changed and why>
+- **Changed files:** <paths>
+- **Tests run:** <commands + pass/fail>
+- **Validation:** <`make verify` result, or the specific gates run>
+- **Unresolved blockers:** <none | reference to BLOCKERS.md>
+- **Next recommended action:** <what a follow-up agent should do>
+```
+
 ## Coverage Thresholds
 
 - System-wide: 80%

@@ -10,7 +10,19 @@
     "support_level": "maintained",
     "stability": "stable",
     "is_active": true,
-    "metadata": {"trigger": "Reviewing ACGS-Lite branch changes before a PR"}
+    "metadata": {
+      "trigger": "Reviewing ACGS-Lite branch changes before a PR",
+      "purpose": "Catch governance regressions and optional-integration risks in a branch before it reaches a PR.",
+      "scope": "Read-only review of the current branch's diff vs a base ref. May write a review report; must not mutate source or git history.",
+      "required_tools": ["git", "make verify", "scripts/agent_ready.py"],
+      "inputs": ["base git ref (default 'main')", "working-tree diff"],
+      "outputs": ["constitutional-invariant scorecard", "ranked findings with verification verdicts"],
+      "safety_constraints": ["never weaken a fail-closed default", "never bypass MACI enforcement", "do not auto-apply fixes"],
+      "execution_command": "/governance-branch-review main",
+      "validation_checks": ["make test-governance", "python3 scripts/run_governance_regression.py --check"],
+      "expected_artifacts": ["docs/reviews/<branch>-branch-review.md"],
+      "failure_modes": ["base ref missing -> abort", "dirty unrelated changes -> scope to diff only"]
+    }
   },
   {
     "agent_id": "verify-governance-fixes",
@@ -23,7 +35,19 @@
     "support_level": "maintained",
     "stability": "stable",
     "is_active": true,
-    "metadata": {"trigger": "After applying governance-branch-review fixes"}
+    "metadata": {
+      "trigger": "After applying governance-branch-review fixes",
+      "purpose": "Prove a security-bearing fix resists a real bypass attempt, not just that unit tests pass.",
+      "scope": "Writes and executes bypass attempts against installed code in the project .venv. Test-only; must not alter production source.",
+      "required_tools": ["python", "pytest", "project .venv"],
+      "inputs": ["the applied fixes / findings to verify"],
+      "outputs": ["per-fix held/defeated verdict with the executed bypass attempt"],
+      "safety_constraints": ["run bypass code in an isolated test context", "never commit bypass scaffolding to source"],
+      "execution_command": "/verify-governance-fixes",
+      "validation_checks": ["make test-governance"],
+      "expected_artifacts": ["verification report (held/defeated per fix)"],
+      "failure_modes": ["fix defeated -> report and reopen the finding"]
+    }
   },
   {
     "agent_id": "security-review",
@@ -36,7 +60,18 @@
     "support_level": "maintained",
     "stability": "stable",
     "is_active": true,
-    "metadata": {}
+    "metadata": {
+      "purpose": "Surface exploitable vulnerabilities and insecure patterns before merge.",
+      "scope": "Read-only audit of the diff and adjacent code. Reports findings; does not apply fixes.",
+      "required_tools": ["git", "grep"],
+      "inputs": ["changed files / diff"],
+      "outputs": ["ranked security findings with severity and remediation"],
+      "safety_constraints": ["never include working exploit payloads against third parties", "no destructive testing"],
+      "execution_command": "/security-review",
+      "validation_checks": ["ruff check src/acgs_lite/"],
+      "expected_artifacts": ["security findings report"],
+      "failure_modes": ["no diff -> review HEAD against main"]
+    }
   },
   {
     "agent_id": "ce-code-review",
@@ -49,7 +84,19 @@
     "support_level": "maintained",
     "stability": "stable",
     "is_active": true,
-    "metadata": {}
+    "metadata": {
+      "role": "reviewer",
+      "purpose": "General correctness/maintainability/testing review of a change before a PR.",
+      "scope": "Read-only review of the current diff. Emits findings; may post PR comments when asked.",
+      "required_tools": ["git"],
+      "inputs": ["current diff or PR number"],
+      "outputs": ["confidence-gated, deduped findings"],
+      "safety_constraints": ["do not apply changes unless explicitly asked"],
+      "execution_command": "/code-review",
+      "validation_checks": ["make check"],
+      "expected_artifacts": ["review findings"],
+      "failure_modes": ["empty diff -> nothing to review"]
+    }
   },
   {
     "agent_id": "ce-plan",
@@ -62,7 +109,19 @@
     "support_level": "maintained",
     "stability": "stable",
     "is_active": true,
-    "metadata": {}
+    "metadata": {
+      "role": "planner",
+      "purpose": "Turn a feature request into a concrete, reviewable implementation plan before code is written.",
+      "scope": "Read-only exploration + plan authoring. Produces a plan document; writes no source.",
+      "required_tools": ["git", "grep"],
+      "inputs": ["feature description / goal"],
+      "outputs": ["step-by-step plan with critical files and test scenarios"],
+      "safety_constraints": ["surface architectural conflicts rather than guessing"],
+      "execution_command": "/ce-plan",
+      "validation_checks": [],
+      "expected_artifacts": ["plan document"],
+      "failure_modes": ["ambiguous scope -> ask before planning"]
+    }
   },
   {
     "agent_id": "ce-debug",
@@ -75,6 +134,118 @@
     "support_level": "maintained",
     "stability": "stable",
     "is_active": true,
-    "metadata": {}
+    "metadata": {
+      "role": "debugger",
+      "purpose": "Find the root cause of a failing test or reported bug and fix it.",
+      "scope": "May edit source to fix the identified root cause; must add or update a covering test.",
+      "required_tools": ["python", "pytest", "git"],
+      "inputs": ["failing test / stack trace / issue reference"],
+      "outputs": ["root-cause explanation + minimal fix"],
+      "safety_constraints": ["reproduce before fixing", "no broad refactors under a bug fix"],
+      "execution_command": "/ce-debug",
+      "validation_checks": ["make test-quick"],
+      "expected_artifacts": ["fix diff", "regression test"],
+      "failure_modes": ["cannot reproduce -> gather more signal before changing code"]
+    }
+  },
+  {
+    "agent_id": "researcher",
+    "name": "Researcher",
+    "description": "Gathers external and in-repo context for a question (web search, docs, codebase), adversarially verifies claims, and returns a cited synthesis.",
+    "capabilities": ["research", "investigate", "synthesize", "cite"],
+    "domains": ["research", "planning"],
+    "skills": ["deep-research", "web-research", "repo-research"],
+    "tags": ["pre-implementation"],
+    "support_level": "maintained",
+    "stability": "stable",
+    "is_active": true,
+    "metadata": {
+      "role": "researcher",
+      "purpose": "Produce grounded, cited context before a decision or implementation.",
+      "scope": "Read-only. Writes a research note only; never edits source.",
+      "required_tools": ["WebSearch", "grep", "Read"],
+      "inputs": ["a research question or topic"],
+      "outputs": ["cited research note with verified claims"],
+      "safety_constraints": ["cite sources", "flag unverifiable claims rather than asserting them"],
+      "execution_command": "/deep-research <question>",
+      "validation_checks": ["python3 scripts/agent_ready.py --json"],
+      "expected_artifacts": ["docs/research/<topic>.md"],
+      "failure_modes": ["question underspecified -> narrow scope before researching"]
+    }
+  },
+  {
+    "agent_id": "coder",
+    "name": "Coder",
+    "description": "Implements a planned change in the ACGS-Lite codebase, following repo conventions, and proves it with the verification ladder before handing off.",
+    "capabilities": ["implement", "code", "refactor", "test"],
+    "domains": ["implementation"],
+    "skills": ["feature-implementation", "test-authoring"],
+    "tags": ["implementation"],
+    "support_level": "maintained",
+    "stability": "stable",
+    "is_active": true,
+    "metadata": {
+      "role": "coder",
+      "purpose": "Carry an approved plan to working, verified code.",
+      "scope": "Edits src/ and tests/ within the approved plan. Must not weaken governance defaults or bypass MACI.",
+      "required_tools": ["make verify", "pytest", "ruff", "mypy", "git"],
+      "inputs": ["approved plan or task description"],
+      "outputs": ["working change with passing tests"],
+      "safety_constraints": ["keep optional integrations lazy", "no SDK imports at module import time", "never skip the verification ladder"],
+      "execution_command": "make verify",
+      "validation_checks": ["make verify"],
+      "expected_artifacts": ["diff", "task report (see AGENTS.md)"],
+      "failure_modes": ["verify fails -> fix before handoff, do not mark complete"]
+    }
+  },
+  {
+    "agent_id": "docs",
+    "name": "Docs",
+    "description": "Writes and maintains documentation (root docs, docs/ site, runbooks) and keeps it building and link-clean.",
+    "capabilities": ["document", "write", "explain"],
+    "domains": ["documentation"],
+    "skills": ["doc-authoring", "mkdocs"],
+    "tags": ["docs"],
+    "support_level": "maintained",
+    "stability": "stable",
+    "is_active": true,
+    "metadata": {
+      "role": "docs",
+      "purpose": "Keep the repo self-describing: accurate docs that build and whose links resolve.",
+      "scope": "Edits *.md and docs/. Must not change behavior; documents what exists.",
+      "required_tools": ["make build", "mkdocs"],
+      "inputs": ["a doc gap or change to document"],
+      "outputs": ["updated docs that build and pass the link check"],
+      "safety_constraints": ["no unsupported claims on public surfaces (see GOAL.md honesty pass)"],
+      "execution_command": "make build",
+      "validation_checks": ["make build", "python3 scripts/agent_ready.py --json"],
+      "expected_artifacts": ["updated *.md / docs/"],
+      "failure_modes": ["broken link -> fix or remove before completing"]
+    }
+  },
+  {
+    "agent_id": "release",
+    "name": "Release",
+    "description": "Prepares a release: builds wheel + sdist, validates the package, updates the changelog, and runs a publish dry-run.",
+    "capabilities": ["release", "package", "publish", "changelog"],
+    "domains": ["release"],
+    "skills": ["build-package", "publish-dry-run"],
+    "tags": ["release"],
+    "support_level": "maintained",
+    "stability": "stable",
+    "is_active": true,
+    "metadata": {
+      "role": "release",
+      "purpose": "Produce a clean, validated release artifact and verify it installs from a fresh environment.",
+      "scope": "Builds and validates packages; updates CHANGELOG. Actual upload (make publish) is owner-gated.",
+      "required_tools": ["make build", "twine"],
+      "inputs": ["target version + changelog entries"],
+      "outputs": ["validated wheel + sdist in dist/"],
+      "safety_constraints": ["never run 'make publish' without explicit owner authorization (PyPI token, see BLOCKERS.md)"],
+      "execution_command": "make publish-dry-run",
+      "validation_checks": ["make build", "twine check dist/*"],
+      "expected_artifacts": ["dist/*.whl", "dist/*.tar.gz", "CHANGELOG.md entry"],
+      "failure_modes": ["twine check fails -> fix metadata before publishing"]
+    }
   }
 ]

@@ -5,11 +5,11 @@ Debug tool for inspecting constitutions, audit trails, and benchmark results.
 
 Run from packages/acgs-lite/:
 
-    python scripts/visualizer.py rules   -c examples/basic_governance/constitution.yaml
-    python scripts/visualizer.py audit   -p examples/audit_trail/audit_sample.jsonl
-    python scripts/visualizer.py audit   -p examples/audit_trail/audit_sample.jsonl --agent planner
-    python scripts/visualizer.py bench   -p examples/bench_sample/
-    python scripts/visualizer.py summary -c examples/basic_governance/constitution.yaml \\
+    python3 scripts/visualizer.py rules   -c examples/basic_governance/constitution.yaml
+    python3 scripts/visualizer.py audit   -p examples/audit_trail/audit_sample.jsonl
+    python3 scripts/visualizer.py audit   -p examples/audit_trail/audit_sample.jsonl --agent planner
+    python3 scripts/visualizer.py bench   -p examples/bench_sample/
+    python3 scripts/visualizer.py summary -c examples/basic_governance/constitution.yaml \\
                                           --audit examples/audit_trail/audit_sample.jsonl
 
 Generate sample data:
@@ -255,7 +255,7 @@ def cmd_bench(args: argparse.Namespace) -> None:
     if not base.exists():
         print(f"Path not found: {base.resolve()}", file=sys.stderr)
         print("Hint: use the bundled sample data:", file=sys.stderr)
-        print("  python scripts/visualizer.py bench -p examples/bench_sample/", file=sys.stderr)
+        print("  python3 scripts/visualizer.py bench -p examples/bench_sample/", file=sys.stderr)
         print("Or point to any directory containing *.json files with", file=sys.stderr)
         print("  latency_p50_us / latency_p99_us / score / throughput fields.", file=sys.stderr)
         sys.exit(0)

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from .base import DatasetRecord, DatasetSnapshot, records_hash
 
-
 _FALLBACK_RECORDS = [
     DatasetRecord(
         id="swebench-lite/fallback-0",

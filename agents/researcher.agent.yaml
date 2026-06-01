@@ -1,0 +1,44 @@
+# GENERATED FILE — do not edit by hand.
+# Source of truth: agent-index.json (repo root). Regenerate with: make agents-sync
+agent_id: researcher
+name: Researcher
+description: Gathers external and in-repo context for a question (web search, docs,
+  codebase), adversarially verifies claims, and returns a cited synthesis.
+support_level: maintained
+stability: stable
+is_active: true
+capabilities:
+- research
+- investigate
+- synthesize
+- cite
+domains:
+- research
+- planning
+skills:
+- deep-research
+- web-research
+- repo-research
+tags:
+- pre-implementation
+role: researcher
+purpose: Produce grounded, cited context before a decision or implementation.
+scope: Read-only. Writes a research note only; never edits source.
+required_tools:
+- WebSearch
+- grep
+- Read
+inputs:
+- a research question or topic
+outputs:
+- cited research note with verified claims
+safety_constraints:
+- cite sources
+- flag unverifiable claims rather than asserting them
+execution_command: /deep-research <question>
+validation_checks:
+- python3 scripts/agent_ready.py --json
+expected_artifacts:
+- docs/research/<topic>.md
+failure_modes:
+- question underspecified -> narrow scope before researching

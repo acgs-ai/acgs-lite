@@ -134,3 +134,14 @@ This repository's own coding agents/skills are catalogued in `agent-index.json`
 (repo root), authored in the exact `AgentCapabilityProfile` schema above and
 loadable via `AgentRegistry.from_manifest("agent-index.json")`. See the
 **Agent Discovery** section of `AGENTS.md`.
+
+For a make-free readiness check that agents can run in constrained shells:
+
+```bash
+python3 scripts/agent_ready.py --run-tests
+```
+
+That command loads the root index through `AgentRegistry`, verifies
+`governance-branch-review` ranks first for governance-regression review work, and
+runs the focused agent registry/selector/index tests. If `make` is available,
+`make agent-check` is the equivalent convenience target.

@@ -239,6 +239,16 @@ from acgs_lite.agents import (
     get_agent_registry,
     reset_agent_registry,
 )
+from acgs_lite.policygen import (
+    AdaptivePolicyGenerator,
+    DomainRiskLevel,
+    GeneratedPolicy,
+    PolicyRequirement,
+    PolicyResearcher,
+    PreContext,
+    PreContextBuilder,
+    ResearchReport,
+)
 from acgs_lite.provenance import ProvenanceNode, ProvenanceRecord
 from acgs_lite.scoring import ConstitutionalImpactScorer, RuleBasedScorer, score_impact
 from acgs_lite.trajectory import (
@@ -283,6 +293,15 @@ __all__ = [
     "SelectionDeniedError",
     "get_agent_registry",
     "reset_agent_registry",
+    # Adaptive policy generation (precontext -> research -> YAML)
+    "AdaptivePolicyGenerator",
+    "DomainRiskLevel",
+    "GeneratedPolicy",
+    "PolicyRequirement",
+    "PolicyResearcher",
+    "PreContext",
+    "PreContextBuilder",
+    "ResearchReport",
     # Core
     "Constitution",
     "ConstitutionBuilder",
@@ -574,6 +593,15 @@ _STABILITY_BETA: frozenset[str] = frozenset(
         "SelectionDeniedError",
         "get_agent_registry",
         "reset_agent_registry",
+        # Adaptive policy generation
+        "AdaptivePolicyGenerator",
+        "DomainRiskLevel",
+        "GeneratedPolicy",
+        "PolicyRequirement",
+        "PolicyResearcher",
+        "PreContext",
+        "PreContextBuilder",
+        "ResearchReport",
     }
 )
 

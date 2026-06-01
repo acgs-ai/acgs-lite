@@ -1,0 +1,48 @@
+# GENERATED FILE — do not edit by hand.
+# Source of truth: agent-index.json (repo root). Regenerate with: make agents-sync
+agent_id: verify-governance-fixes
+name: Verify Governance Fixes
+description: Adversarially verifies that applied governance fixes actually close their
+  findings by writing and executing concrete bypass attempts against the installed
+  code.
+support_level: maintained
+stability: stable
+is_active: true
+capabilities:
+- verify
+- audit
+- security
+- bypass
+- governance
+domains:
+- governance
+- security
+skills:
+- bypass-attempt
+- fix-verification
+tags:
+- post-fix
+- governance-critical
+trigger: After applying governance-branch-review fixes
+purpose: Prove a security-bearing fix resists a real bypass attempt, not just that
+  unit tests pass.
+scope: Writes and executes bypass attempts against installed code in the project .venv.
+  Test-only; must not alter production source.
+required_tools:
+- python
+- pytest
+- project .venv
+inputs:
+- the applied fixes / findings to verify
+outputs:
+- per-fix held/defeated verdict with the executed bypass attempt
+safety_constraints:
+- run bypass code in an isolated test context
+- never commit bypass scaffolding to source
+execution_command: /verify-governance-fixes
+validation_checks:
+- make test-governance
+expected_artifacts:
+- verification report (held/defeated per fix)
+failure_modes:
+- fix defeated -> report and reopen the finding

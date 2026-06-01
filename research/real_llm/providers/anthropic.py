@@ -24,7 +24,9 @@ class AnthropicProvider:
     simulated: bool = False
 
     def is_available(self) -> bool:
-        return bool(os.getenv(self.api_key_env)) and importlib.util.find_spec("anthropic") is not None
+        return (
+            bool(os.getenv(self.api_key_env)) and importlib.util.find_spec("anthropic") is not None
+        )
 
     def availability_reason(self) -> str:
         if not os.getenv(self.api_key_env):

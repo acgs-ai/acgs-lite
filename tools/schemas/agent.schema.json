@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acgs.ai/schemas/agent.schema.json",
+  "title": "ACGS-Lite Agent Capability Profile",
+  "description": "Schema for one entry in agent-index.json. Mirrors acgs_lite.agents.AgentCapabilityProfile; the agent-contract fields live under `metadata`.",
+  "type": "object",
+  "required": ["agent_id", "name", "metadata"],
+  "additionalProperties": true,
+  "properties": {
+    "agent_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "capabilities": { "type": "array", "items": { "type": "string" } },
+    "domains": { "type": "array", "items": { "type": "string" } },
+    "skills": { "type": "array", "items": { "type": "string" } },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "support_level": { "type": "string" },
+    "stability": { "type": "string" },
+    "is_active": { "type": "boolean" },
+    "metadata": {
+      "type": "object",
+      "description": "Repo-owned executable agent contract. Runtime AgentRegistry accepts lighter profiles, but this repository requires these fields for every indexed agent.",
+      "additionalProperties": true,
+      "required": [
+        "purpose",
+        "scope",
+        "required_tools",
+        "inputs",
+        "outputs",
+        "safety_constraints",
+        "execution_command",
+        "validation_checks",
+        "expected_artifacts",
+        "failure_modes"
+      ],
+      "properties": {
+        "role": { "type": "string" },
+        "purpose": { "type": "string", "minLength": 1 },
+        "scope": { "type": "string", "minLength": 1 },
+        "required_tools": { "type": "array", "items": { "type": "string" } },
+        "inputs": { "type": "array", "items": { "type": "string" } },
+        "outputs": { "type": "array", "items": { "type": "string" } },
+        "safety_constraints": { "type": "array", "items": { "type": "string" } },
+        "execution_command": { "type": "string", "minLength": 1 },
+        "validation_checks": { "type": "array", "items": { "type": "string" } },
+        "expected_artifacts": { "type": "array", "items": { "type": "string" } },
+        "failure_modes": { "type": "array", "items": { "type": "string" } },
+        "trigger": { "type": "string" }
+      }
+    }
+  }
+}

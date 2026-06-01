@@ -815,18 +815,18 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 )
                 for rule_idx, pat in _pats:
                     if pat.search(text_lower):
-                            rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                            if strict and is_crit:
-                                _e_src = self._rule_excs[rule_idx]
-                                raise ConstitutionalViolationError(
-                                    str(_e_src),
-                                    rule_id=_e_src.rule_id,
-                                    severity=_e_src.severity,
-                                    action=action_200,
-                                )
-                            if violations is None:
-                                violations = []
-                            violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
+                        rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
+                        if strict and is_crit:
+                            _e_src = self._rule_excs[rule_idx]
+                            raise ConstitutionalViolationError(
+                                str(_e_src),
+                                rule_id=_e_src.rule_id,
+                                severity=_e_src.severity,
+                                action=action_200,
+                            )
+                        if violations is None:
+                            violations = []
+                        violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
             return violations
         elif self._combined_findall is not None:
             _m = self._combined_search(text_lower)
@@ -875,19 +875,19 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 )
                 for rule_idx, pat in _pats:
                     if not (fired & (1 << rule_idx)) and pat.search(text_lower):
-                            fired |= 1 << rule_idx
-                            rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                            if strict and is_crit:
-                                _e_src = self._rule_excs[rule_idx]
-                                raise ConstitutionalViolationError(
-                                    str(_e_src),
-                                    rule_id=_e_src.rule_id,
-                                    severity=_e_src.severity,
-                                    action=action_200,
-                                )
-                            if violations is None:
-                                violations = []
-                            violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
+                        fired |= 1 << rule_idx
+                        rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
+                        if strict and is_crit:
+                            _e_src = self._rule_excs[rule_idx]
+                            raise ConstitutionalViolationError(
+                                str(_e_src),
+                                rule_id=_e_src.rule_id,
+                                severity=_e_src.severity,
+                                action=action_200,
+                            )
+                        if violations is None:
+                            violations = []
+                        violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
             elif self._pattern_rule_idxs:
                 # F4: no-anchor patterns (secret regexes with no literal anchor
                 # word, e.g. ``sk-...`` keys or SSNs) must ALWAYS be evaluated.
@@ -902,18 +902,18 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 )
                 for rule_idx, pat in _pats:
                     if pat.search(text_lower):
-                            rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                            if strict and is_crit:
-                                _e_src = self._rule_excs[rule_idx]
-                                raise ConstitutionalViolationError(
-                                    str(_e_src),
-                                    rule_id=_e_src.rule_id,
-                                    severity=_e_src.severity,
-                                    action=action_200,
-                                )
-                            if violations is None:
-                                violations = []
-                            violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
+                        rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
+                        if strict and is_crit:
+                            _e_src = self._rule_excs[rule_idx]
+                            raise ConstitutionalViolationError(
+                                str(_e_src),
+                                rule_id=_e_src.rule_id,
+                                severity=_e_src.severity,
+                                action=action_200,
+                            )
+                        if violations is None:
+                            violations = []
+                        violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
             return violations
         return violations
 
