@@ -463,9 +463,8 @@ def parse_callable_to_z3(func: Callable[..., Any]) -> tuple[dict[str, Any], list
         # Otherwise, parse standard parameter annotations and defaults
         metadata = []
         default_val = param.default
-        if PYDANTIC_AVAILABLE and isinstance(default_val, FieldInfo):
-            if default_val.metadata:
-                metadata.extend(default_val.metadata)
+        if PYDANTIC_AVAILABLE and isinstance(default_val, FieldInfo) and default_val.metadata:
+            metadata.extend(default_val.metadata)
 
         var_type, var_constraints = _parse_type_and_constraints(name, ann, metadata)
         if var_type is not None:

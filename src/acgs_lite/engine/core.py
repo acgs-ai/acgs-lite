@@ -306,8 +306,10 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         if warmup and self._rust_validator is not None:
             _real_hot = self._hot
             _real_audit = self.audit_log
+            _real_custom_validators = self.custom_validators
             try:
                 self.audit_log = _FastAuditLog(constitution.hash)
+                self.custom_validators = []
                 _temp_hot = list(_real_hot)
                 _temp_hot[6] = _NoopRecorder()
                 self._hot = tuple(_temp_hot)
@@ -399,6 +401,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             finally:
                 self._hot = _real_hot
                 self.audit_log = _real_audit
+                self.custom_validators = _real_custom_validators
         import gc as _gc  # noqa: PLC0415
 
         _gc.collect()

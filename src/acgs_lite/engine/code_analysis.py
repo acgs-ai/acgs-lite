@@ -693,9 +693,12 @@ class CodeActionValidator:
         candidates: list[ast.expr] = list(node.args)
         candidates.extend(kw.value for kw in node.keywords)
         for arg in candidates:
-            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                if arg.value.startswith("__"):
-                    return arg.value
+            if (
+                isinstance(arg, ast.Constant)
+                and isinstance(arg.value, str)
+                and arg.value.startswith("__")
+            ):
+                return arg.value
         return None
 
     def _check_attribute(self, node: ast.Attribute) -> list[Violation]:
