@@ -14,24 +14,25 @@ Add a two-layer agent-discovery capability so an orchestrating agent can always
 find and pick the most suitable agent for a task, with every selection governed
 by the constitution.
 
-- **Layer 1 (library):** a new `src/acgs_lite/agents/` subpackage — an
+* **Layer 1 (library):** a new `src/acgs_lite/agents/` subpackage — an
   `AgentCapabilityProfile` schema, an `AgentRegistry` (mirroring the existing
   `provider_capabilities.CapabilityRegistry` pattern), and a
   `GovernedAgentSelector` that ranks candidates and routes the chosen action
   through the constitution and MACI before returning a selection bound to a
   signed-capable `DecisionReceipt`.
-- **Layer 2 (repo scaffolding):** a machine-readable `.claude/agent-index.json`
+
+* **Layer 2 (repo scaffolding):** a machine-readable `.claude/agent-index.json`
   describing this repo's own coding agents/skills using the *same* profile
   schema, plus an `AGENTS.md` "Agent Discovery" section. A schema-conformance
   test loads the index through `AgentRegistry` so the two layers cannot drift.
 
 Governance invariants held throughout: selection is **fail-closed** (no
 constitution/policy state, empty registry, or no eligible candidate → raise, never
-a silent pick), every selection **produces a `DecisionReceipt`**, and the selector
+a silent pick), every selection **produces a** **`DecisionReceipt`**, and the selector
 **never bypasses MACI** (role checks + no self-validation run before a selection is
 authorized).
 
----
+***
 
 ## Problem Frame
 
@@ -47,76 +48,92 @@ The crux: selection must be **discoverable** (a registry an agent can query) and
 **legitimate** (fail-closed, receipted, MACI-respecting) — reusing the existing
 Runtime Legitimacy Kernel rather than inventing a parallel decision path.
 
----
+***
 
 ## Requirements
 
-- **R1** — A registry of agent capability profiles supporting register, lookup,
+* **R1** — A registry of agent capability profiles supporting register, lookup,
   active-only listing, and deterministic ranked candidate resolution for a task.
-- **R2** — A selector that returns the most suitable agent for a task **only**
+
+* **R2** — A selector that returns the most suitable agent for a task **only**
   after a governed, fail-closed decision, and attaches a `DecisionReceipt` to
   every outcome (allow and deny).
-- **R3** — Selection never bypasses MACI: the chosen agent's role must permit the
+
+* **R3** — Selection never bypasses MACI: the chosen agent's role must permit the
   action, and a requester can never be selected as its own validator.
-- **R4** — Optional Ed25519 signing of the selection receipt when the `crypto`
+
+* **R4** — Optional Ed25519 signing of the selection receipt when the `crypto`
   extra is present; unsigned path must work with no extra installed.
-- **R5** — New public API exported from the top-level package with a stability
+
+* **R5** — New public API exported from the top-level package with a stability
   tier, no import-time heavy/optional SDK loads.
-- **R6** — `docs/api/agents.md` documents the surface in the existing docs/api
+
+* **R6** — `docs/api/agents.md` documents the surface in the existing docs/api
   format.
-- **R7** — A machine-readable `.claude/agent-index.json` of this repo's coding
+
+* **R7** — A machine-readable `.claude/agent-index.json` of this repo's coding
   agents/skills, conformant to the `AgentCapabilityProfile` schema, plus an
   `AGENTS.md` "Agent Discovery" section explaining how agents route tasks.
-- **R8** — A test loads `.claude/agent-index.json` through the registry and
+
+* **R8** — A test loads `.claude/agent-index.json` through the registry and
   asserts every entry is a valid profile (drift guard tying Layer 2 to Layer 1).
-- **R9** — Full verification sequence (`make lint && make typecheck && make test
+
+* **R9** — Full verification sequence (`make lint && make typecheck && make test
   && make build`) passes; `matcher.py` hot-path is untouched.
 
----
+***
 
 ## Key Technical Decisions
 
-- **KTD1 — Name the ranking module `selector.py`, never `matcher.py`.** The
+* **KTD1 — Name the ranking module** **`selector.py`, never** **`matcher.py`.** The
   governance hot-path `src/acgs_lite/engine/matcher.py` is protected by CLAUDE.md
   ("Never change matcher.py hot-path behavior without targeted tests"). A new file
   named `matcher.py`, even at a different path, invites conflation by reviewers and
   agents. Ranking lives in `src/acgs_lite/agents/selector.py` and does not import
   or alter the governance matcher.
-- **KTD2 — Mirror `provider_capabilities.CapabilityRegistry`.** The existing
+
+* **KTD2 — Mirror** **`provider_capabilities.CapabilityRegistry`.** The existing
   registry (singleton via `get_capability_registry()`, JSON manifest auto-load,
   thread-safe reads, `reset_*` for tests) is the established pattern. `AgentRegistry`
-  + `get_agent_registry()` + `reset_agent_registry()` follow it 1:1 for
-  consistency and reviewer familiarity.
-- **KTD3 — Reuse the Legitimacy Kernel, do not fork a decision path.** Selection
+
+  * `get_agent_registry()` + `reset_agent_registry()` follow it 1:1 for
+    consistency and reviewer familiarity.
+
+* **KTD3 — Reuse the Legitimacy Kernel, do not fork a decision path.** Selection
   emits a `legitimacy.receipt.DecisionReceipt` via `DecisionReceipt.create(...)`,
   uses the canonical `DecisionState` taxonomy, and binds the chosen agent through
   `ExecutionBoundary(allowed_method="delegate:<agent_id>", allowed_subjects=(agent_id,),
   allowed_scope=domain)`. This makes selections replay-verifiable with the existing
   `replay_and_verify` machinery (R4) for free.
-- **KTD4 — Deterministic pure-Python lexical ranker as the default.** Candidate
+
+* **KTD4 — Deterministic pure-Python lexical ranker as the default.** Candidate
   scoring is keyword/capability/domain overlap between the task terms and each
   profile — deterministic and dependency-free, honoring the "keep Python fallbacks"
   rule. A semantic/embedding ranker is explicitly **deferred** (see Scope
   Boundaries), keeping this change free of new heavy deps.
-- **KTD5 — Fail-closed is an exception, not a sentinel.** Missing governance state,
+
+* **KTD5 — Fail-closed is an exception, not a sentinel.** Missing governance state,
   an empty registry, a constitutional violation, or zero eligible candidates each
-  raise a typed error that **carries the denied `DecisionReceipt`** for audit —
+  raise a typed error that **carries the denied** **`DecisionReceipt`** for audit —
   never a `None` return or a silent best-effort pick. `SelectionDeniedError`
   subclasses `ConstitutionalViolationError` to match CK-002 ("validation failures
   raise").
-- **KTD6 — MACI is mandatory when a role is required.** If `required_role` is
+
+* **KTD6 — MACI is mandatory when a role is required.** If `required_role` is
   supplied but no `MACIEnforcer` is provided, the selector fails closed (raises)
   rather than skipping the check — "never bypass MACI enforcement" applies to the
   selection path.
-- **KTD7 — One schema, two layers.** `.claude/agent-index.json` uses the exact
+
+* **KTD7 — One schema, two layers.** `.claude/agent-index.json` uses the exact
   `AgentCapabilityProfile` JSON shape the library registry loads, and U6's test
   loads it through `AgentRegistry.from_manifest()`. The repo index is *the*
   worked example of the library schema; drift breaks a test.
-- **KTD8 — Beta stability tier.** New surface registers as `beta` in the
+
+* **KTD8 — Beta stability tier.** New surface registers as `beta` in the
   `__init__.py` stability metadata — a coherent, tested API, but young enough that
   the ranker contract may evolve.
 
----
+***
 
 ## High-Level Technical Design
 
@@ -149,7 +166,7 @@ Decision states used: `ALLOW` for an authorized selection; denials map to
 `HARD_DENY` / `DENY_OPERATION_WITH_ALTERNATIVE` via `canonicalize_decision_state`
 on the carried receipt. Only `ALLOW` returns a usable `selected_agent_id`.
 
----
+***
 
 ## Output Structure
 
@@ -172,7 +189,7 @@ tests/test_agent_index.py
 The per-unit **Files** lists below are authoritative; the implementer may adjust
 layout if a better split emerges.
 
----
+***
 
 ## Implementation Units
 
@@ -186,9 +203,12 @@ shape both layers share.
 **Dependencies:** none
 
 **Files:**
-- `src/acgs_lite/agents/__init__.py` (create)
-- `src/acgs_lite/agents/capability.py` (create)
-- `tests/test_agent_registry.py` (create — profile cases; registry cases land in U2)
+
+* `src/acgs_lite/agents/__init__.py` (create)
+
+* `src/acgs_lite/agents/capability.py` (create)
+
+* `tests/test_agent_registry.py` (create — profile cases; registry cases land in U2)
 
 **Approach:** `@dataclass(slots=True, frozen=True) AgentCapabilityProfile` with
 fields: `agent_id: str`, `name: str`, `description: str = ""`,
@@ -203,17 +223,21 @@ empty `agent_id`/`name`) and `to_dict() -> dict`. No external deps; pure stdlib.
 `src/acgs_lite/provider_capabilities.py` (field shape, `from_dict`/`to_dict`,
 frozen dataclass).
 
-**Test scenarios (tests/test_agent_registry.py):**
-- Happy: construct a profile; `to_dict`→`from_dict` round-trips identically.
-- Edge: `from_dict` with list values coerces to tuples; missing optional fields
+**Test scenarios (tests/test\_agent\_registry.py):**
+
+* Happy: construct a profile; `to_dict`→`from_dict` round-trips identically.
+
+* Edge: `from_dict` with list values coerces to tuples; missing optional fields
   use defaults.
-- Error: `from_dict` with empty/whitespace `agent_id` or `name` raises `ValueError`.
-- Edge: `is_active=False` profile round-trips and is flagged inactive.
+
+* Error: `from_dict` with empty/whitespace `agent_id` or `name` raises `ValueError`.
+
+* Edge: `is_active=False` profile round-trips and is flagged inactive.
 
 **Verification:** Profile imports from `acgs_lite.agents`, round-trips, and rejects
 invalid input.
 
----
+***
 
 ### U2. AgentRegistry + manifest loading + singleton
 
@@ -225,10 +249,13 @@ resolution, mirroring the provider capability registry.
 **Dependencies:** U1
 
 **Files:**
-- `src/acgs_lite/agents/registry.py` (create)
-- `src/acgs_lite/agents/agent_capabilities_manifest.json` (create — bundled default,
+
+* `src/acgs_lite/agents/registry.py` (create)
+
+* `src/acgs_lite/agents/agent_capabilities_manifest.json` (create — bundled default,
   may be empty array)
-- `tests/test_agent_registry.py` (extend)
+
+* `tests/test_agent_registry.py` (extend)
 
 **Approach:** `AgentRegistry` with `register(profile)`,
 `get(agent_id) -> AgentCapabilityProfile | None`,
@@ -247,25 +274,32 @@ locking shape as `provider_capabilities`.
 load mirrors `provider_capabilities_manifest.json` handling.
 
 **Test scenarios:**
-- Happy: register N profiles, `get` returns the right one, `list_profiles` returns
+
+* Happy: register N profiles, `get` returns the right one, `list_profiles` returns
   active ones.
-- Edge: `active_only=True` excludes inactive profiles; `active_only=False` includes
+
+* Edge: `active_only=True` excludes inactive profiles; `active_only=False` includes
   them.
-- Happy: `candidates_for` returns profiles ordered by descending score; the
+
+* Happy: `candidates_for` returns profiles ordered by descending score; the
   best-overlapping profile ranks first.
-- Edge: ranking is deterministic across runs and stable for equal scores (sorted by
+
+* Edge: ranking is deterministic across runs and stable for equal scores (sorted by
   `agent_id`).
-- Edge: empty registry → `candidates_for` returns `[]` (no raise here; fail-closed
+
+* Edge: empty registry → `candidates_for` returns `[]` (no raise here; fail-closed
   lives in U3).
-- Integration: `from_manifest` loads a temp JSON file into valid profiles;
+
+* Integration: `from_manifest` loads a temp JSON file into valid profiles;
   malformed entry raises with a clear message.
-- Singleton: `get_agent_registry()` returns the same instance;
+
+* Singleton: `get_agent_registry()` returns the same instance;
   `reset_agent_registry()` clears it; absent/empty bundled manifest does not error.
 
 **Verification:** Registry registers, lists, ranks deterministically, and loads a
 manifest; singleton + reset behave like the provider registry.
 
----
+***
 
 ### U3. Governed selector — fail-closed, receipts, MACI
 
@@ -277,23 +311,31 @@ after a fail-closed, receipted, MACI-respecting decision.
 **Dependencies:** U1, U2
 
 **Files:**
-- `src/acgs_lite/agents/selector.py` (create)
-- `src/acgs_lite/agents/errors.py` (create)
-- `tests/test_governed_selector.py` (create)
+
+* `src/acgs_lite/agents/selector.py` (create)
+
+* `src/acgs_lite/agents/errors.py` (create)
+
+* `tests/test_governed_selector.py` (create)
 
 **Approach:**
-- `errors.py`: `SelectionDeniedError(ConstitutionalViolationError)` and
+
+* `errors.py`: `SelectionDeniedError(ConstitutionalViolationError)` and
   `NoEligibleAgentError(GovernanceError)`, each carrying an optional
   `receipt: DecisionReceipt` attribute for audit.
-- `@dataclass(slots=True, frozen=True) AgentSelection`: `selected_agent_id: str`,
+
+* `@dataclass(slots=True, frozen=True) AgentSelection`: `selected_agent_id: str`,
   `decision: DecisionState`, `receipt: DecisionReceipt`,
   `signed_receipt: SignedReceipt | None`,
-  `candidates: tuple[tuple[str, float], ...]` (agent_id, score), `rationale: str`.
-- `GovernedAgentSelector.__init__(self, *, registry, engine, maci_enforcer=None,
+  `candidates: tuple[tuple[str, float], ...]` (agent\_id, score), `rationale: str`.
+
+* `GovernedAgentSelector.__init__(self, *, registry, engine, maci_enforcer=None,
   signer=None, policy_version=None)`. `engine` is a `GovernanceEngine`;
   `policy_version` defaults to the engine's constitution version/hash.
-- `select(self, task, *, requester_id="anonymous", required_role=None, domain=None,
+
+* `select(self, task, *, requester_id="anonymous", required_role=None, domain=None,
   candidates=None) -> AgentSelection`:
+
   1. **Fail-closed guards:** no constitution/`policy_version` → emit denied receipt,
      raise `SelectionDeniedError`. Registry empty (and no explicit `candidates`) →
      raise `NoEligibleAgentError` with denied receipt.
@@ -315,39 +357,49 @@ after a fail-closed, receipted, MACI-respecting decision.
      allowed_subjects=(agent_id,), expires_at=None, single_use=False))`.
   6. If `signer` provided → `signer.sign_receipt(receipt)` → `signed_receipt`.
   7. Return `AgentSelection`.
-- **No import of or change to `engine/matcher.py`.** Ranking is independent.
+
+* **No import of or change to** **`engine/matcher.py`.** Ranking is independent.
 
 **Patterns to follow:** `DecisionReceipt.create` / `ExecutionBoundary` in
 `src/acgs_lite/legitimacy/receipt.py`; `Ed25519ReceiptSigner.sign_receipt` in
 `legitimacy/signing.py`; `MACIEnforcer.check` / `check_no_self_validation` in
 `maci/enforcer.py`; raise-on-violation per CK-002.
 
-**Test scenarios (tests/test_governed_selector.py, InMemory* stubs):**
-- Covers R2. Happy: populated registry + permissive constitution → `select` returns
+*Test scenarios (tests/test\_governed\_selector.py, InMemory* stubs):\*
+
+* Covers R2. Happy: populated registry + permissive constitution → `select` returns
   `AgentSelection` with `decision == "ALLOW"`, a `selected_agent_id` among the
   candidates, and `receipt.verify_hash()` true.
-- Covers R2. Edge: `execution_boundary.allowed_subjects == (selected_agent_id,)`
+
+* Covers R2. Edge: `execution_boundary.allowed_subjects == (selected_agent_id,)`
   and `allowed_method == f"delegate:{selected_agent_id}"`.
-- Covers R2. Error: a task that violates a CRITICAL rule → `SelectionDeniedError`,
+
+* Covers R2. Error: a task that violates a CRITICAL rule → `SelectionDeniedError`,
   and the raised error carries a denied receipt (decision not `ALLOW`).
-- Covers R2. Error (fail-closed): empty registry → `NoEligibleAgentError`, no silent
-  pick; selector with no constitution/policy_version → `SelectionDeniedError`.
-- Covers R3. Error: requester cannot be selected as its own validator
+
+* Covers R2. Error (fail-closed): empty registry → `NoEligibleAgentError`, no silent
+  pick; selector with no constitution/policy\_version → `SelectionDeniedError`.
+
+* Covers R3. Error: requester cannot be selected as its own validator
   (`check_no_self_validation` enforced) — that candidate is skipped.
-- Covers R3. Error: `required_role` set with `maci_enforcer=None` →
+
+* Covers R3. Error: `required_role` set with `maci_enforcer=None` →
   `SelectionDeniedError` (MACI not bypassed).
-- Covers R3. Edge: candidate whose MACI role forbids the action is skipped; if none
+
+* Covers R3. Edge: candidate whose MACI role forbids the action is skipped; if none
   remain → `NoEligibleAgentError`.
-- Covers R4. Integration: with an `Ed25519ReceiptSigner`, `signed_receipt` is set
+
+* Covers R4. Integration: with an `Ed25519ReceiptSigner`, `signed_receipt` is set
   and `replay_and_verify(signed, evaluator, expected_public_key=...)` reports `ok`
   (reuse `legitimacy.replay_verify`).
-- Covers R4. Edge: with no signer, `signed_receipt is None` and the unsigned path
+
+* Covers R4. Edge: with no signer, `signed_receipt is None` and the unsigned path
   needs no `crypto` extra.
 
 **Verification:** ALLOW returns a receipted selection; every denial path raises a
 typed error carrying a receipt; MACI checks always run; signed path replay-verifies.
 
----
+***
 
 ### U4. Public API exports + stability
 
@@ -359,8 +411,10 @@ deps.
 **Dependencies:** U1, U2, U3
 
 **Files:**
-- `src/acgs_lite/__init__.py` (modify — add to `__all__`, stability metadata)
-- `tests/test_agent_registry.py` (extend — top-level import + stability assertions)
+
+* `src/acgs_lite/__init__.py` (modify — add to `__all__`, stability metadata)
+
+* `tests/test_agent_registry.py` (extend — top-level import + stability assertions)
 
 **Approach:** Add `AgentCapabilityProfile`, `AgentRegistry`, `get_agent_registry`,
 `reset_agent_registry`, `GovernedAgentSelector`, `AgentSelection`,
@@ -374,15 +428,18 @@ Do **not** add `agents` imports to any import-time-eager path that would pull cr
 `__getattr__` conventions already in `src/acgs_lite/__init__.py`.
 
 **Test scenarios:**
-- Happy: `from acgs_lite import GovernedAgentSelector, AgentRegistry, ...` succeeds.
-- Happy: `stability("GovernedAgentSelector") == "beta"` (and peers).
-- Edge: importing the package and the unsigned selection path works with the
+
+* Happy: `from acgs_lite import GovernedAgentSelector, AgentRegistry, ...` succeeds.
+
+* Happy: `stability("GovernedAgentSelector") == "beta"` (and peers).
+
+* Edge: importing the package and the unsigned selection path works with the
   `crypto` extra absent (no `cryptography` import at module load).
 
 **Verification:** All new names import from the top level, carry the `beta` tier,
 and importing the package does not require optional extras.
 
----
+***
 
 ### U5. API documentation page
 
@@ -393,15 +450,17 @@ and importing the package does not require optional extras.
 **Dependencies:** U1, U2, U3, U4
 
 **Files:**
-- `docs/api/agents.md` (create)
-- `mkdocs.yml` (modify — add nav entry if a nav list exists)
+
+* `docs/api/agents.md` (create)
+
+* `mkdocs.yml` (modify — add nav entry if a nav list exists)
 
 **Approach:** Mirror `docs/api/legitimacy.md` / `docs/api/maci.md`: H1 + stability
 note; mkdocstrings blocks (`::: acgs_lite.agents.registry.AgentRegistry`,
 `::: acgs_lite.agents.selector.GovernedAgentSelector`,
 `::: acgs_lite.agents.capability.AgentCapabilityProfile`); a Decision &
 Fail-Closed Behavior section (the gate sequence, which states deny); a Receipt
-Binding table (goal/proposed_method/execution_boundary); a MACI Constraints note;
+Binding table (goal/proposed\_method/execution\_boundary); a MACI Constraints note;
 and a short end-to-end example (register profiles → construct selector → `select`).
 Add to `mkdocs.yml` nav under the API section if present.
 
@@ -413,7 +472,7 @@ not breaking and mkdocstrings resolving the referenced symbols.
 **Verification:** Page renders, mkdocstrings resolves all referenced symbols, nav
 shows the page.
 
----
+***
 
 ### U6. Repo scaffolding — AGENTS.md Agent Discovery + machine-readable index
 
@@ -425,9 +484,12 @@ AGENTS.md guidance that lets an agent route a task — schema-locked to Layer 1.
 **Dependencies:** U1, U2 (schema + loader must exist)
 
 **Files:**
-- `.claude/agent-index.json` (create — real entries for this repo's agents/skills)
-- `AGENTS.md` (modify — add "Agent Discovery" section)
-- `tests/test_agent_index.py` (create — drift guard)
+
+* `.claude/agent-index.json` (create — real entries for this repo's agents/skills)
+
+* `AGENTS.md` (modify — add "Agent Discovery" section)
+
+* `tests/test_agent_index.py` (create — drift guard)
 
 **Approach:** Author `.claude/agent-index.json` as a JSON array of
 `AgentCapabilityProfile` dicts for the repo's actual coding agents/skills —
@@ -445,19 +507,22 @@ exist; edit the root file, do not create a new one.
 absolute-internal links); `provider_capabilities_manifest.json` as the JSON-array
 manifest shape.
 
-**Test scenarios (tests/test_agent_index.py):**
-- Covers R8. Happy: `AgentRegistry.from_manifest(".claude/agent-index.json")` loads
+**Test scenarios (tests/test\_agent\_index.py):**
+
+* Covers R8. Happy: `AgentRegistry.from_manifest(".claude/agent-index.json")` loads
   without error and yields ≥1 profile.
-- Covers R8. Edge: every loaded entry has a non-empty `agent_id` and `name`, and
+
+* Covers R8. Edge: every loaded entry has a non-empty `agent_id` and `name`, and
   unique `agent_id`s (no duplicates in the index).
-- Edge: `candidates_for("review a branch for governance regressions")` ranks the
+
+* Edge: `candidates_for("review a branch for governance regressions")` ranks the
   governance-review agent first (sanity that the index is useful, not just valid).
 
 **Verification:** The index parses through the library loader, every entry is a valid
 unique profile, AGENTS.md documents discovery, and a representative task resolves to
 the expected specialist.
 
----
+***
 
 ## Scope Boundaries
 
@@ -466,38 +531,49 @@ top-level exports, API docs, and the repo agent-index + AGENTS.md section, all u
 fail-closed/receipted/MACI governance.
 
 ### Deferred to Follow-Up Work
-- **Semantic / embedding ranker** behind an optional extra (default stays the
+
+* **Semantic / embedding ranker** behind an optional extra (default stays the
   deterministic lexical scorer — KTD4).
-- **Auto-syncing `.claude/agent-index.json` from `.claude/` skill definitions**
+
+* **Auto-syncing** **`.claude/agent-index.json`** **from** **`.claude/`** **skill definitions**
   (the index is hand-authored this pass; a generator is a separate change).
-- **A `select_and_execute` convenience** that chains selection → governed execution
+
+* **A** **`select_and_execute`** **convenience** that chains selection → governed execution
   via `validate_receipt_for_execution`; this plan stops at returning a receipted
   selection.
-- **CLI surface** (`acgs agents ...`) for querying the registry from the terminal.
+
+* **CLI surface** (`acgs agents ...`) for querying the registry from the terminal.
 
 ### Non-goals
-- No change to `engine/matcher.py` hot-path behavior (KTD1, R9).
-- Not an agent runtime/executor — selection returns a decision + receipt, it does
-  not run the agent.
-- No new heavy runtime dependency; signing reuses the existing `crypto` extra only.
 
----
+* No change to `engine/matcher.py` hot-path behavior (KTD1, R9).
+
+* Not an agent runtime/executor — selection returns a decision + receipt, it does
+  not run the agent.
+
+* No new heavy runtime dependency; signing reuses the existing `crypto` extra only.
+
+***
 
 ## Risks & Dependencies
 
-- **Naming collision risk (medium):** a `matcher`-named file would be conflated with
+* **Naming collision risk (medium):** a `matcher`-named file would be conflated with
   the protected hot-path. Mitigated by KTD1 (`selector.py`) and a code-review note.
-- **Fail-closed correctness (high):** the value of the feature is that it never
+
+* **Fail-closed correctness (high):** the value of the feature is that it never
   silently picks. Every denial branch is covered by a U3 test asserting a raise +
   carried receipt, not a `None`.
-- **MACI bypass (high):** `required_role` without an enforcer must not skip the
+
+* **MACI bypass (high):** `required_role` without an enforcer must not skip the
   check. Covered by an explicit U3 test (KTD6).
-- **Stability metadata drift:** `__init__.py` stability dicts must include the new
+
+* **Stability metadata drift:** `__init__.py` stability dicts must include the new
   names or `stability()` raises; covered by U4 tests.
-- **Reuses:** `legitimacy.receipt`, `legitimacy.signing`, `legitimacy.replay_verify`,
+
+* **Reuses:** `legitimacy.receipt`, `legitimacy.signing`, `legitimacy.replay_verify`,
   `maci.enforcer`, `engine.GovernanceEngine`, `provider_capabilities` (as pattern).
 
----
+***
 
 ## Verification Strategy
 
@@ -511,12 +587,16 @@ Plus targeted runs during development:
 `python -m pytest tests/test_agent_registry.py tests/test_governed_selector.py tests/test_agent_index.py -v --import-mode=importlib`.
 Confirm `git diff --stat src/acgs_lite/engine/matcher.py` is empty.
 
----
+***
 
 ## Sources & Research
 
-- Pattern source: `src/acgs_lite/provider_capabilities.py` (+ `_manifest.json`).
-- Governance primitives: `src/acgs_lite/legitimacy/{receipt,signing,replay_verify,invariants,decide}.py`.
-- MACI: `src/acgs_lite/maci/enforcer.py`.
-- Engine + errors: `src/acgs_lite/engine/core.py`, `src/acgs_lite/errors.py`.
-- Conventions: `AGENTS.md`, `CLAUDE.md` (CK-001/002/003), `docs/api/{legitimacy,maci,engine}.md`, `Makefile`.
+* Pattern source: `src/acgs_lite/provider_capabilities.py` (+ `_manifest.json`).
+
+* Governance primitives: `src/acgs_lite/legitimacy/{receipt,signing,replay_verify,invariants,decide}.py`.
+
+* MACI: `src/acgs_lite/maci/enforcer.py`.
+
+* Engine + errors: `src/acgs_lite/engine/core.py`, `src/acgs_lite/errors.py`.
+
+* Conventions: `AGENTS.md`, `CLAUDE.md` (CK-001/002/003), `docs/api/{legitimacy,maci,engine}.md`, `Makefile`.
