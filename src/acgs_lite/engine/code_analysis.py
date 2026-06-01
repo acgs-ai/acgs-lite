@@ -231,9 +231,7 @@ class CodeActionValidator:
         # passing critical_imports/dangerous_calls can only *add* to the default
         # denied set, never silently drop os/subprocess/eval/… from it. (The allow
         # list above is the inverse — authorized_imports legitimately replaces.)
-        self.critical_imports: frozenset[str] = CRITICAL_IMPORTS | frozenset(
-            critical_imports or ()
-        )
+        self.critical_imports: frozenset[str] = CRITICAL_IMPORTS | frozenset(critical_imports or ())
         self.dangerous_calls: frozenset[str] = DANGEROUS_CALLS | frozenset(dangerous_calls or ())
         self.category = category
         self.flag_medium_builtins = flag_medium_builtins
@@ -461,9 +459,7 @@ class CodeActionValidator:
                         positional[-len(fn_args.defaults) :], fn_args.defaults, strict=True
                     ):
                         bind_param(arg, default)
-                for kw_arg, kw_default in zip(
-                    fn_args.kwonlyargs, fn_args.kw_defaults, strict=True
-                ):
+                for kw_arg, kw_default in zip(fn_args.kwonlyargs, fn_args.kw_defaults, strict=True):
                     bind_param(kw_arg, kw_default)
 
         # Resolve each name transitively to a dangerous builtin (cycle-guarded).

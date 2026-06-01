@@ -6,10 +6,11 @@ import argparse
 import hashlib
 import json
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from acgs_lite.audit import AuditEntry, AuditLog, JSONLAuditBackend
 
@@ -17,8 +18,8 @@ from .datasets import (
     DatasetAdapter,
     DatasetSnapshot,
     HumanEvalSubsetDataset,
-    SWEBenchLiteSubsetDataset,
     StaticDataset,
+    SWEBenchLiteSubsetDataset,
 )
 from .providers import AnthropicProvider, LLMProvider, MockProvider, OpenAIProvider
 from .providers.base import ProviderUnavailable
@@ -201,7 +202,9 @@ def _failure_entry(
     provider: LLMProvider, sample_id: str, failure_type: str, message: str
 ) -> AuditEntry:
     return AuditEntry(
-        id=_stable_id("failure", f"{provider.provider_id}:{provider.model_id}:{sample_id}:{message}"),
+        id=_stable_id(
+            "failure", f"{provider.provider_id}:{provider.model_id}:{sample_id}:{message}"
+        ),
         type="real_llm_failure",
         agent_id=provider.provider_id,
         action="provider.generate",

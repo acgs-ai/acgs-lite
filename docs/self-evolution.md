@@ -52,7 +52,7 @@ This aligns with AI governance/MLOps release discipline: observe continuously, e
 For command-line experiments, build a provenance-preserving JSONL corpus from decision logs:
 
 ```bash
-python scripts/build_evolution_corpus.py decisions.jsonl --output corpus.jsonl --validate-schema
+python3 scripts/build_evolution_corpus.py decisions.jsonl --output corpus.jsonl --validate-schema
 ```
 
 Each row includes a stable ID, normalized text, source field, source audit IDs, observed decisions, labels, and a coverage category. This makes gate results reproducible and independently auditable.
