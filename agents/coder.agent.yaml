@@ -1,0 +1,47 @@
+# GENERATED FILE — do not edit by hand.
+# Source of truth: agent-index.json (repo root). Regenerate with: make agents-sync
+agent_id: coder
+name: Coder
+description: Implements a planned change in the ACGS-Lite codebase, following repo
+  conventions, and proves it with the verification ladder before handing off.
+support_level: maintained
+stability: stable
+is_active: true
+capabilities:
+- implement
+- code
+- refactor
+- test
+domains:
+- implementation
+skills:
+- feature-implementation
+- test-authoring
+tags:
+- implementation
+role: coder
+purpose: Carry an approved plan to working, verified code.
+scope: Edits src/ and tests/ within the approved plan. Must not weaken governance
+  defaults or bypass MACI.
+required_tools:
+- make verify
+- pytest
+- ruff
+- mypy
+- git
+inputs:
+- approved plan or task description
+outputs:
+- working change with passing tests
+safety_constraints:
+- keep optional integrations lazy
+- no SDK imports at module import time
+- never skip the verification ladder
+execution_command: make verify
+validation_checks:
+- make verify
+expected_artifacts:
+- diff
+- task report (see AGENTS.md)
+failure_modes:
+- verify fails -> fix before handoff, do not mark complete

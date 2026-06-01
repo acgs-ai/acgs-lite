@@ -1,0 +1,45 @@
+# GENERATED FILE — do not edit by hand.
+# Source of truth: agent-index.json (repo root). Regenerate with: make agents-sync
+agent_id: release
+name: Release
+description: 'Prepares a release: builds wheel + sdist, validates the package, updates
+  the changelog, and runs a publish dry-run.'
+support_level: maintained
+stability: stable
+is_active: true
+capabilities:
+- release
+- package
+- publish
+- changelog
+domains:
+- release
+skills:
+- build-package
+- publish-dry-run
+tags:
+- release
+role: release
+purpose: Produce a clean, validated release artifact and verify it installs from a
+  fresh environment.
+scope: Builds and validates packages; updates CHANGELOG. Actual upload (make publish)
+  is owner-gated.
+required_tools:
+- make build
+- twine
+inputs:
+- target version + changelog entries
+outputs:
+- validated wheel + sdist in dist/
+safety_constraints:
+- never run 'make publish' without explicit owner authorization (PyPI token, see BLOCKERS.md)
+execution_command: make publish-dry-run
+validation_checks:
+- make build
+- twine check dist/*
+expected_artifacts:
+- dist/*.whl
+- dist/*.tar.gz
+- CHANGELOG.md entry
+failure_modes:
+- twine check fails -> fix metadata before publishing

@@ -13,11 +13,13 @@ TWINE       = $(PYTHON) -m twine
 PACKAGE_DIR := .
 SRC_DIR     = $(PACKAGE_DIR)/src/acgs_lite
 TEST_DIR    = $(PACKAGE_DIR)/tests
+SCRIPT_DIR  = $(PACKAGE_DIR)/scripts
 
 # Detect repo root (two levels up from this Makefile)
 REPO_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 
-.PHONY: help dev-setup install install-dev test test-quick test-cov test-examples \
+.PHONY: help setup dev-setup install install-dev agent-check agents-sync validate verify smoke dev \
+        test test-quick test-cov test-examples \
         test-governance \
         lint format typecheck check build publish-dry-run publish \
         examples visualize clean
@@ -26,6 +28,15 @@ REPO_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 help:
 	@echo ""
 	@echo "  acgs-lite development targets"
+	@echo ""
+	@echo "  Agent-ready (one-command surfaces for coding agents):"
+	@echo "    make setup         One-shot: create .venv + install all dev deps (= dev-setup)"
+	@echo "    make dev           Run the local FastAPI governance server (autoreload)"
+	@echo "    make smoke         Fast smoke: run bundled examples + import check"
+	@echo "    make verify        Pre-handoff gate: lint + typecheck + test-quick + validate + agent-check"
+	@echo "    make validate      Workspace integrity: manifests, tool registry, readiness"
+	@echo "    make agents-sync   Regenerate agents/*.agent.yaml from agent-index.json"
+	@echo "    make agent-check   Agent discovery/readiness gate (direct script fallback exists)"
 	@echo ""
 	@echo "  Setup:"
 	@echo "    make dev-setup     One-shot: create .venv + install all dev deps"
@@ -40,7 +51,7 @@ help:
 	@echo "    make test-examples Run all examples/ as smoke tests"
 	@echo ""
 	@echo "  Quality:"
-	@echo "    make lint          Ruff linter"
+	@echo "    make lint          Ruff linter (src/tests/scripts)"
 	@echo "    make format        Ruff auto-fix + format"
 	@echo "    make typecheck     MyPy type check (strict)"
 	@echo "    make check         lint + typecheck + test"
@@ -79,6 +90,9 @@ dev-setup:
 	@echo "  Full locked env: uv sync --all-extras && uv run make test"
 	@echo "  Ready.  Run: source .venv/bin/activate && make test"
 
+# `setup` is the goal's canonical name for the one-shot bootstrap (alias of dev-setup).
+setup: dev-setup
+
 install:
 	$(PYTHON) -m pip install -e .
 
@@ -88,6 +102,38 @@ install-dev:
 	@echo "Dev environment ready. No API keys required for tests."
 	@echo "Placeholder keys: OPENAI_API_KEY=test-key ANTHROPIC_API_KEY=test-key"
 	@echo "See .env.example for the full set."
+
+agent-check:
+	$(TEST_ENV) $(PYTHON) scripts/agent_ready.py --run-tests
+
+# ── Agent-ready execution ─────────────────────────────────────────────────────
+# Regenerate the per-agent manifests from the canonical agent-index.json.
+agents-sync:
+	$(PYTHON) scripts/sync_agents.py
+
+# Workspace integrity without running the focused test gate: manifest↔index sync,
+# tool-registry liveness, and the make-free readiness summary.
+validate:
+	$(PYTHON) scripts/sync_agents.py --check
+	$(PYTHON) scripts/validate_tools.py
+	$(TEST_ENV) $(PYTHON) scripts/agent_ready.py --no-run-tests
+
+# Comprehensive pre-handoff gate. Keep validate explicit so the public command
+# graph matches tools/runbooks/verify.md and tools/registry.yaml.
+verify: lint typecheck test-quick validate agent-check
+	@echo "verify: all gates passed"
+
+# Fast smoke: bundled examples as executable checks + a bare import.
+smoke: test-examples
+	@$(TEST_ENV) $(PYTHON) -c "import acgs_lite; import acgs_lite.agents; print('smoke OK')"
+
+# Local dev server (FastAPI governance app, autoreload). Needs the [server] extra.
+dev:
+	@$(PYTHON) -c "import uvicorn" >/dev/null 2>&1 || { \
+	  echo "uvicorn not found — install it: pip install -e '.[server]'"; exit 1; }
+	ACGS_API_KEY=$${ACGS_API_KEY:-dev-key} \
+	    $(PYTHON) -m uvicorn acgs_lite.server:create_governance_app \
+	    --factory --reload --host 127.0.0.1 --port 8000
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 # ACGS tests use InMemory* stubs — zero external deps in CI.
@@ -150,11 +196,11 @@ test-examples:
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 lint:
-	$(RUFF) check $(SRC_DIR)/ $(TEST_DIR)/
+	$(RUFF) check $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/
 
 format:
-	$(RUFF) check --fix $(SRC_DIR)/ $(TEST_DIR)/
-	$(RUFF) format $(SRC_DIR)/ $(TEST_DIR)/
+	$(RUFF) check --fix $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/
+	$(RUFF) format $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/
 
 typecheck:
 	$(MYPY) $(SRC_DIR)/ --ignore-missing-imports

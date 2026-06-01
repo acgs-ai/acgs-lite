@@ -1,0 +1,219 @@
+# Tool Registry — ACGS-Lite
+#
+# Machine-readable catalog of every executable surface an agent may need: make targets,
+# scripts, and the CLI. The Makefile and scripts remain the executable source of truth;
+# this file is the discoverable *index* of them. `scripts/validate_tools.py` asserts that
+# every `make <target>` and `scripts/*.py` referenced below actually exists, so no entry can
+# describe a dead tool. The same validator also enforces the schema-compatible required
+# and allowed fields documented in tools/schemas/tool.schema.json.
+#
+# Regenerate nothing by hand-running tools — to validate: `make validate` (or
+# `python3 scripts/validate_tools.py`). Human companion: ../TOOLS.md
+version: 1
+
+tools:
+  # ── Setup ──────────────────────────────────────────────────────────────────
+  - name: setup
+    purpose: One-shot developer setup — create .venv and install all dev dependencies.
+    command: make setup
+    env: []
+    inputs: []
+    outputs: [".venv/", "editable install of acgs-lite"]
+    failure_modes: ["network failure during pip install", "no compatible Python (<=3.13) on PATH"]
+    retry: "Safe to re-run; recreates the venv and reinstalls."
+    validation: make agent-check
+    owner_module: Makefile
+
+  - name: install-dev
+    purpose: Install the package plus dev tooling (pytest, ruff, mypy) into the active env.
+    command: make install-dev
+    env: []
+    inputs: []
+    outputs: ["editable install with [dev] extras"]
+    failure_modes: ["network failure", "incompatible Python version"]
+    retry: "Idempotent."
+    validation: make lint
+    owner_module: Makefile
+
+  # ── Run ────────────────────────────────────────────────────────────────────
+  - name: dev
+    purpose: Run the local FastAPI governance server with autoreload for development.
+    command: make dev
+    env: ["ACGS_API_KEY (optional)", "ACGS_LIFECYCLE_ENABLED (optional)"]
+    inputs: []
+    outputs: ["governance server on http://127.0.0.1:8000"]
+    failure_modes: ["uvicorn not installed -> install the [server] extra", "port already in use"]
+    retry: "Stop the process and re-run."
+    validation: make smoke
+    owner_module: src/acgs_lite/server.py
+
+  - name: smoke
+    purpose: Fast smoke test — run the bundled examples end-to-end as executable checks.
+    command: make smoke
+    env: ["OPENAI_API_KEY=test-key-for-unit-tests", "ANTHROPIC_API_KEY=test-key-for-unit-tests"]
+    inputs: []
+    outputs: ["example run output (all examples pass)"]
+    failure_modes: ["an example raises -> a regression in a public surface"]
+    retry: "Deterministic; re-run after fixing the failing example."
+    validation: make smoke
+    owner_module: examples/
+
+  # ── Test ───────────────────────────────────────────────────────────────────
+  - name: test
+    purpose: Run the full Python test suite (InMemory* stubs — no real API keys needed).
+    command: make test
+    env: ["OPENAI_API_KEY=test-key-for-unit-tests", "ANTHROPIC_API_KEY=test-key-for-unit-tests"]
+    inputs: []
+    outputs: ["pytest report"]
+    failure_modes: ["import error", "failing assertion"]
+    retry: "Deterministic; fix the failure and re-run."
+    validation: make test
+    owner_module: tests/
+
+  - name: test-quick
+    purpose: Run the suite minus slow/benchmark tests, failing fast (-x).
+    command: make test-quick
+    env: ["OPENAI_API_KEY=test-key-for-unit-tests", "ANTHROPIC_API_KEY=test-key-for-unit-tests"]
+    inputs: []
+    outputs: ["pytest report"]
+    failure_modes: ["first failing test stops the run"]
+    retry: "Deterministic."
+    validation: make test-quick
+    owner_module: tests/
+
+  - name: test-governance
+    purpose: Governance-regression safety gate — fail-closed invariants must not weaken.
+    command: make test-governance
+    env: ["OPENAI_API_KEY=test-key-for-unit-tests", "ANTHROPIC_API_KEY=test-key-for-unit-tests"]
+    inputs: []
+    outputs: ["governance regression report"]
+    failure_modes: ["a previously-closed bypass vector reopens -> hard fail"]
+    retry: "Deterministic."
+    validation: make test-governance
+    owner_module: scripts/run_governance_regression.py
+
+  - name: agent-check
+    purpose: Agent discovery/readiness gate — proves the workspace is agent-executable.
+    command: make agent-check
+    env: ["OPENAI_API_KEY=test-key-for-unit-tests", "ANTHROPIC_API_KEY=test-key-for-unit-tests"]
+    inputs: []
+    outputs: ["readiness report (human or --json)"]
+    failure_modes: ["registry unloadable", "required docs missing", "manifests drifted"]
+    retry: "Deterministic; fix the reported check and re-run."
+    validation: make agent-check
+    owner_module: scripts/agent_ready.py
+
+  # ── Quality ────────────────────────────────────────────────────────────────
+  - name: lint
+    purpose: Ruff lint over src/, tests/, and scripts/.
+    command: make lint
+    env: []
+    inputs: []
+    outputs: ["lint diagnostics"]
+    failure_modes: ["lint violation"]
+    retry: "Run `make format` to auto-fix, then re-lint."
+    validation: make lint
+    owner_module: Makefile
+
+  - name: typecheck
+    purpose: MyPy static type check over the package.
+    command: make typecheck
+    env: []
+    inputs: []
+    outputs: ["type diagnostics"]
+    failure_modes: ["type error"]
+    retry: "Fix the annotation and re-run."
+    validation: make typecheck
+    owner_module: Makefile
+
+  # ── Validation ─────────────────────────────────────────────────────────────
+  - name: validate
+    purpose: Workspace integrity — agents↔index sync, tool registry liveness, readiness summary.
+    command: make validate
+    env: []
+    inputs: []
+    outputs: ["validation report"]
+    failure_modes: ["manifest drift", "dead tool reference", "readiness check failure"]
+    retry: "Fix the reported problem and re-run."
+    validation: make validate
+    owner_module: scripts/agent_ready.py
+
+  - name: agents-sync
+    purpose: Regenerate agents/*.agent.yaml from the canonical agent-index.json.
+    command: make agents-sync
+    env: []
+    inputs: ["agent-index.json"]
+    outputs: ["agents/*.agent.yaml"]
+    failure_modes: ["malformed agent-index.json entry"]
+    retry: "Idempotent; safe to re-run."
+    validation: python3 scripts/sync_agents.py --check
+    owner_module: scripts/sync_agents.py
+
+  - name: verify
+    purpose: The comprehensive pre-handoff gate — lint, typecheck, quick tests, validate, agent-check.
+    command: make verify
+    env: ["OPENAI_API_KEY=test-key-for-unit-tests", "ANTHROPIC_API_KEY=test-key-for-unit-tests"]
+    inputs: []
+    outputs: ["aggregate pass/fail"]
+    failure_modes: ["any sub-gate fails -> overall fail"]
+    retry: "Fix the first failing gate and re-run."
+    validation: make verify
+    owner_module: Makefile
+
+  # ── Release ────────────────────────────────────────────────────────────────
+  - name: build
+    purpose: Build wheel + sdist into dist/.
+    command: make build
+    env: []
+    inputs: []
+    outputs: ["dist/*.whl", "dist/*.tar.gz"]
+    failure_modes: ["packaging metadata error"]
+    retry: "Cleans dist/ first; safe to re-run."
+    validation: make build
+    owner_module: pyproject.toml
+
+  - name: publish-dry-run
+    purpose: Build and run twine check without uploading.
+    command: make publish-dry-run
+    env: []
+    inputs: []
+    outputs: ["twine check result"]
+    failure_modes: ["invalid package metadata"]
+    retry: "Safe to re-run."
+    validation: make publish-dry-run
+    owner_module: Makefile
+
+  # ── Scripts (direct, make-free fallbacks) ──────────────────────────────────
+  - name: agent-ready-script
+    purpose: Stdlib-only readiness self-check — direct fallback when make/venv is unavailable.
+    command: python3 scripts/agent_ready.py --json --run-tests
+    env: ["OPENAI_API_KEY=test-key-for-unit-tests", "ANTHROPIC_API_KEY=test-key-for-unit-tests"]
+    inputs: ["--json", "--run-tests / --no-run-tests"]
+    outputs: ["machine-readable readiness payload"]
+    failure_modes: ["a check fails -> non-zero exit"]
+    retry: "Deterministic."
+    validation: python3 scripts/agent_ready.py --no-run-tests
+    owner_module: scripts/agent_ready.py
+
+  - name: governance-regression-script
+    purpose: Governance-regression check used by the test-governance gate.
+    command: python3 scripts/run_governance_regression.py --check
+    env: ["OPENAI_API_KEY=test-key-for-unit-tests", "ANTHROPIC_API_KEY=test-key-for-unit-tests"]
+    inputs: ["--check"]
+    outputs: ["regression verdict"]
+    failure_modes: ["a fail-closed invariant changed"]
+    retry: "Deterministic."
+    validation: make test-governance
+    owner_module: scripts/run_governance_regression.py
+
+  # ── CLI ────────────────────────────────────────────────────────────────────
+  - name: cli-capabilities-validate
+    purpose: Validate the provider-capability manifest freshness (used in CI).
+    command: python3 -m acgs_lite.cli capabilities validate --max-age-days 45
+    env: []
+    inputs: ["--max-age-days N"]
+    outputs: ["validation result"]
+    failure_modes: ["manifest stale or malformed"]
+    retry: "Refresh the manifest and re-run."
+    validation: make lint
+    owner_module: src/acgs_lite/commands/capabilities.py

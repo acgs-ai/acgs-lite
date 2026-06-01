@@ -1,0 +1,41 @@
+# GENERATED FILE — do not edit by hand.
+# Source of truth: agent-index.json (repo root). Regenerate with: make agents-sync
+agent_id: ce-plan
+name: Technical Planning
+description: 'Creates structured implementation plans for multi-step software features:
+  decisions, files, dependencies, and enumerated test scenarios.'
+support_level: maintained
+stability: stable
+is_active: true
+capabilities:
+- plan
+- architecture
+- design
+- decompose
+domains:
+- planning
+skills:
+- implementation-plan
+- test-scenarios
+tags:
+- pre-implementation
+role: planner
+purpose: Turn a feature request into a concrete, reviewable implementation plan before
+  code is written.
+scope: Read-only exploration + plan authoring. Produces a plan document; writes no
+  source.
+required_tools:
+- git
+- grep
+inputs:
+- feature description / goal
+outputs:
+- step-by-step plan with critical files and test scenarios
+safety_constraints:
+- surface architectural conflicts rather than guessing
+execution_command: /ce-plan
+validation_checks: []
+expected_artifacts:
+- plan document
+failure_modes:
+- ambiguous scope -> ask before planning

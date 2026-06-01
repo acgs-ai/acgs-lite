@@ -1,0 +1,44 @@
+# GENERATED FILE — do not edit by hand.
+# Source of truth: agent-index.json (repo root). Regenerate with: make agents-sync
+agent_id: ce-debug
+name: Debug
+description: 'Systematically finds root causes and fixes bugs: reproduces failures,
+  traces errors, and investigates test failures or issue-tracker reports.'
+support_level: maintained
+stability: stable
+is_active: true
+capabilities:
+- debug
+- root-cause
+- fix
+- investigate
+domains:
+- debugging
+skills:
+- repro
+- stack-trace-analysis
+tags:
+- bug
+role: debugger
+purpose: Find the root cause of a failing test or reported bug and fix it.
+scope: May edit source to fix the identified root cause; must add or update a covering
+  test.
+required_tools:
+- python
+- pytest
+- git
+inputs:
+- failing test / stack trace / issue reference
+outputs:
+- root-cause explanation + minimal fix
+safety_constraints:
+- reproduce before fixing
+- no broad refactors under a bug fix
+execution_command: /ce-debug
+validation_checks:
+- make test-quick
+expected_artifacts:
+- fix diff
+- regression test
+failure_modes:
+- cannot reproduce -> gather more signal before changing code

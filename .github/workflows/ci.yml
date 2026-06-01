@@ -148,3 +148,26 @@ jobs:
         run: python -m build --wheel --sdist
       - name: Validate package
         run: twine check dist/*
+
+  agent-workspace:
+    name: Agent-ready workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python3 -m pip install -e ".[dev]" httpx
+      # Prove a fresh agent can understand and execute the workspace: the registry loads,
+      # generated manifests match the canonical index, the tool registry references only
+      # live targets/scripts, the required docs exist, and the focused agent tests pass.
+      - name: Agent readiness self-check
+        env:
+          OPENAI_API_KEY: test-key-for-unit-tests
+          ANTHROPIC_API_KEY: test-key-for-unit-tests
+        run: python3 scripts/agent_ready.py --json --run-tests
+      - name: Agent manifests in sync with agent-index.json
+        run: python3 scripts/sync_agents.py --check
+      - name: Tool registry references only live tools
+        run: python3 scripts/validate_tools.py

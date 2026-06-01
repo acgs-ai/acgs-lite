@@ -46,3 +46,22 @@ def test_governance_review_ranks_first_for_governance_task(registry: AgentRegist
     ranked = registry.candidates_for("review a branch for governance regressions")
     assert ranked, "expected at least one candidate for a governance review task"
     assert ranked[0][0].agent_id == "governance-branch-review"
+
+
+@pytest.mark.parametrize(
+    ("task", "expected_agent_id"),
+    (
+        ("write documentation for the agent readiness command", "docs"),
+        ("prepare a package release and changelog", "release"),
+        ("implement a planned code change with tests", "coder"),
+        ("research official docs for a framework decision", "researcher"),
+    ),
+)
+def test_added_agent_roles_rank_first_for_representative_tasks(
+    registry: AgentRegistry,
+    task: str,
+    expected_agent_id: str,
+) -> None:
+    ranked = registry.candidates_for(task)
+    assert ranked, f"expected at least one candidate for {task!r}"
+    assert ranked[0][0].agent_id == expected_agent_id

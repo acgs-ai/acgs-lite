@@ -1,0 +1,41 @@
+# GENERATED FILE — do not edit by hand.
+# Source of truth: agent-index.json (repo root). Regenerate with: make agents-sync
+agent_id: docs
+name: Docs
+description: Writes and maintains documentation (root docs, docs/ site, runbooks)
+  and keeps it building and link-clean.
+support_level: maintained
+stability: stable
+is_active: true
+capabilities:
+- document
+- write
+- explain
+domains:
+- documentation
+skills:
+- doc-authoring
+- mkdocs
+tags:
+- docs
+role: docs
+purpose: 'Keep the repo self-describing: accurate docs that build and whose links
+  resolve.'
+scope: Edits *.md and docs/. Must not change behavior; documents what exists.
+required_tools:
+- make build
+- mkdocs
+inputs:
+- a doc gap or change to document
+outputs:
+- updated docs that build and pass the link check
+safety_constraints:
+- no unsupported claims on public surfaces (see GOAL.md honesty pass)
+execution_command: make build
+validation_checks:
+- make build
+- python3 scripts/agent_ready.py --json
+expected_artifacts:
+- updated *.md / docs/
+failure_modes:
+- broken link -> fix or remove before completing

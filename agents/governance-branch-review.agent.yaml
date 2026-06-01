@@ -1,0 +1,55 @@
+# GENERATED FILE — do not edit by hand.
+# Source of truth: agent-index.json (repo root). Regenerate with: make agents-sync
+agent_id: governance-branch-review
+name: Governance Branch Review
+description: 'Governance-aware adaptive review of the current branch versus a base
+  ref: maps changes, fans out ACGS-Lite-specific dimension reviewers, adversarially
+  verifies findings, and emits a constitutional-invariant scorecard.'
+support_level: maintained
+stability: stable
+is_active: true
+capabilities:
+- review
+- governance
+- audit
+- regression
+- branch
+- scorecard
+domains:
+- governance
+- review
+skills:
+- branch-review
+- constitutional-invariants
+- optional-integration-review
+tags:
+- pre-pr
+- governance-critical
+trigger: Reviewing ACGS-Lite branch changes before a PR
+purpose: Catch governance regressions and optional-integration risks in a branch before
+  it reaches a PR.
+scope: Read-only review of the current branch's diff vs a base ref. May write a review
+  report; must not mutate source or git history.
+required_tools:
+- git
+- make verify
+- scripts/agent_ready.py
+inputs:
+- base git ref (default 'main')
+- working-tree diff
+outputs:
+- constitutional-invariant scorecard
+- ranked findings with verification verdicts
+safety_constraints:
+- never weaken a fail-closed default
+- never bypass MACI enforcement
+- do not auto-apply fixes
+execution_command: /governance-branch-review main
+validation_checks:
+- make test-governance
+- python3 scripts/run_governance_regression.py --check
+expected_artifacts:
+- docs/reviews/<branch>-branch-review.md
+failure_modes:
+- base ref missing -> abort
+- dirty unrelated changes -> scope to diff only

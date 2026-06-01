@@ -1,0 +1,42 @@
+# GENERATED FILE — do not edit by hand.
+# Source of truth: agent-index.json (repo root). Regenerate with: make agents-sync
+agent_id: security-review
+name: Security Review
+description: Reviews code for exploitable vulnerabilities, input validation gaps,
+  auth/authz issues, hardcoded secrets, and OWASP concerns.
+support_level: maintained
+stability: stable
+is_active: true
+capabilities:
+- review
+- security
+- audit
+- vulnerability
+domains:
+- security
+skills:
+- security-audit
+- owasp
+tags:
+- pre-pr
+- security
+purpose: Surface exploitable vulnerabilities and insecure patterns before merge.
+scope: Read-only audit of the diff and adjacent code. Reports findings; does not apply
+  fixes.
+required_tools:
+- git
+- grep
+inputs:
+- changed files / diff
+outputs:
+- ranked security findings with severity and remediation
+safety_constraints:
+- never include working exploit payloads against third parties
+- no destructive testing
+execution_command: /security-review
+validation_checks:
+- ruff check src/acgs_lite/
+expected_artifacts:
+- security findings report
+failure_modes:
+- no diff -> review HEAD against main
