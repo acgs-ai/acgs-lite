@@ -4,7 +4,7 @@
 # A full uv.lock is deferred: resolving the `all` extra's heavy ML deps (crewai/autogen/swarms)
 # is too slow/network-bound to lock here. See BLOCKERS.md.
 aiohappyeyeballs==2.6.2
-aiohttp==3.13.5
+aiohttp==3.14.0
 aiosignal==1.4.0
 aiosqlite==0.22.1
 annotated-doc==0.0.4
