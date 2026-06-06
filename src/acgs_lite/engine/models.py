@@ -30,7 +30,13 @@ class Violation(NamedTuple):
     category: str
 
 
-@dataclass(slots=True)
+# Sentinel distinguishing an omitted list arg (-> fresh []) from an explicitly
+# passed None, exactly reproducing dataclass default_factory semantics. Typed as
+# Any so it is an accepted default for the list-typed __init__ params under mypy.
+_MISSING: Any = object()
+
+
+@dataclass(slots=True, init=False)
 class ValidationResult:
     """Result of validating an action against the constitution."""
 
@@ -51,6 +57,40 @@ class ValidationResult:
     review_requests: list[ReviewRequest] = field(default_factory=list)
     escalations: list[EscalationRequest] = field(default_factory=list)
     incident_alerts: list[IncidentAlert] = field(default_factory=list)
+
+    def __init__(
+        self,
+        valid: bool,
+        constitutional_hash: str,
+        violations: list[Violation] = _MISSING,
+        rules_checked: int = 0,
+        latency_ms: float = 0.0,
+        request_id: str = "",
+        timestamp: str = "",
+        action: str = "",
+        agent_id: str = "",
+        warnings: list[Violation] = _MISSING,
+        action_taken: ViolationAction | None = None,
+        notifications: list[NotificationEvent] = _MISSING,
+        review_requests: list[ReviewRequest] = _MISSING,
+        escalations: list[EscalationRequest] = _MISSING,
+        incident_alerts: list[IncidentAlert] = _MISSING,
+    ) -> None:
+        self.valid = valid
+        self.constitutional_hash = constitutional_hash
+        self.violations = [] if violations is _MISSING else violations
+        self.rules_checked = rules_checked
+        self.latency_ms = latency_ms
+        self.request_id = request_id
+        self.timestamp = timestamp
+        self.action = action
+        self.agent_id = agent_id
+        self.warnings = [] if warnings is _MISSING else warnings
+        self.action_taken = action_taken
+        self.notifications = [] if notifications is _MISSING else notifications
+        self.review_requests = [] if review_requests is _MISSING else review_requests
+        self.escalations = [] if escalations is _MISSING else escalations
+        self.incident_alerts = [] if incident_alerts is _MISSING else incident_alerts
 
     @property
     def blocking_violations(self) -> list[Violation]:
