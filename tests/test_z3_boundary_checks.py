@@ -184,7 +184,7 @@ class TestGovernedCallableZ3Integration:
 
         import logging
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="acgs_lite.governed"):
 
             @GovernedCallable(rules)
             def withdraw(amount: float = Field(gt=0, le=1000)) -> None:
