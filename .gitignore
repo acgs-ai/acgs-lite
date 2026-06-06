@@ -64,6 +64,9 @@ output/
 .agents/
 .bt/
 
+# self-improve loop experiment worktrees (never commit)
+worktrees/
+
 # Local secrets — never commit
 .env
 .env.*
