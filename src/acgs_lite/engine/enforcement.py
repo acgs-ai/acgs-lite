@@ -168,10 +168,42 @@ class EnforcementResolution:
     review_requests: list[ReviewRequest] = field(default_factory=list)
     escalations: list[EscalationRequest] = field(default_factory=list)
     incident_alerts: list[IncidentAlert] = field(default_factory=list)
-    outcomes: list[EnforcementOutcome] = field(default_factory=list)
     action_taken: ViolationAction | None = None
     primary_action: ViolationAction | None = None
     primary_violation: ViolationLike | None = None
+    _outcome_specs: list[
+        tuple[
+            str,
+            ViolationAction,
+            bool,
+            NotificationEvent | None,
+            ReviewRequest | None,
+            EscalationRequest | None,
+            IncidentAlert | None,
+        ]
+    ] = field(default_factory=list, repr=False, compare=False)
+    _outcomes_cache: list[EnforcementOutcome] | None = field(
+        default=None, repr=False, compare=False
+    )
+
+    @property
+    def outcomes(self) -> list[EnforcementOutcome]:
+        cached = self._outcomes_cache
+        if cached is None:
+            cached = [
+                EnforcementOutcome(
+                    rule_id=s[0],
+                    workflow_action=s[1],
+                    blocking=s[2],
+                    notification=s[3],
+                    review_request=s[4],
+                    escalation=s[5],
+                    incident_alert=s[6],
+                )
+                for s in self._outcome_specs
+            ]
+            self._outcomes_cache = cached
+        return cached
 
     def audit_metadata(self) -> dict[str, Any]:
         return {
@@ -264,15 +296,15 @@ def resolve_enforcement(
             )
             resolution.incident_alerts.append(incident_alert)
 
-        resolution.outcomes.append(
-            EnforcementOutcome(
-                rule_id=violation.rule_id,
-                workflow_action=workflow_action,
-                blocking=blocking,
-                notification=notification,
-                review_request=review_request,
-                escalation=escalation,
-                incident_alert=incident_alert,
+        resolution._outcome_specs.append(
+            (
+                violation.rule_id,
+                workflow_action,
+                blocking,
+                notification,
+                review_request,
+                escalation,
+                incident_alert,
             )
         )
 
