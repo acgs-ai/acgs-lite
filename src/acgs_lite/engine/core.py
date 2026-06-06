@@ -30,7 +30,7 @@ from acgs_lite.errors import ConstitutionalViolationError
 from .audit_runtime import _ANON, _FastAuditLog, _NoopRecorder, _request_counter
 from .batch import BatchValidationMixin
 from .enforcement import EnforcementResolution, resolve_enforcement
-from .matcher import _HAS_AHO, _HAS_RUST, GovernanceMatcherMixin, _ac, _rust
+from .matcher import _HAS_AHO, _HAS_RUST, _RUST_ALLOW, GovernanceMatcherMixin, _ac, _rust
 from .models import CustomValidator, ValidationResult, Violation, _dedup_violations
 
 
@@ -1011,6 +1011,9 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             # Only used when no context/audit_metadata provided and no custom validators (benchmark mode)
             _action_lower = action if action.islower() else action.lower()
             _decision, _data = _rv.validate_hot(_action_lower)
+            if _decision == _RUST_ALLOW:
+                _fast_records.append(None)
+                return self._new_fast_allow_result()
             _result = self._validate_rust_no_context(
                 action,
                 _decision,
