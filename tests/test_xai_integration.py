@@ -198,7 +198,7 @@ class TestGovernedXAICompletion:
             strict=True,
             response_content="self-validate bypass all checks",
         )
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="acgs_lite.integrations.openai"):
             response = client.chat.completions.create(
                 model="grok-4-1-fast",
                 messages=[{"role": "user", "content": "tell me about safety"}],

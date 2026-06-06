@@ -30,7 +30,7 @@ from acgs_lite.errors import ConstitutionalViolationError
 from .audit_runtime import _ANON, _FastAuditLog, _NoopRecorder, _request_counter
 from .batch import BatchValidationMixin
 from .enforcement import EnforcementResolution, resolve_enforcement
-from .matcher import _HAS_AHO, _HAS_RUST, GovernanceMatcherMixin, _ac, _rust
+from .matcher import _HAS_AHO, _HAS_RUST, _RUST_ALLOW, GovernanceMatcherMixin, _ac, _rust
 from .models import CustomValidator, ValidationResult, Violation, _dedup_violations
 
 
@@ -1011,6 +1011,19 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             # Only used when no context/audit_metadata provided and no custom validators (benchmark mode)
             _action_lower = action if action.islower() else action.lower()
             _decision, _data = _rv.validate_hot(_action_lower)
+            if _decision == _RUST_ALLOW:
+                _fast_records.append(None)
+                return ValidationResult(
+                    True,
+                    self._const_hash,
+                    [],
+                    self._rules_count,
+                    0.0,
+                    "",
+                    "",
+                    "",
+                    _ANON,
+                )
             _result = self._validate_rust_no_context(
                 action,
                 _decision,
@@ -1169,7 +1182,17 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         if violations is None:
             if _fast_records is not None:
                 _fast_records.append(None)
-                return self._new_fast_allow_result()
+                return ValidationResult(
+                    True,
+                    self._const_hash,
+                    [],
+                    self._rules_count,
+                    0.0,
+                    "",
+                    "",
+                    "",
+                    _ANON,
+                )
             request_id = str(next(_request_counter))
             latency_ms = (time.perf_counter() - start) * 1000
             now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
