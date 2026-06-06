@@ -1013,7 +1013,17 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             _decision, _data = _rv.validate_hot(_action_lower)
             if _decision == _RUST_ALLOW:
                 _fast_records.append(None)
-                return self._new_fast_allow_result()
+                return ValidationResult(
+                    True,
+                    self._const_hash,
+                    [],
+                    self._rules_count,
+                    0.0,
+                    "",
+                    "",
+                    "",
+                    _ANON,
+                )
             _result = self._validate_rust_no_context(
                 action,
                 _decision,
@@ -1172,7 +1182,17 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         if violations is None:
             if _fast_records is not None:
                 _fast_records.append(None)
-                return self._new_fast_allow_result()
+                return ValidationResult(
+                    True,
+                    self._const_hash,
+                    [],
+                    self._rules_count,
+                    0.0,
+                    "",
+                    "",
+                    "",
+                    _ANON,
+                )
             request_id = str(next(_request_counter))
             latency_ms = (time.perf_counter() - start) * 1000
             now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
