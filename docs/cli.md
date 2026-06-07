@@ -108,7 +108,8 @@ acgs activate ACGS-PRO-XXXX-XXXX
 ```
 
 ### `acgs verify`
-Validate the integrity of your license key and constitutional hash.
+Validate local license key integrity only. It does not validate constitutional hash
+integrity; use `acgs lint rules.yaml` to catch stale or mismatched rule hashes.
 ```bash
 acgs verify
 ```

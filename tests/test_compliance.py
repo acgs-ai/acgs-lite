@@ -14,6 +14,7 @@ import json
 
 import pytest
 
+import acgs_lite.compliance.hipaa_ai as hipaa_ai
 from acgs_lite.compliance import (
     AustraliaAIEthicsFramework,
     BrazilLGPDFramework,
@@ -219,6 +220,22 @@ class TestHIPAAAI:
         fw.auto_populate_acgs_lite(checklist)
         compliant = [i for i in checklist if i.status == ChecklistStatus.COMPLIANT]
         assert len(compliant) >= 7
+
+    def test_penalty_guidance_avoids_stale_flat_amounts(self, system_desc: dict) -> None:
+        fw = HIPAAAIFramework()
+        result = fw.assess(system_desc)
+        public_text = "\n".join(
+            (
+                hipaa_ai.__doc__ or "",
+                HIPAAAIFramework.__doc__ or "",
+                *result.recommendations,
+            )
+        )
+
+        assert "tiered, culpability-dependent, and annually inflation-adjusted" in public_text
+        assert "$1.5M" not in public_text
+        assert "$100-$50,000" not in public_text
+        assert "$100 to $50,000" not in public_text
 
 
 @pytest.mark.compliance

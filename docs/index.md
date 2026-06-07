@@ -4,7 +4,8 @@ ACGS converts a declared goal and proposed method into a governed decision befor
 
 ACGS is a fail-closed legitimacy layer for AI-agent action. It resolves authority, constraints, policy version, and execution boundary before execution. If that proof is missing, ambiguous, unknown, or unverifiable, ACGS blocks execution.
 
-ACGS makes agent action decisions explicit, authorized, constrained, transformable, deniable, bounded, and replayable before execution.
+In receipt-enforced paths, ACGS leads with three concrete checks: a canonical
+decision, a receipt issued before execution, and a bounded executor.
 
 The standard `GovernedAgent` path provides deterministic input/output validation and audit logging. For receipt-enforced execution paths, ACGS can require:
 
@@ -39,17 +40,17 @@ audits and risk assessments. The ratios below are SELF-ASSESSED mapping
 coverage only; they are not certification, regulatory approval, adoption proof,
 or a substitute for legal review.
 
-| Framework | Business Risk | Mapping Coverage |
+| Framework | Mapping Coverage | Review Context |
 |---|---|---|
-| **EU AI Act** | 7% global revenue penalty | SELF-ASSESSED mapping coverage: 5/9 |
-| **NIST AI RMF** | US Federal procurement gate | SELF-ASSESSED mapping coverage: 7/16 |
-| **ISO/IEC 42001** | International audit failure | SELF-ASSESSED mapping coverage: 9/18 |
-| **SOC 2 + AI** | Enterprise gate / lost contracts | SELF-ASSESSED mapping coverage: 10/16 |
-| **HIPAA + AI** | $1.5M fine per violation | SELF-ASSESSED mapping coverage: 9/15 |
-| **GDPR Art. 22** | 4% global revenue | SELF-ASSESSED mapping coverage: 10/12 |
-| **ECOA/FCRA** | Unlimited damages | SELF-ASSESSED mapping coverage: 6/12 |
-| **NYC LL 144** | $1,500/day | SELF-ASSESSED mapping coverage: 6/12 |
-| **OECD AI** | Baseline standard | SELF-ASSESSED mapping coverage: 10/15 |
+| **EU AI Act** | SELF-ASSESSED mapping coverage: 5/9 | Risk classification, transparency, human oversight, and documentation mapping |
+| **NIST AI RMF** | SELF-ASSESSED mapping coverage: 7/16 | Governance, mapping, measurement, and management functions |
+| **ISO/IEC 42001** | SELF-ASSESSED mapping coverage: 9/18 | AI management-system controls and audit-preparation evidence |
+| **SOC 2 + AI** | SELF-ASSESSED mapping coverage: 10/16 | Security, availability, processing integrity, confidentiality, and privacy mappings |
+| **HIPAA + AI** | SELF-ASSESSED mapping coverage: 9/15 | Privacy, security, breach-notification, and PHI-handling safeguards; penalty exposure is tiered and inflation-adjusted, so verify current HHS/OCR amounts with legal review |
+| **GDPR Art. 22** | SELF-ASSESSED mapping coverage: 10/12 | Automated decision-making, explanation, and data-protection mapping |
+| **ECOA/FCRA** | SELF-ASSESSED mapping coverage: 6/12 | Fair-lending, adverse-action, and model-documentation mapping |
+| **NYC LL 144** | SELF-ASSESSED mapping coverage: 6/12 | Bias-audit, candidate-notice, and public-reporting mapping |
+| **OECD AI** | SELF-ASSESSED mapping coverage: 10/15 | Transparency, accountability, robustness, and human-oversight mapping |
 
 **Run `acgs assess` to see self-assessed mapping coverage for your jurisdiction and domain.**
 

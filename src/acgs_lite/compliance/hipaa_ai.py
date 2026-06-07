@@ -8,7 +8,9 @@ Protected Health Information (PHI) or electronic PHI (ePHI):
 
 Reference: Health Insurance Portability and Accountability Act (1996),
 HITECH Act (2009), 45 CFR Parts 160, 162, 164.
-Penalties: $100-$50,000 per violation; up to $1.5M per year per category.
+Penalty exposure is tiered, culpability-dependent, and annually
+inflation-adjusted under 45 CFR 160.404 / 45 CFR 102.3; verify current
+HHS/OCR amounts with legal review.
 
 Constitutional Hash: 608508a9bd224290
 """
@@ -203,9 +205,10 @@ class HIPAAAIFramework:
     safeguards), and Breach Notification Rule as applied to AI systems
     that process Protected Health Information.
 
-    Penalties: $100 to $50,000 per violation, up to $1.5M per year
-    per identical violation category. Criminal penalties possible for
-    knowing violations.
+    HIPAA civil monetary penalties are tiered, culpability-dependent,
+    and annually inflation-adjusted under 45 CFR 160.404 / 45 CFR 102.3.
+    Verify current HHS/OCR amounts with legal review. Criminal penalties
+    are possible for knowing violations.
 
     Status: Enacted (1996, HITECH 2009). Enforced by HHS OCR.
 
@@ -269,8 +272,10 @@ class HIPAAAIFramework:
         for item in checklist:
             if item.status == ChecklistStatus.PENDING and item.blocking:
                 recs.append(
-                    f"{item.ref}: Address for HIPAA compliance. Penalties "
-                    f"up to $1.5M per year per violation category."
+                    f"{item.ref}: Address for HIPAA compliance. Civil monetary "
+                    f"penalty exposure is tiered, culpability-dependent, and "
+                    f"annually inflation-adjusted under 45 CFR 160.404 / 45 CFR 102.3; "
+                    f"verify current HHS/OCR amounts with legal review."
                 )
 
         return FrameworkAssessment(
