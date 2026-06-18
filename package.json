@@ -6,6 +6,6 @@
     "preview": "wrangler dev"
   },
   "devDependencies": {
-    "wrangler": "^4.90.0"
+    "wrangler": "^4.102.0"
   }
 }
