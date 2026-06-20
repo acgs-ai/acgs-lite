@@ -71,7 +71,7 @@ jsonschema-specifications==2025.9.1
 keyring==25.7.0
 langchain-core==1.4.1
 langchain-protocol==0.0.16
-langsmith==0.8.9
+langsmith==0.8.18
 librt==0.11.0
 litellm==1.87.1
 llama-index-core==0.14.22
