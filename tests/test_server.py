@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -13,6 +13,27 @@ from fastapi.testclient import TestClient
 from acgs_lite import Constitution, Rule, Severity
 from acgs_lite.audit import AuditEntry
 from acgs_lite.server import create_governance_app
+
+try:  # FastAPI >= 0.138 defers router inclusion behind lazy wrappers
+    from fastapi.routing import iter_route_contexts as _iter_route_contexts
+except ImportError:  # older FastAPI flattens included routes into app.routes
+    _iter_route_contexts = None
+
+
+def _iter_api_routes(app: Any) -> Iterator[Any]:
+    """Yield API-route-like objects (with ``.path``/``.endpoint``) for ``app``.
+
+    Works with both the legacy flattened ``app.routes`` layout and FastAPI 0.138+,
+    which stores included routers as lazy ``_IncludedRouter`` wrappers.
+    """
+    if _iter_route_contexts is not None:
+        for ctx in _iter_route_contexts(app.routes):
+            if isinstance(ctx.original_route, APIRoute):
+                yield ctx
+    else:
+        for route in app.routes:
+            if isinstance(route, APIRoute):
+                yield route
 
 
 class _DummyAuditStore:
@@ -63,8 +84,8 @@ class TestGovernanceServer:
 
     @staticmethod
     def _route_endpoint(app: Any, path: str) -> Callable[..., dict[str, Any]]:
-        for route in app.routes:
-            if isinstance(route, APIRoute) and route.path == path:
+        for route in _iter_api_routes(app):
+            if route.path == path:
                 return cast(Callable[..., dict[str, Any]], route.endpoint)
         raise AssertionError(f"Route {path!r} not found")
 
