@@ -22,7 +22,7 @@ cffi==2.0.0
 charset-normalizer==3.4.7
 click==8.4.1
 colorama==0.4.6
-coverage==7.14.1
+coverage==7.14.3
 cryptography==49.0.0
 dataclasses-json==0.6.7
 Deprecated==1.3.1
@@ -31,7 +31,7 @@ distro==1.9.0
 docstring_parser==0.18.0
 docutils==0.23
 eval_type_backport==0.4.0
-fastapi==0.137.2
+fastapi==0.138.0
 fastuuid==0.14.0
 filelock==3.29.4
 filetype==1.2.0
@@ -71,12 +71,12 @@ jsonschema-specifications==2025.9.1
 keyring==25.7.0
 langchain-core==1.4.8
 langchain-protocol==0.0.18
-langsmith==0.8.18
+langsmith==0.9.1
 librt==0.11.0
-litellm==1.89.2
+litellm==1.89.3
 llama-index-core==0.14.22
 llama-index-instrumentation==0.5.0
-llama-index-workflows==2.22.0
+llama-index-workflows==2.22.1
 Markdown==3.10.2
 markdown-it-py==4.2.0
 MarkupSafe==3.0.3
@@ -85,7 +85,7 @@ mcp==1.28.0
 mdurl==0.1.2
 mergedeep==1.3.4
 mike==2.2.0
-mistralai==2.4.13
+mistralai==2.5.0
 mkdocs==1.6.1
 mkdocs-autorefs==1.4.4
 mkdocs-get-deps==0.2.2
@@ -100,7 +100,7 @@ mypy==2.1.0
 mypy_extensions==1.1.0
 nest-asyncio==1.6.0
 networkx==3.6.1
-nh3==0.3.5
+nh3==0.3.6
 nltk==3.9.4
 numpy==2.4.6
 openai==2.43.0
@@ -124,7 +124,7 @@ pydantic-settings==2.14.2
 pydantic_core==2.47.0
 Pygments==2.20.0
 PyJWT==2.13.0
-pymdown-extensions==10.21.3
+pymdown-extensions==11.0
 pyparsing==3.3.2
 pyproject_hooks==1.2.0
 pytest==9.1.1
@@ -152,7 +152,7 @@ six==1.17.0
 smmap==5.0.3
 sniffio==1.3.1
 SQLAlchemy==2.0.51
-sse-starlette==3.4.4
+sse-starlette==3.4.5
 starlette==1.3.1
 structlog==26.1.0
 tenacity==9.1.4
@@ -171,7 +171,7 @@ uvicorn==0.49.0
 verspec==0.1.0
 watchdog==6.0.0
 websockets==16.0
-wrapt==2.2.1
+wrapt==2.2.2
 xxhash==3.7.0
 yarl==1.24.2
 zipp==4.1.0
