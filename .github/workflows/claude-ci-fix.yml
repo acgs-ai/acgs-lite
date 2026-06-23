@@ -107,7 +107,7 @@ jobs:
 
       - name: Checkout PR branch
         if: steps.pr.outputs.skip == 'false' && steps.guard.outputs.skip == 'false'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
