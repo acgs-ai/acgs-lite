@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any, cast
 
 import pytest
@@ -25,10 +25,31 @@ from acgs_lite.integrations.openshell_governance import (
     create_openshell_governance_app,
 )
 
+try:  # FastAPI >= 0.138 defers router inclusion behind lazy wrappers
+    from fastapi.routing import iter_route_contexts as _iter_route_contexts
+except ImportError:  # older FastAPI flattens included routes into app.routes
+    _iter_route_contexts = None
+
+
+def _iter_api_routes(app: Any) -> Iterator[Any]:
+    """Yield API-route-like objects (with ``.path``/``.endpoint``) for ``app``.
+
+    Works with both the legacy flattened ``app.routes`` layout and FastAPI 0.138+,
+    which stores included routers as lazy ``_IncludedRouter`` wrappers.
+    """
+    if _iter_route_contexts is not None:
+        for ctx in _iter_route_contexts(app.routes):
+            if isinstance(ctx.original_route, APIRoute):
+                yield ctx
+    else:
+        for route in app.routes:
+            if isinstance(route, APIRoute):
+                yield route
+
 
 def _route_endpoint(app: Any, path: str) -> Callable[..., Any]:
-    for route in app.routes:
-        if isinstance(route, APIRoute) and route.path == path:
+    for route in _iter_api_routes(app):
+        if route.path == path:
             return cast(Callable[..., Any], route.endpoint)
     raise AssertionError(f"Route {path!r} not found")
 
@@ -73,7 +94,7 @@ def _make_action(*, risk: RiskLevel, operation: OperationType) -> ActionEnvelope
 class TestOpenShellGovernanceIntegration:
     def test_app_registers_expected_routes(self) -> None:
         app = create_openshell_governance_app()
-        paths = {route.path for route in app.routes if isinstance(route, APIRoute)}
+        paths = {route.path for route in _iter_api_routes(app)}
         assert "/governance/evaluate-action" in paths
         assert "/governance/submit-for-approval" in paths
         assert "/governance/review-approval" in paths

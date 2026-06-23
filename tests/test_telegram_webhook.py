@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -13,6 +14,27 @@ from acgs_lite import Constitution, Rule, Severity
 from acgs_lite.engine import GovernanceEngine
 from acgs_lite.integrations.telegram_webhook import create_telegram_webhook_router
 from acgs_lite.server import create_governance_app
+
+try:  # FastAPI >= 0.138 defers router inclusion behind lazy wrappers
+    from fastapi.routing import iter_route_contexts as _iter_route_contexts
+except ImportError:  # older FastAPI flattens included routes into app.routes
+    _iter_route_contexts = None
+
+
+def _iter_api_routes(app: Any) -> Iterator[Any]:
+    """Yield API-route-like objects (with ``.path``/``.endpoint``) for ``app``.
+
+    Works with both the legacy flattened ``app.routes`` layout and FastAPI 0.138+,
+    which stores included routers as lazy ``_IncludedRouter`` wrappers.
+    """
+    if _iter_route_contexts is not None:
+        for ctx in _iter_route_contexts(app.routes):
+            if isinstance(ctx.original_route, APIRoute):
+                yield ctx
+    else:
+        for route in app.routes:
+            if isinstance(route, APIRoute):
+                yield route
 
 
 def _make_engine() -> GovernanceEngine:
@@ -128,8 +150,8 @@ def test_create_governance_app_mounts_telegram_router(tmp_path: Any) -> None:
 
     webhook_paths = {
         route.path
-        for route in app.routes
-        if isinstance(route, APIRoute) and route.path.startswith("/telegram/webhook/")
+        for route in _iter_api_routes(app)
+        if route.path is not None and route.path.startswith("/telegram/webhook/")
     }
 
     assert webhook_paths == {"/telegram/webhook/mounted-secret"}
