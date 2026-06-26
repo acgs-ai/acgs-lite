@@ -90,10 +90,12 @@ The Phoenix example under
 shows `request -> decision -> receipt -> bounded execution` telemetry; its
 `governance.decision.*` span attributes are experimental.
 
-**Current status:** v2.11.0 package metadata with a CI-backed test suite. PyPI
-publication remains an owner-gated external action. Production deployment
+**Current status:** the currently published package on PyPI is `2.10.1`; the
+repository also contains `2.11.0` work-in-progress and a fresh-venv proof path.
+PyPI publication remains an owner-gated external action. Production deployment
 properties depend on your constitution, storage, authentication, and operational
-controls.
+controls, and the project does not claim independent production users or
+compliance certification.
 
 ## Security Disclosure
 
@@ -115,6 +117,7 @@ Start here for the shortest local verification paths:
   tests without requiring `make`
 - **AI-agent install verify** — [`examples/agent_quickstart/`](./examples/agent_quickstart/) runs a self-verifying suite: `GovernedCallable` + MACI + AuditLog in one script, exits 0 on success
 - **Goal v1.0 membrane** — [`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py) shows ALLOW / DENY / TRANSFORM decisions, receipts, executor refusal, and audit evidence
+- **Release proof artifact** — `python examples/release_proof.py --output /tmp/acgs-release-proof.json` writes a deterministic JSON proof another developer can inspect locally
 - **Minimal proof** — [`examples/basic_governance/`](./examples/basic_governance/) shows safe requests passing and unsafe ones blocked before execution
 - **Audit trail demo** — [`examples/audit_trail/`](./examples/audit_trail/) shows the tamper-evident decision chain
 - **Shared infrastructure path** — [`examples/mcp_agent_client.py`](./examples/mcp_agent_client.py) runs governance as shared MCP-compatible infrastructure
@@ -568,7 +571,7 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 
 ---
 
-## Stable surfaces today (v2.11.0)
+## Stable surfaces today (2.10.1 published; 2.11.0 pending)
 
 This table describes library surfaces with stable APIs and test coverage. It is
 not a blanket production-readiness claim for every deployment.

@@ -25,7 +25,11 @@ make publish-dry-run        # = make build && twine check dist/*
 ```bash
 python3 -m venv /tmp/acgs-fresh && /tmp/acgs-fresh/bin/pip install dist/*.whl
 /tmp/acgs-fresh/bin/python -c "import acgs_lite; print(acgs_lite.__version__)"
+/tmp/acgs-fresh/bin/python examples/release_proof.py --output /tmp/acgs-release-proof.json
+cat /tmp/acgs-release-proof.json
 ```
+
+The release proof script is the canonical proof artifact for the current package line: it runs without API keys and emits a deterministic JSON summary that another developer can inspect locally.
 
 ## Publish (owner only)
 

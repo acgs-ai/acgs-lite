@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.11.0] - 2026-05-31
+### Added
+
+- Added a release-proof demo script and a reproducible JSON artifact for fresh-venv verification.
+
+### Changed
+
+- Aligned release messaging with the currently published package state: `2.10.1` is the latest published package; `2.11.0` remains pending publication.
+
+## [2.11.0] - Unreleased
 
 ### Security
 
