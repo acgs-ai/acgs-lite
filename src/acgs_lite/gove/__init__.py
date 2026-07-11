@@ -20,3 +20,9 @@ except ImportError:  # pragma: no cover - depends on environment
     GOVE_AVAILABLE = False
 
 __all__ = ["GOVE_AVAILABLE", "GoveKernelUnavailable"]
+
+if GOVE_AVAILABLE:
+    from acgs_lite.gove.policy import ConstitutionPolicy, ValidatorLike
+    from acgs_lite.gove.verdicts import decision_state_to_gove
+
+    __all__ += ["ConstitutionPolicy", "ValidatorLike", "decision_state_to_gove"]
