@@ -516,6 +516,65 @@ replay-verification API.
 
 ---
 
+## 🌉 gove-zone kernel bridge (Experimental)
+
+`acgs_lite.gove` lets a `GovernanceEngine` constitution act as a
+[gove-zone](https://pypi.org/project/gove-zone/) `Policy`, so an existing
+constitution can gate calls through gove-zone's signed `execute_with_receipt`
+executor. This bridge is **Experimental**: it is a new adapter seam, not a
+replacement for the legitimacy receipt pipeline above, and it has not been
+run in production.
+
+Install (Python >= 3.11 only; `gove-zone` is not yet published to PyPI, so
+the extra resolves to nothing until then — treat it as workspace/monorepo-only
+in the interim):
+
+```bash
+pip install "acgs-lite[gove]"
+```
+
+Minimal usage — a real constitution evaluating a `gove_zone.tool.ToolCall`:
+
+```python
+from acgs_lite import Constitution, GovernanceEngine
+from acgs_lite.gove.policy import ConstitutionPolicy
+from gove_zone.tool import ToolCall
+
+policy = ConstitutionPolicy(GovernanceEngine(Constitution.default(), strict=False), version="1.0.0")
+record = policy.evaluate(ToolCall(name="deploy_feature", args={"env": "staging"}, goal="deploy to staging", actor="agent-1"))
+```
+
+`record` is a `gove_zone.decision.DecisionRecord`; hand it to gove-zone's own
+`ChainHashAuditStore` / `DecisionReceipt.from_record` / `execute_with_receipt`
+to reach a signed, gated execution — see
+[`tests/gove/test_conformance_e2e.py`](./tests/gove/test_conformance_e2e.py)
+for the full, working chain.
+
+Honest limitations:
+
+- **Legacy `legitimacy` receipts and gove-zone receipts are distinct formats
+  with incompatible canonicalizations.** They are not interchangeable and the
+  bridge does not convert between them.
+- **The bridge does not translate old evidence.** Legitimacy `DecisionReceipt`
+  records already on disk are not migrated or replayed into gove-zone's audit
+  chain; each governance pipeline keeps its own history.
+- **Single-use / expiry enforcement comes from gove-zone's own ledger, not
+  from `ExecutionBoundary.single_use`.** The legacy `ExecutionBoundary`
+  dataclass's `single_use` field is not read or enforced anywhere in this
+  bridge; replay/expiry protection for gove-zone-gated calls is entirely
+  gove-zone's responsibility.
+- The 8-state acgs-lite decision taxonomy is projected onto gove-zone's 4
+  verdicts (`decision_state_to_gove`); the original state is preserved as a
+  `reason` prefix, not as a first-class gove-zone field.
+- `ConstitutionPolicy` matches on a deterministic text projection of the
+  `ToolCall` (`name` + canonical JSON of `args` + `goal`), not on the
+  structured arguments directly — constitutions authored for prose actions
+  should target tool names and argument keys to match reliably.
+- `gove-zone` itself is pre-1.0 (`0.1.0a1`); its API may change before a
+  stable release.
+
+---
+
 ## 🔒 Safety Defaults
 
 `acgs-lite` is **fail-closed by default**. This is a design principle, not a configuration option.
@@ -568,6 +627,7 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 | Z3 constraint verifier | 🧪 **Experimental** | Useful for high-risk scenarios; requires separate Z3 install |
 | Lean 4 / Leanstral proof certificates | 🧪 **Experimental** | Requires `mistralai` extra and external Lean kernel |
 | Newer framework adapters (Agno, A2A, LiteLLM, Mistral) | 🧪 **Experimental** | Community-contributed; test coverage varies |
+| `acgs_lite.gove` — gove-zone kernel bridge | 🧪 **Experimental** | Optional `gove` extra (Python >= 3.11); `gove-zone` not yet on PyPI; distinct receipt format from `legitimacy`, not translated |
 
 ---
 

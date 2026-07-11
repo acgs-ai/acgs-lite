@@ -12,6 +12,7 @@ PUBLIC_SURFACES = (
     REPO_ROOT / "README.md",
     REPO_ROOT / "docs" / "index.md",
     REPO_ROOT / "docs" / "compliance.md",
+    REPO_ROOT / "docs" / "cli.md",
     REPO_ROOT / "research" / "README.md",
 )
 
@@ -45,9 +46,7 @@ def test_banned_public_social_proof_strings_absent() -> None:
             if banned in text:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}: {banned!r}")
 
-    assert not offenders, "unsupported public social-proof claims remain: " + ", ".join(
-        offenders
-    )
+    assert not offenders, "unsupported public social-proof claims remain: " + ", ".join(offenders)
 
 
 def test_empty_production_users_table_is_reframed() -> None:
@@ -69,9 +68,27 @@ def test_compliance_ratios_are_self_assessed_mapping_coverage() -> None:
             if ratio_pattern.search(line) and "SELF-ASSESSED mapping coverage" not in line:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_number}: {line}")
 
-    assert not offenders, "unlabeled compliance mapping ratios remain: " + "\n".join(
-        offenders
+    assert not offenders, "unlabeled compliance mapping ratios remain: " + "\n".join(offenders)
+
+
+def test_homepage_compliance_table_leads_with_coverage_not_penalties() -> None:
+    index = _read(REPO_ROOT / "docs" / "index.md")
+
+    assert "| Framework | Mapping Coverage | Review Context |" in index
+    assert "| Framework | Business Risk | Mapping Coverage |" not in index
+    assert "$1.5M fine per violation" not in index
+    assert "penalty exposure is tiered and inflation-adjusted" in index
+
+
+def test_acgs_verify_docs_do_not_claim_constitutional_hash_validation() -> None:
+    cli = _read(REPO_ROOT / "docs" / "cli.md")
+    cli_normalized = " ".join(cli.split())
+
+    assert "acgs verify                 Validate license key integrity only" in _read(
+        REPO_ROOT / "src" / "acgs_lite" / "cli.py"
     )
+    assert "Validate the integrity of your license key and constitutional hash." not in cli
+    assert "does not validate constitutional hash integrity" in cli_normalized
 
 
 def test_research_result_lines_are_simulation_prefixed() -> None:
@@ -87,9 +104,7 @@ def test_research_result_lines_are_simulation_prefixed() -> None:
         if line.startswith("- ") and not line.startswith(f"- {SIMULATION_PREFIX}")
     ]
 
-    assert not offenders, "research result lines missing simulation prefix: " + "\n".join(
-        offenders
-    )
+    assert not offenders, "research result lines missing simulation prefix: " + "\n".join(offenders)
 
 
 def test_experiment_generators_emit_simulation_metadata() -> None:
@@ -99,6 +114,4 @@ def test_experiment_generators_emit_simulation_metadata() -> None:
         if '"simulation"' not in text or "not empirical benchmark" not in text:
             offenders.append(str(path.relative_to(REPO_ROOT)))
 
-    assert not offenders, "experiment outputs lack simulation metadata: " + ", ".join(
-        offenders
-    )
+    assert not offenders, "experiment outputs lack simulation metadata: " + ", ".join(offenders)
