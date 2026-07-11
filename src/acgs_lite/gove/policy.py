@@ -36,10 +36,10 @@ class ConstitutionPolicy(Policy):
     def _action_text(call: ToolCall) -> str:
         return f"{call.name} {canonical_json(dict(call.args))} {call.goal}".strip()
 
-    def _record(self, call: ToolCall, **overrides: Any) -> DecisionRecord:
+    def _record(self, call: ToolCall, *, argument_hash: str, **overrides: Any) -> DecisionRecord:
         base: dict[str, Any] = {
             "tool": call.name,
-            "argument_hash": sha256_json(dict(call.args)),
+            "argument_hash": argument_hash,
             "policy_version": self.version,
             "event_id": new_event_id(),
             "goal": call.goal,
@@ -51,6 +51,15 @@ class ConstitutionPolicy(Policy):
 
     def evaluate(self, call: ToolCall) -> DecisionRecord:
         try:
+            argument_hash = sha256_json(dict(call.args))
+        except Exception as exc:  # fail closed — unserializable args
+            return self._record(
+                call,
+                argument_hash="unserializable-args",
+                decision=Decision.DENY,
+                reason=f"argument-serialization-error:{type(exc).__name__}",
+            )
+        try:
             result = self._engine.validate(
                 self._action_text(call), agent_id=call.actor or "anonymous"
             )
@@ -59,18 +68,23 @@ class ConstitutionPolicy(Policy):
             # instead of returning valid=False in strict mode).
             return self._record(
                 call,
+                argument_hash=argument_hash,
                 decision=Decision.DENY,
                 reason=f"constitution-engine-error:{type(exc).__name__}",
             )
         if getattr(result, "valid", False):
             return self._record(
-                call, decision=Decision.ALLOW, reason="constitution: no violations"
+                call,
+                argument_hash=argument_hash,
+                decision=Decision.ALLOW,
+                reason="constitution: no violations",
             )
         violations = list(getattr(result, "violations", []) or [])
         rule_ids = tuple(str(v.rule_id) for v in violations)
         first_text = str(violations[0].rule_text) if violations else "unspecified violation"
         return self._record(
             call,
+            argument_hash=argument_hash,
             decision=Decision.DENY,
             matched_rules=rule_ids,
             reason=f"constitution violation: {first_text}",

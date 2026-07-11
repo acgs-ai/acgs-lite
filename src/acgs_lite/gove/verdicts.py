@@ -1,7 +1,12 @@
 """Map acgs-lite's 8-state decision taxonomy onto gove-zone's 4 kernel verdicts.
 
-Lossless in combination with DecisionRecord.reason: adapters prefix the
-original state as ``acgs-lite:<STATE>:`` so replay/audit can recover it.
+Standalone projection utility for the ``DecisionState`` taxonomy
+(``acgs_lite.legitimacy.decide``). Not yet consumed by
+``ConstitutionPolicy`` — that adapter is binary (ALLOW/DENY) by
+construction because ``GovernanceEngine.validate`` returns a
+``ValidationResult`` with no ``DecisionState``. Callers bridging the
+legitimacy lane can preserve the original state losslessly by prefixing
+``DecisionRecord.reason`` with ``REASON_PREFIX + state + ":"``.
 """
 
 from __future__ import annotations

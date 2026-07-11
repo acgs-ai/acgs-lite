@@ -78,3 +78,13 @@ def test_action_text_is_deterministic():
 def test_empty_version_rejected():
     with pytest.raises(ValueError):
         ConstitutionPolicy(_StubEngine(_Result(valid=True)), version="")
+
+
+def test_unserializable_args_fail_closed():
+    engine = _StubEngine(_Result(valid=True))
+    policy = ConstitutionPolicy(engine, version="hash608")
+    call = ToolCall(name="send_email", args={"payload": {1, 2}}, goal="notify", actor="agent-7")
+    record = policy.evaluate(call)  # must NOT raise
+    assert record.decision is Decision.DENY
+    assert "argument-serialization-error" in record.reason
+    assert engine.seen_actions == []  # engine never consulted
