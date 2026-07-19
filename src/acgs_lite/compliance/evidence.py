@@ -3,7 +3,7 @@
 Gathers runtime and filesystem signals that substantiate compliance claims.
 Collectors are lightweight — no network calls, no external services — and
 produce :class:`EvidenceItem` records that map directly to article references
-across all 18 supported frameworks.
+across all 20 supported frameworks.
 
 Three built-in collectors:
 
@@ -144,7 +144,7 @@ _COMPONENT_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("china_ai", "CN-ARS Art.11"),
             ("canada_aida", "AIDA §11(3)"),
             ("australia_ai_ethics", "AU-P3.2"),
-            ("singapore_maigf", "MAIGF P2.1"),
+            ("singapore_maigf", "MAIGF — Human Involvement: risk-based oversight determination"),
             ("uk_ai_framework", "UK ACC-1"),
             ("nist_ai_rmf", "NIST MEASURE 1.3"),
             ("soc2_ai", "SOC2 CC7.2"),
@@ -166,7 +166,7 @@ _COMPONENT_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("eu_ai_act", "EU-AIA Art.15(3)"),
             ("dora", "DORA Art.6(1)"),
             ("australia_ai_ethics", "AU-P1.1"),
-            ("singapore_maigf", "MAIGF P1.1"),
+            ("singapore_maigf", "MAIGF — Internal Governance: documented AI policies"),
             ("uk_ai_framework", "UK SAF-1"),
             ("canada_aida", "AIDA §5(1)"),
             ("india_dpdp", "DPDP Art.8(1)"),
@@ -184,7 +184,7 @@ _COMPONENT_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("eu_ai_act", "EU-AIA Art.9(4)"),
             ("canada_aida", "AIDA §5(2)"),
             ("australia_ai_ethics", "AU-P6.1"),
-            ("singapore_maigf", "MAIGF P4.1"),
+            ("singapore_maigf", "MAIGF — Internal Governance: documented AI policies"),
             ("uk_ai_framework", "UK SAF-3"),
         ],
         0.80,
@@ -197,7 +197,10 @@ _COMPONENT_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("eu_ai_act", "EU-AIA Art.9(1)"),
             ("eu_ai_act", "EU-AIA Art.14(1)"),
             ("iso_42001", "ISO 42001 §8.1"),
-            ("singapore_maigf", "MAIGF P1.3"),
+            (
+                "singapore_maigf",
+                "MAIGF — Internal Governance: human review for significant decisions",
+            ),
             ("uk_ai_framework", "UK SAF-2"),
             ("australia_ai_ethics", "AU-P8.1"),
         ],
@@ -209,7 +212,7 @@ _COMPONENT_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
         [
             ("eu_ai_act", "EU-AIA Art.14(5)"),
             ("uk_ai_framework", "UK ACC-3"),
-            ("singapore_maigf", "MAIGF P2.3"),
+            ("singapore_maigf", "MAIGF — Internal Governance: roles & accountability"),
             ("nist_ai_rmf", "NIST GOVERN 2.1"),
             ("iso_42001", "ISO 42001 §5.3"),
             ("australia_ai_ethics", "AU-P4.2"),
@@ -224,12 +227,12 @@ _COMPONENT_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("nist_ai_rmf", "NIST MAP 1.2"),
             ("eu_ai_act", "EU-AIA Art.9(2)"),
             ("eu_ai_act", "EU-AIA Art.27(1)"),
-            ("dora", "DORA Art.6(8)"),
+            ("dora", "DORA Art.8(3)"),
             ("iso_42001", "ISO 42001 §6.1.2"),
-            ("singapore_maigf", "MAIGF P1.2"),
+            ("singapore_maigf", "MAIGF — Internal Governance: human-AI decision model"),
             ("australia_ai_ethics", "AU-P7.1"),
             ("uk_ai_framework", "UK SAF-2"),
-            ("india_dpdp", "DPDP Art.7(1)"),
+            ("india_dpdp", "DPDP §10(2)(c)"),
             ("china_ai", "CN-GAI Art.9(1)"),
         ],
         0.80,
@@ -244,7 +247,7 @@ _COMPONENT_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("eu_ai_act", "EU-AIA Art.11(1)"),
             ("uk_ai_framework", "UK TRA-1"),
             ("uk_ai_framework", "UK TRA-2"),
-            ("singapore_maigf", "MAIGF P3.1"),
+            ("singapore_maigf", "MAIGF — Stakeholder Interaction: AI involvement disclosure"),
             ("canada_aida", "AIDA §10(1)"),
             ("australia_ai_ethics", "AU-P5.1"),
             ("ccpa_cpra", "CCPA §1798.100(a)"),
@@ -264,7 +267,10 @@ _COMPONENT_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("gdpr", "GDPR Art.22(3)"),
             ("ccpa_cpra", "CPRA §1798.185(a)(16)"),
             ("uk_ai_framework", "UK ACC-2"),
-            ("singapore_maigf", "MAIGF P2.2"),
+            (
+                "singapore_maigf",
+                "MAIGF — Internal Governance: human review for significant decisions",
+            ),
             ("australia_ai_ethics", "AU-P4.1"),
             ("canada_aida", "AIDA §8(1)"),
             ("brazil_lgpd", "LGPD Art.20(1)"),
@@ -371,7 +377,7 @@ _FILE_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("iso_42001", "ISO 42001 §6.1.2"),
             ("nist_ai_rmf", "NIST MAP 1.5"),
             ("australia_ai_ethics", "AU-P7.1"),
-            ("singapore_maigf", "MAIGF P1.2"),
+            ("singapore_maigf", "MAIGF — Internal Governance: human-AI decision model"),
         ],
         0.75,
     ),
@@ -392,7 +398,7 @@ _FILE_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
         [
             ("gdpr", "GDPR Art.35(1)"),
             ("eu_ai_act", "EU-AIA Art.27(1)"),
-            ("india_dpdp", "DPDP Art.7(1)"),
+            ("india_dpdp", "DPDP §10(2)(c)"),
             ("brazil_lgpd", "LGPD Art.38"),
         ],
         0.75,
@@ -402,7 +408,7 @@ _FILE_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
         "Privacy Impact Assessment",
         [
             ("gdpr", "GDPR Art.35(1)"),
-            ("india_dpdp", "DPDP Art.7(1)"),
+            ("india_dpdp", "DPDP §10(2)(c)"),
             ("canada_aida", "AIDA §11(1)"),
         ],
         0.70,
@@ -422,7 +428,10 @@ _FILE_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("eu_ai_act", "EU-AIA Art.13(1)"),
             ("eu_ai_act", "EU-AIA Art.11(1)"),
             ("nist_ai_rmf", "NIST GOVERN 4.1"),
-            ("singapore_maigf", "MAIGF P3.1"),
+            (
+                "singapore_maigf",
+                "MAIGF — Stakeholder Interaction: decision-factor transparency",
+            ),
             ("uk_ai_framework", "UK TRA-1"),
             ("australia_ai_ethics", "AU-P5.1"),
         ],
@@ -445,7 +454,10 @@ _FILE_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("eu_ai_act", "EU-AIA Art.13(1)"),
             ("canada_aida", "AIDA §10(1)"),
             ("uk_ai_framework", "UK TRA-2"),
-            ("singapore_maigf", "MAIGF P3.2"),
+            (
+                "singapore_maigf",
+                "MAIGF — Stakeholder Interaction: AI involvement disclosure",
+            ),
         ],
         0.75,
     ),
@@ -655,7 +667,7 @@ class ACGSLiteImportCollector:
     """Check which acgs-lite components are importable in the current runtime.
 
     Each importable component generates evidence items for the article
-    references it satisfies across all 20 frameworks.
+    references it supports across all 20 frameworks.
     """
 
     def collect(self, system_description: dict[str, Any]) -> list[EvidenceItem]:  # noqa: ARG002

@@ -58,27 +58,28 @@ _DORA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
     ),
     (
         "DORA Art.6(1)",
-        "Have in place an internal governance and control framework ensuring "
-        "an effective and prudent management of ICT risk, including for "
-        "AI-driven decision systems.",
+        "Establish and maintain a sound, comprehensive, and well-documented "
+        "ICT risk management framework as part of the overall risk management "
+        "system, enabling them to address ICT risk quickly, efficiently, and "
+        "comprehensively, including for AI-driven decision systems.",
         "Regulation (EU) 2022/2554, Article 6(1)",
         "GovernanceEngine — constitutional governance framework for ICT risk control",
         True,
     ),
     (
-        "DORA Art.6(4)",
-        "Establish, implement, and maintain an ICT risk management framework "
-        "as part of the overall risk management system; review and update it "
-        "after each major ICT disruption.",
-        "Regulation (EU) 2022/2554, Article 6(4)",
+        "DORA Art.6(5)",
+        "Review the ICT risk management framework at least once a year, and "
+        "additionally whenever a major ICT-related incident occurs; document "
+        "and act on the review outcomes.",
+        "Regulation (EU) 2022/2554, Article 6(5)",
         "Constitution — version-controlled governance policy with hash integrity",
         True,
     ),
     (
-        "DORA Art.6(8)",
+        "DORA Art.8(3)",
         "Perform thorough ICT risk assessments following major changes in "
         "network/infrastructure, operational processes, or AI system scope.",
-        "Regulation (EU) 2022/2554, Article 6(8)",
+        "Regulation (EU) 2022/2554, Article 8(3)",
         "RiskClassifier — automated risk classification on system configuration changes",
         True,
     ),
@@ -112,16 +113,19 @@ _DORA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
     ),
     (
         "DORA Art.9(4)(b)",
-        "Implement dedicated and up-to-date antivirus, anti-malware, intrusion "
-        "detection, and data-loss prevention solutions.",
+        "Implement a sound network and infrastructure management structure "
+        "using appropriate techniques, methods, and protocols, including "
+        "automated mechanisms to isolate affected information assets in the "
+        "event of cyberattacks.",
         "Regulation (EU) 2022/2554, Article 9(4)(b)",
         None,
         True,
     ),
     (
         "DORA Art.9(4)(c)",
-        "Implement patch management and source code review procedures; apply "
-        "security patches within a defined time frame based on criticality.",
+        "Implement policies that limit physical or logical access to ICT "
+        "assets to what is required for legitimate, approved functions and "
+        "activities.",
         "Regulation (EU) 2022/2554, Article 9(4)(c)",
         None,
         True,
@@ -181,10 +185,10 @@ _DORA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         True,
     ),
     (
-        "DORA Art.12(3)",
-        "Test backup and restoration procedures at least annually; document "
+        "DORA Art.12(2)",
+        "Test backup and restoration procedures periodically; document "
         "results. Backups of AI model artefacts shall be included.",
-        "Regulation (EU) 2022/2554, Article 12(3)",
+        "Regulation (EU) 2022/2554, Article 12(2)",
         None,
         False,
     ),
@@ -218,12 +222,12 @@ _DORA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
     # Article 26 — Advanced testing (TLPT)
     (
         "DORA Art.26(1)",
-        "Significant financial entities shall conduct threat-led penetration "
-        "testing (TLPT) at least every three years, covering live production "
-        "systems including AI workloads.",
+        "Financial entities identified per Article 26(8) shall conduct "
+        "threat-led penetration testing (TLPT) at least every three years, "
+        "covering live production systems including AI workloads.",
         "Regulation (EU) 2022/2554, Article 26(1)",
         None,
-        False,  # only for significant entities
+        False,  # only for entities identified per Art 26(8)
     ),
     # Article 28 — Third-party ICT risk management
     (
@@ -236,11 +240,11 @@ _DORA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         True,
     ),
     (
-        "DORA Art.28(4)",
+        "DORA Art.28(3)",
         "Maintain an up-to-date register of all contractual arrangements with "
         "ICT third-party service providers, distinguishing critical and "
         "non-critical providers.",
-        "Regulation (EU) 2022/2554, Article 28(4)",
+        "Regulation (EU) 2022/2554, Article 28(3)",
         None,
         True,
     ),
@@ -248,8 +252,8 @@ _DORA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
     (
         "DORA Art.30(2)",
         "Contracts with ICT third-party providers must include provisions on "
-        "service description, locations of data processing, sub-contracting "
-        "arrangements, and exit strategies.",
+        "service description, locations of data processing, and "
+        "sub-contracting arrangements.",
         "Regulation (EU) 2022/2554, Article 30(2)",
         None,
         True,
@@ -257,8 +261,10 @@ _DORA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
     (
         "DORA Art.30(3)",
         "Include full service level descriptions with quantitative and "
-        "qualitative performance targets (uptime, RTO/RPO), audit rights, "
-        "and termination rights for the regulator.",
+        "qualitative performance targets (uptime, RTO/RPO), exit strategies "
+        "(Art.30(3)(f)), and audit and access rights for competent "
+        "authorities; termination rights are held by the financial entity "
+        "under Article 30(2)(h).",
         "Regulation (EU) 2022/2554, Article 30(3)",
         None,
         False,
@@ -277,11 +283,11 @@ _ACGS_LITE_MAP: dict[str, str] = {
         "acgs-lite GovernanceEngine — provides constitutional governance "
         "framework implementing prudent ICT risk management and oversight"
     ),
-    "DORA Art.6(4)": (
+    "DORA Art.6(5)": (
         "acgs-lite Constitution — version-controlled governance policy with "
         "hash integrity ensures auditable, up-to-date risk framework"
     ),
-    "DORA Art.6(8)": (
+    "DORA Art.8(3)": (
         "acgs-lite RiskClassifier — automated risk re-classification triggered "
         "on configuration changes supports the post-change assessment obligation"
     ),
@@ -341,7 +347,8 @@ class DORAFramework:
     def get_checklist(self, system_description: dict[str, Any]) -> list[ChecklistItem]:
         """Generate DORA checklist items.
 
-        TLPT obligation (Art. 26(1)) is only required for significant entities.
+        TLPT obligation (Art. 26(1)) is only required for entities identified
+        per Article 26(8).
         """
         is_significant = system_description.get("is_significant_entity", True)
         items: list[ChecklistItem] = []
@@ -353,9 +360,9 @@ class DORAFramework:
                 blocking=blocking,
                 legal_citation=citation,
             )
-            # TLPT only required for significant entities
+            # TLPT only required for entities identified per Art 26(8)
             if ref == "DORA Art.26(1)" and not is_significant:
-                item.mark_not_applicable("Not a significant entity; TLPT not required.")
+                item.mark_not_applicable("Not identified per Article 26(8); TLPT not required.")
             items.append(item)
         return items
 
