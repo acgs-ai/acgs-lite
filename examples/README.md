@@ -67,6 +67,7 @@ python examples/mcp_agent_client.py
 | [`mcp_agent_client.py`](mcp_agent_client.py) | **MCP Governance Hub**: Connect an agent to a centralized safety server | ⭐⭐ Intermediate |
 | [`basic_governance/`](basic_governance/) | Wrap any callable with a `Constitution` + `Rule` objects | ⭐ Beginner |
 | [`compliance_eu_ai_act/`](compliance_eu_ai_act/) | EU AI Act risk-tier inference and article-level gap assessment | ⭐⭐ Intermediate |
+| [`eu_ai_act_runtime/`](eu_ai_act_runtime/) | **EU AI Act runtime enforcement**: signed Art 12 receipts + tamper detection, Art 14 fail-closed human oversight, Art 15 injection → incident | ⭐⭐ Intermediate |
 | [`maci_separation/`](maci_separation/) | Proposer → Validator → Executor role gates; Golden Rule enforcement | ⭐⭐ Intermediate |
 | [`audit_trail/`](audit_trail/) | Tamper-evident audit chain; query + JSON export | ⭐⭐ Intermediate |
 | [`mock_stub_testing/`](mock_stub_testing/) | `typing.Protocol` + `InMemory*` stub pattern for production-grade testing | ⭐⭐⭐ Advanced |
