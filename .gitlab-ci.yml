@@ -1,0 +1,65 @@
+# GitLab CI for acgs-lite — mirrors the local verification gates
+# (make lint && make typecheck && make test && make build) plus an
+# explicit e2e pass and a tag-gated, manual PyPI publish stage.
+#
+# Publish requires a masked CI/CD variable TWINE_PASSWORD (PyPI API
+# token) configured in GitLab project settings — never in the repo.
+
+stages:
+  - verify
+  - build
+  - publish
+
+default:
+  image: python:3.12
+  cache:
+    key: "pip-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .cache/pip
+  before_script:
+    - python -V
+    - pip install --upgrade pip
+    - pip install -e ".[dev]"
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  # Placeholders to silence import-time validation in tests; not secrets.
+  OPENAI_API_KEY: "test-key-for-unit-tests"
+  ANTHROPIC_API_KEY: "test-key-for-unit-tests"
+
+lint:
+  stage: verify
+  script:
+    - make lint
+    - make typecheck
+
+test:
+  stage: verify
+  script:
+    - make test
+    - python -m pytest tests/test_e2e_governance.py -m e2e -q --import-mode=importlib
+
+build:
+  stage: build
+  script:
+    - pip install build twine
+    - make build
+    - python -m twine check dist/*
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+
+publish-pypi:
+  stage: publish
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+      when: manual
+  script:
+    - pip install build twine
+    - python scripts/check_release_coherence.py
+    - make build
+    - python -m twine upload dist/* --username __token__ --non-interactive
+  environment:
+    name: pypi
+    url: https://pypi.org/project/acgs-lite/
