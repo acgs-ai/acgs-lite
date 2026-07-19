@@ -11,8 +11,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-import pytest
-
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "check_release_coherence.py"
 _spec = importlib.util.spec_from_file_location("check_release_coherence", _SCRIPT)
 assert _spec and _spec.loader
