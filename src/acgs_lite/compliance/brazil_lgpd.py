@@ -134,7 +134,7 @@ _LGPD_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "data subjects, communicate this to the ANPD and affected data "
         "subjects within a reasonable period.",
         "LGPD, Article 48 (Law No. 13,709/2018)",
-        "AuditLog — security incident detection and immutable record for notification",
+        "AuditLog — security incident detection and tamper-evident record for notification",
         True,
     ),
     # ANPD DPIA guidance — for high-risk AI processing
@@ -200,7 +200,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
         "protect personal data from unauthorised access"
     ),
     "LGPD Art.48": (
-        "acgs-lite AuditLog — security incident detection and immutable record "
+        "acgs-lite AuditLog — security incident detection and tamper-evident record "
         "supports ANPD notification obligations"
     ),
     "LGPD DPIA": (

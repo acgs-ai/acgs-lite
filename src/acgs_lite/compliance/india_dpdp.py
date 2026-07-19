@@ -190,7 +190,7 @@ _DPDP_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Principal and the Data Protection Board in such form and manner as "
         "prescribed.",
         "India DPDP Act 2023, Section 8(6)",
-        "AuditLog — breach event detection and immutable record for notification",
+        "AuditLog — breach event detection and tamper-evident record for notification",
         True,
     ),
 ]
@@ -236,7 +236,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
         "algorithmic accountability with full audit trail"
     ),
     "DPDP §8(6)": (
-        "acgs-lite AuditLog — breach event detection and immutable record "
+        "acgs-lite AuditLog — breach event detection and tamper-evident record "
         "supports notification obligations"
     ),
 }

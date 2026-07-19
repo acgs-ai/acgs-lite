@@ -401,7 +401,7 @@ See [`examples/agent_quickstart/`](./examples/agent_quickstart/) for the full se
 
 ### Governance Engine
 
-The `GovernanceEngine` sits between your agent and its tools. Every action passes through it before execution. Matching rules block or flag the action; the result is an immutable `ValidationResult`.
+The `GovernanceEngine` sits between your agent and its tools. Every action passes through it before execution. Matching rules block or flag the action; the result is a `ValidationResult`.
 
 ```python
 from acgs_lite import Constitution, GovernanceEngine, Rule, Severity

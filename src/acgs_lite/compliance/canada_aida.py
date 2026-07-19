@@ -145,7 +145,7 @@ _AIDA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Retain monitoring records for a period prescribed by regulation "
         "(expected 10 years for high-impact systems).",
         "Bill C-27, AIDA Section 12(2)",
-        "AuditLog — configurable log retention with immutable records",
+        "AuditLog — configurable log retention with tamper-evident records",
         True,
     ),
     # Section 13 — Record-keeping
@@ -260,7 +260,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
         "and validation detects emerging risks and biased outputs"
     ),
     "AIDA §12(2)": (
-        "acgs-lite AuditLog — configurable log retention with immutable "
+        "acgs-lite AuditLog — configurable log retention with tamper-evident "
         "records supports monitoring record retention obligations"
     ),
     "AIDA §13(1)": (
