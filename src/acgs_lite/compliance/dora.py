@@ -9,9 +9,10 @@ operating AI-driven systems under DORA:
 - Article 10: Detection of anomalous activities
 - Article 11: Response and recovery
 - Article 12: Backup policies and recovery procedures
-- Article 17: ICT-related incident reporting
+- Article 17: ICT incident management process
 - Article 18: Classification of ICT-related incidents
-- Article 25: Advanced testing (threat-led penetration testing)
+- Article 19: Reporting of major ICT-related incidents
+- Article 26: Advanced testing (threat-led penetration testing)
 - Article 28: Third-party ICT risk management
 - Article 30: Contract requirements with ICT third-party service providers
 
@@ -22,8 +23,9 @@ providers, and other financial entities operating in the EU.
 Reference: Regulation (EU) 2022/2554 — Digital Operational Resilience Act
 Applicable from: 17 January 2025
 
-Penalties: Up to 2% of total annual worldwide turnover; up to 1% per day
-of average daily worldwide turnover for continuing violations.
+Penalties for financial entities are set by member states (Arts 50-52);
+critical ICT third-party providers face periodic penalty payments up to 1%
+of average daily worldwide turnover (Art 35(8)).
 
 Constitutional Hash: 608508a9bd224290
 """
@@ -196,10 +198,10 @@ _DORA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         True,
     ),
     (
-        "DORA Art.17(3)",
+        "DORA Art.19",
         "Report major ICT-related incidents to the competent authority and "
         "notify affected clients without undue delay.",
-        "Regulation (EU) 2022/2554, Article 17(3)",
+        "Regulation (EU) 2022/2554, Article 19",
         None,
         True,
     ),
@@ -213,13 +215,13 @@ _DORA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "RiskClassifier — incident severity classification with impact dimensions",
         True,
     ),
-    # Article 25 — Advanced testing (TLPT)
+    # Article 26 — Advanced testing (TLPT)
     (
-        "DORA Art.25(1)",
+        "DORA Art.26(1)",
         "Significant financial entities shall conduct threat-led penetration "
         "testing (TLPT) at least every three years, covering live production "
         "systems including AI workloads.",
-        "Regulation (EU) 2022/2554, Article 25(1)",
+        "Regulation (EU) 2022/2554, Article 26(1)",
         None,
         False,  # only for significant entities
     ),
@@ -281,7 +283,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
     ),
     "DORA Art.6(8)": (
         "acgs-lite RiskClassifier — automated risk re-classification triggered "
-        "on configuration changes satisfies post-change assessment obligation"
+        "on configuration changes supports the post-change assessment obligation"
     ),
     "DORA Art.9(2)": (
         "acgs-lite GovernanceEngine — circuit breakers and input validation "
@@ -315,7 +317,9 @@ class DORAFramework:
 
     Status: Enacted; applicable from 17 January 2025.
 
-    Penalties: Up to 2% of total annual worldwide turnover.
+    Penalties for financial entities are set by member states (Arts 50-52);
+    critical ICT third-party providers face periodic penalty payments up to
+    1% of average daily worldwide turnover (Art 35(8)).
 
     Usage::
 
@@ -337,7 +341,7 @@ class DORAFramework:
     def get_checklist(self, system_description: dict[str, Any]) -> list[ChecklistItem]:
         """Generate DORA checklist items.
 
-        TLPT obligation (Art. 25) is only required for significant entities.
+        TLPT obligation (Art. 26(1)) is only required for significant entities.
         """
         is_significant = system_description.get("is_significant_entity", True)
         items: list[ChecklistItem] = []
@@ -350,7 +354,7 @@ class DORAFramework:
                 legal_citation=citation,
             )
             # TLPT only required for significant entities
-            if ref == "DORA Art.25(1)" and not is_significant:
+            if ref == "DORA Art.26(1)" and not is_significant:
                 item.mark_not_applicable("Not a significant entity; TLPT not required.")
             items.append(item)
         return items

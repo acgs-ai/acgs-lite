@@ -11,7 +11,7 @@ Constitutional Sentinel
 
 ## Tagline
 
-An independent GitLab governance agent that reviews AI-generated merge requests, flags risky code inline, blocks unsafe merges, and leaves a tamper-evident audit trail.
+An independent GitLab governance agent that reviews AI-generated merge requests, flags risky code inline, flags unsafe merges for blocking (posts a block verdict; enforce via required pipeline + branch protection), and leaves a tamper-evident audit trail.
 
 ## Inspiration
 
@@ -29,7 +29,7 @@ Constitutional Sentinel is a GitLab merge request governance agent powered by AC
 - **Validates added lines against constitutional governance rules** for secrets, PII, destructive SQL, CI bypasses, and separation-of-powers violations
 - **Posts inline comments directly on violating lines** so developers can see exactly what needs to change
 - **Generates a governance summary** with risk score, violations found, and the constitutional hash of the active ruleset
-- **Blocks unsafe merges** when HIGH or CRITICAL violations are present
+- **Flags unsafe merges for blocking** (posts a block verdict; enforce via required pipeline + branch protection) when HIGH or CRITICAL violations are present
 - **Preserves a tamper-evident audit trail** so reviewers can prove which rules were applied to a specific decision
 
 This is not a chat assistant and not just a linter summary. It is an agent that reacts to GitLab events and takes governance action inside the merge request workflow.
@@ -79,7 +79,7 @@ That means the system that proposes code is never the system that validates it.
 
 - **A working end-to-end GitLab MR governance flow** that reacts to events and comments directly on code
 - **12 violations caught in a single demo merge request**
-- **Merge-blocking behavior for unsafe changes**
+- **Block-verdict posting for unsafe changes** (enforced via required pipeline + branch protection)
 - **Tamper-evident constitutional hashing and audit trail support**
 - **30/30 hackathon evals passing** for the hackathon-focused integration surface
 - **A clean demo story judges can inspect directly in GitLab**

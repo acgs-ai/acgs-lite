@@ -1,7 +1,7 @@
 """Australia AI Ethics Framework compliance module.
 
 Implements the eight principles of Australia's voluntary AI Ethics Framework,
-published by the Department of Industry, Science, Energy and Resources (now
+published by the Department of Industry, Innovation and Science (now
 Department of Industry, Science and Resources) in 2019, and cross-referenced
 with the Responsible AI Framework published by the Digital Transformation
 Agency (2023).
@@ -23,7 +23,7 @@ Cross-referenced instruments:
 - Anti-Discrimination Act obligations (Federal + State)
 
 Reference: Australia's AI Ethics Framework — Department of Industry,
-Science, Energy and Resources (2019)
+Innovation and Science (2019)
 Responsible AI Framework — Digital Transformation Agency (2023)
 
 Status: Voluntary; referenced in government procurement and APS AI guidance.

@@ -206,7 +206,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
     ),
     "DPDP §6(4)": (
         "acgs-lite TransparencyDisclosure — notice and consent information "
-        "fields in system card satisfy prior notice obligation"
+        "fields in system card support the prior notice obligation"
     ),
     "DPDP §8(3)": (
         "acgs-lite GovernanceEngine — circuit breakers and access controls "
@@ -222,7 +222,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
     ),
     "DPDP §11(1)": (
         "acgs-lite AuditLog — queryable per-subject processing record "
-        "satisfies right to access information obligation"
+        "supports the right to access information obligation"
     ),
     "DPDP §16(1)(b)": (
         "acgs-lite AuditLog — tamper-evident audit chain with hash integrity "

@@ -282,8 +282,12 @@ class RiskClassifier:
                 article_basis="Article 50",
                 obligations=[
                     "Article 50(1) — Inform users they are interacting with an AI system",
+                    "Article 50(2) — Mark AI-generated or manipulated content as artificially "
+                    "generated (machine-readable labelling)",
                     "Article 50(3) — Disclose emotion recognition or biometric categorisation",
-                    "Article 50(4) — Label AI-generated or manipulated content (deepfakes)",
+                    "Article 50(4) — Deployers of deepfake or AI-generated/manipulated content "
+                    "must disclose that the content has been artificially generated or "
+                    "manipulated",
                 ],
                 rationale=(
                     f"Domain '{description.domain}' triggers Article 50 transparency obligations"

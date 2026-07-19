@@ -98,11 +98,11 @@ from acgs_lite_rust import ALLOW, DENY, DENY_CRITICAL
 
 ## Fallback Behavior
 
-When the Rust extension is not available (build failure, Python version mismatch), the system falls back to the pure Python implementation in `packages/acgs-lite/src/acgs_lite/engine/core.py`. The Python fallback maintains feature parity with the Rust version.
+When the Rust extension is not available (build failure, Python version mismatch), the system falls back to the pure Python implementation in `packages/acgs-lite/src/acgs_lite/engine/core.py`. The Python fallback aims to maintain feature parity with the Rust version (see tests for covered surface).
 
 ## Performance
 
-Typical latency:
+Indicative targets:
 - Hot path (fast validation): <0.5ms P99
 - Full path (complete validation): <2ms P99
 - Throughput: >5000 validations/sec

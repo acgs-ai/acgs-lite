@@ -42,8 +42,8 @@ python packages/acgs-lite/examples/compliance_eu_ai_act/main.py
 
 ── 3. Checklist Size by Risk Tier ────────────────────────────
   unacceptable  :  2 applicable items
-  limited       :  4 applicable items
-  high          : 23 applicable items
+  limited       :  5 applicable items
+  high          : 24 applicable items
 
 ── 4. Multi-Framework Assessment ─────────────────────────────
   Overall score: 72%

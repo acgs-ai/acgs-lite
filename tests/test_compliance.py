@@ -374,8 +374,9 @@ class TestDORA:
         fw = DORAFramework()
         desc = dict(_SYSTEM_DESC, is_significant_entity=False)
         checklist = fw.get_checklist(desc)
-        art25 = [i for i in checklist if "Art.25" in i.ref]
-        assert all(i.status == ChecklistStatus.NOT_APPLICABLE for i in art25)
+        art26 = [i for i in checklist if "Art.26" in i.ref]
+        assert art26, "Expected DORA Art.26(1) TLPT item in checklist"
+        assert all(i.status == ChecklistStatus.NOT_APPLICABLE for i in art26)
 
     def test_auto_populate_marks_acgs_items(self, system_desc: dict) -> None:
         fw = DORAFramework()

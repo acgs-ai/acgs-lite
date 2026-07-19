@@ -252,7 +252,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
     ),
     "CN-PIPL Art.24": (
         "acgs-lite HumanOversightGateway — human review pathway for impactful "
-        "automated decisions satisfies PIPL opt-out and review obligations"
+        "automated decisions supports PIPL opt-out and review obligations"
     ),
     "CN-PIPL Art.24(2)": (
         "acgs-lite TransparencyDisclosure — decision explanation fields and "
@@ -282,7 +282,8 @@ class ChinaAIFramework:
     Status: All four instruments enacted and enforced by CAC.
 
     Penalties: PIPL — up to CNY 50 million or 5% of prior-year revenue;
-    Generative AI — up to CNY 1 million per infraction.
+    Generative AI Measures: no standalone fines; penalties under CSL/DSL/PIPL,
+    else warnings, orders to correct, or service suspension (Art 21).
 
     Usage::
 

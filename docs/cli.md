@@ -118,7 +118,7 @@ acgs verify
 
 ## 🚀 Pro Tip: CI/CD Integration
 
-Integrate ACGS-Lite into your GitLab or GitHub pipelines to ensure no unverified code or policy changes ever reach production.
+Integrate ACGS-Lite into your GitLab or GitHub pipelines to gate pipeline runs so unverified code or policy changes fail CI before merge (enforce with branch protection).
 
 ```bash
 # In your CI script:

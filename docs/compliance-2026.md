@@ -1,6 +1,6 @@
 # 2026 AI Regulatory Compliance: EU AI Act, SB 205, and TRAIGA
 
-**Meta Description**: Ensure your AI agents comply with the 2026 regulatory landscape, including the EU AI Act's main high-risk obligations from December 2, 2027 (Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus), Colorado SB 205, and Texas TRAIGA using ACGS-Lite.
+**Meta Description**: Support your AI agents' compliance with the 2026 regulatory landscape, including the EU AI Act's main high-risk obligations from December 2, 2027 (Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus), Colorado SB 205, and Texas TRAIGA using ACGS-Lite.
 
 ---
 
@@ -8,14 +8,14 @@
 
 Monitor EU updates before relying on a launch date in legal advice or customer commitments; the 2026 Digital Omnibus (Council final approval 2026-06-29) deferred the main high-risk timeline, and further adjustments remain possible.
 
-ACGS-Lite provides the technical artifacts and runtime controls needed to demonstrate compliance with these mandates.
+ACGS-Lite provides technical artifacts and runtime controls that support demonstrating compliance with these mandates.
 
 ## Regulatory Mapping Table
 
 | Regulation | Key Requirement | ACGS-Lite Technical Solution |
 | :--- | :--- | :--- |
 | **EU AI Act** | **Human Oversight (Art. 14)** | `GovernedAgent` provides a deterministic "Kill Switch" and HITL escalation paths. |
-| **EU AI Act** | **Logging & Traceability** | Hash-chained `AuditLog` provides immutable records of every agent decision. |
+| **EU AI Act** | **Logging & Traceability** | Hash-chained `AuditLog` provides tamper-evident records of every agent decision. |
 | **Colorado SB 205** | **Bias Mitigation** | `Constitution` allows for runtime filtering of discriminatory patterns and impact scoring. |
 | **Texas TRAIGA** | **No Unlawful Deepfakes** | Rule patterns to block the generation of unauthorized digital personas or personas of public officials. |
 | **NIST AI RMF** | **Risk Management** | `GovernanceEngine` classifies every action by severity (`LOW` to `CRITICAL`). |
@@ -33,7 +33,7 @@ Agents must be designed such that they can be effectively overseen by natural pe
 
 ### Article 12: Record-Keeping
 High-risk AI systems must automatically generate logs while the system is operating.
-*   **ACGS Implementation**: Every validation event is written to a `JSONLAuditBackend`. These logs are cryptographically chained, making them resistant to retroactive tampering—a critical requirement for legal defensibility.
+*   **ACGS Implementation**: Every validation event is written to a `JSONLAuditBackend`. These logs are cryptographically chained, making retroactive tampering detectable, which supports evidentiary review.
 
 ## 🏔️ Colorado SB 205 (Effective: June 2026)
 

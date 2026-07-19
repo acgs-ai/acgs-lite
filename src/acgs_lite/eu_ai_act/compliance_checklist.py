@@ -176,8 +176,9 @@ _HIGH_RISK_ITEMS: list[tuple[str, str, str | None, bool]] = [
     ),
     (
         "Article 43",
-        "Conformity assessment: carry out self-assessment (most Annex III systems) "
-        "or third-party audit (biometric and law enforcement systems) before deployment.",
+        "Conformity assessment: carry out self-assessment (most Annex III systems); "
+        "the third-party notified-body route applies to Annex III pt 1 "
+        "remote-biometric systems where harmonised standards are not fully applied.",
         "ComplianceChecklist — generates conformity assessment documentation",
         True,
     ),
@@ -199,9 +200,17 @@ _LIMITED_RISK_ITEMS: list[tuple[str, str, str | None, bool]] = [
         True,
     ),
     (
+        "Article 50(2)",
+        "Machine-readable labelling: mark AI-generated or manipulated images, "
+        "audio, or video content as artificially generated.",
+        None,
+        True,
+    ),
+    (
         "Article 50(4)",
-        "Deepfake labelling: label AI-generated or manipulated images, audio, or "
-        "video content so that it is disclosed as artificially generated.",
+        "Deployer disclosure: deployers of deepfakes or AI-generated/manipulated "
+        "text published on matters of public interest must disclose that the "
+        "content has been artificially generated or manipulated.",
         None,
         True,
     ),

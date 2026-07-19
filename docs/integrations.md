@@ -84,7 +84,7 @@ result = chain.invoke("Task instructions...")
 
 ## 🤖 AutoGen
 
-For multi-agent systems, wrap the model client to ensure agents don't collude or violate policies in their inter-agent chatter.
+For multi-agent systems, wrap the model client to screen inter-agent chatter for policy violations.
 
 ```python
 from acgs_lite.integrations.autogen import GovernedModelClient
@@ -96,7 +96,7 @@ agent = ConversableAgent("SafeAgent", llm_config={"model_client_cls": governed_c
 
 ## 🏰 CrewAI
 
-Govern the entire "Crew" to ensure that the collective output of multiple agents meets regulatory standards.
+Govern the entire "Crew" to check the collective output of multiple agents against your constitution's rules.
 
 ```python
 from acgs_lite.integrations.crewai import GovernedCrew

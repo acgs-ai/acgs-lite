@@ -134,8 +134,9 @@ _HIPAA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
     (
         "HIPAA 164.408",
         "Notify the Secretary of HHS of breaches of unsecured PHI involving "
-        "AI systems. Breaches affecting 500+ individuals require immediate "
-        "notification.",
+        "AI systems. Breaches affecting 500+ individuals require notification "
+        "contemporaneously with individual notice (without unreasonable "
+        "delay, no later than 60 days).",
         "45 CFR 164.408 — Notification to the Secretary",
         None,
         True,

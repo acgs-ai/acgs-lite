@@ -233,7 +233,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
     ),
     "AIDA §9(1)": (
         "acgs-lite RiskClassifier — impact assessment with obligation mapping "
-        "across risk tiers satisfies pre-deployment impact assessment"
+        "across risk tiers supports pre-deployment impact assessment"
     ),
     "AIDA §9(2)": (
         "acgs-lite GovernanceEngine — continuous lifecycle monitoring triggers "
@@ -261,7 +261,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
     ),
     "AIDA §12(2)": (
         "acgs-lite AuditLog — configurable log retention with immutable "
-        "records satisfies monitoring record retention obligations"
+        "records supports monitoring record retention obligations"
     ),
     "AIDA §13(1)": (
         "acgs-lite AuditLog — lifecycle audit chain with tamper-evident "

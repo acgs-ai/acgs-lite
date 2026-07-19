@@ -194,7 +194,7 @@ _CCPA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
 _ACGS_LITE_MAP: dict[str, str] = {
     "CCPA §1798.100": (
         "acgs-lite AuditLog — queryable per-subject processing record "
-        "satisfies right-to-know obligations"
+        "supports right-to-know obligations"
     ),
     "CCPA §1798.110": (
         "acgs-lite TransparencyDisclosure — data categories and third-party "
@@ -210,7 +210,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
     ),
     "CCPA ADMT-LOGIC": (
         "acgs-lite TransparencyDisclosure — decision logic explanation fields "
-        "satisfy ADMT logic disclosure obligation"
+        "support the ADMT logic disclosure obligation"
     ),
     "CCPA ADMT-HUMAN-REVIEW": (
         "acgs-lite HumanOversightGateway — human review with override "

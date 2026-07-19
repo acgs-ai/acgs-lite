@@ -8,7 +8,7 @@ Covers:
 - CCPA/CPRA + ADMT
 - ComplianceReportExporter (text, Markdown, JSON)
 - MultiFrameworkAssessor routing for round-3 jurisdictions
-- 18-framework total count
+- 20-framework total count
 
 Constitutional Hash: 608508a9bd224290
 """

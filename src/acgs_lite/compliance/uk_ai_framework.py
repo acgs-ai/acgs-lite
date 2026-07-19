@@ -1,7 +1,7 @@
 """UK AI Regulatory Principles Framework compliance module.
 
 Implements the five cross-sector AI regulatory principles published in the
-UK Government's AI Regulation White Paper (March 2023, Cm 9315) and carried
+UK Government's AI Regulation White Paper (March 2023, CP 815) and carried
 forward in the AI Opportunities Action Plan (January 2025). These principles
 are operationalised by UK sector regulators (FCA, ICO, CMA, MHRA, Ofcom).
 
@@ -23,7 +23,7 @@ Key sector instruments cross-referenced:
 - MHRA Guidance on Software and AI as Medical Devices — healthcare AI
 - Equality Act 2010 — protected characteristic fairness requirements
 
-Reference: UK AI Regulatory Framework — AI White Paper (Cm 9315, 2023)
+Reference: UK AI Regulatory Framework — AI White Paper (CP 815, 2023)
            UK AI Opportunities Action Plan (DSIT, January 2025)
 Status:    Voluntary framework; mandatory compliance derives from sector
            regulators applying these principles through existing powers.
@@ -52,7 +52,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Identify and assess safety-related risks from the AI system throughout "
         "its lifecycle, including novel failure modes, adversarial attacks, and "
         "cascading harms.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 1 — Safety",
+        "UK AI White Paper (CP 815, 2023), Principle 1 — Safety",
         "RiskClassifier — automated risk level classification and obligation mapping",
         True,
     ),
@@ -61,7 +61,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Implement technical and organisational measures to ensure the AI system "
         "operates safely within defined boundaries, including fail-safe mechanisms "
         "and human override capability.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 1 — Safety",
+        "UK AI White Paper (CP 815, 2023), Principle 1 — Safety",
         "GovernanceEngine — severity-based blocking with halt and override controls",
         True,
     ),
@@ -70,7 +70,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Conduct security testing of the AI system against known attack vectors "
         "(adversarial inputs, data poisoning, model extraction, prompt injection) "
         "and remediate identified vulnerabilities.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 1 — Security",
+        "UK AI White Paper (CP 815, 2023), Principle 1 — Security",
         None,
         True,
     ),
@@ -79,7 +79,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Ensure the AI system is robust to reasonably foreseeable misuse and "
         "distribution shift; test and document performance degradation at "
         "operational boundaries.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 1 — Robustness",
+        "UK AI White Paper (CP 815, 2023), Principle 1 — Robustness",
         "GovernanceEngine — anomaly detection flags out-of-distribution behaviour",
         True,
     ),
@@ -89,7 +89,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Provide clear, accurate, and accessible information about what the AI "
         "system does, its intended use, known limitations, and the role of AI "
         "in any decision that affects an individual.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 2 — Transparency",
+        "UK AI White Paper (CP 815, 2023), Principle 2 — Transparency",
         "TransparencyDisclosure — system card with capabilities, limitations, and purpose",
         True,
     ),
@@ -98,7 +98,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Where the AI system produces decisions or recommendations that affect "
         "individuals, provide meaningful explanations that those individuals "
         "can understand and act upon.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 2 — Explainability",
+        "UK AI White Paper (CP 815, 2023), Principle 2 — Explainability",
         "TransparencyDisclosure — decision-level explanation fields in system card",
         True,
     ),
@@ -116,7 +116,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Publish or make available technical documentation (model cards, system "
         "cards, or equivalent) proportionate to the risk and impact of the AI "
         "system.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 2",
+        "UK AI White Paper (CP 815, 2023), Principle 2",
         "TransparencyDisclosure — standardised machine-readable system card",
         False,
     ),
@@ -126,7 +126,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Identify and assess risks of unfair outcomes or discrimination against "
         "protected groups under the Equality Act 2010 arising from the AI "
         "system's design or use.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 3 — Fairness; Equality Act 2010",
+        "UK AI White Paper (CP 815, 2023), Principle 3 — Fairness; Equality Act 2010",
         "RiskClassifier — protected characteristic risk flags",
         True,
     ),
@@ -134,7 +134,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "UK-AI PRO-3.2",
         "Conduct disaggregated performance testing across demographic sub-groups "
         "relevant to the AI system's use case and document the results.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 3 — Fairness",
+        "UK AI White Paper (CP 815, 2023), Principle 3 — Fairness",
         None,
         True,
     ),
@@ -142,7 +142,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "UK-AI PRO-3.3",
         "Implement technical and procedural controls to detect, monitor, and "
         "mitigate unfair bias and disparate impact in AI system outputs.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 3 — Fairness",
+        "UK AI White Paper (CP 815, 2023), Principle 3 — Fairness",
         "GovernanceEngine — constitutional fairness rules block discriminatory outputs",
         True,
     ),
@@ -152,7 +152,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Designate a responsible person or function accountable for the AI "
         "system throughout its lifecycle, with documented authority and "
         "escalation pathways.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 4 — Accountability",
+        "UK AI White Paper (CP 815, 2023), Principle 4 — Accountability",
         "MACIEnforcer — role separation with designated accountability per action class",
         True,
     ),
@@ -161,7 +161,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Maintain governance documentation covering the AI system's purpose, "
         "risks, controls, testing results, and any material changes throughout "
         "its lifecycle.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 4 — Governance",
+        "UK AI White Paper (CP 815, 2023), Principle 4 — Governance",
         "AuditLog — lifecycle audit chain with tamper-evident governance records",
         True,
     ),
@@ -169,7 +169,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "UK-AI PRO-4.3",
         "Establish a process to review and update AI governance measures in "
         "response to incidents, regulatory changes, or significant model changes.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 4 — Governance",
+        "UK AI White Paper (CP 815, 2023), Principle 4 — Governance",
         "GovernanceEngine — continuous lifecycle validation triggers review on changes",
         True,
     ),
@@ -178,7 +178,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Comply with sector-specific regulatory obligations (FCA AI DP5/22, "
         "ICO AI auditing framework, MHRA SaMD guidance) as applicable to the "
         "deployment context.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 4; Sector regulators",
+        "UK AI White Paper (CP 815, 2023), Principle 4; Sector regulators",
         None,
         False,  # blocking depends on sector
     ),
@@ -188,7 +188,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Provide individuals with the ability to contest AI-assisted decisions "
         "that significantly affect them, with a genuine and accessible process "
         "for review.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 5 — Contestability",
+        "UK AI White Paper (CP 815, 2023), Principle 5 — Contestability",
         "HumanOversightGateway — contestation pathway with human review capability",
         True,
     ),
@@ -197,7 +197,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Ensure contestation processes are accessible, clearly communicated, "
         "and resolve disputes within a reasonable timeframe with documented "
         "outcomes.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 5 — Redress",
+        "UK AI White Paper (CP 815, 2023), Principle 5 — Redress",
         "HumanOversightGateway — documented review flow with outcome recording",
         True,
     ),
@@ -206,7 +206,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Where an AI decision is found to be erroneous or unfair following "
         "contestation, implement remediation and update controls to prevent "
         "recurrence.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 5 — Redress",
+        "UK AI White Paper (CP 815, 2023), Principle 5 — Redress",
         "GovernanceEngine — policy update workflow with constitutional amendment",
         True,
     ),
@@ -215,7 +215,7 @@ _UK_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Log all contestation requests, their outcomes, and any system "
         "changes made in response, to demonstrate responsiveness to "
         "redress obligations.",
-        "UK AI White Paper (Cm 9315, 2023), Principle 5",
+        "UK AI White Paper (CP 815, 2023), Principle 5",
         "AuditLog — contestation records with outcome and remediation fields",
         True,
     ),
@@ -247,7 +247,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
     ),
     "UK-AI PRO-2.3": (
         "acgs-lite HumanOversightGateway — ensures human review for automated "
-        "high-impact decisions, satisfying UK GDPR Art.22 safeguards"
+        "high-impact decisions, supporting UK GDPR Art.22 safeguards"
     ),
     "UK-AI PRO-2.4": (
         "acgs-lite TransparencyDisclosure — standardised machine-readable "

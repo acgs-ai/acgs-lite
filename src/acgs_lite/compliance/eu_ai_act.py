@@ -11,7 +11,8 @@ AI models under the EU Artificial Intelligence Act:
 - Article 13: Transparency to deployers and users
 - Article 14: Human oversight
 - Article 15: Accuracy, robustness, and cybersecurity
-- Article 26: Deployer obligations (fundamental-rights impact assessment)
+- Article 26: Deployer obligations
+- Article 27: Fundamental-rights impact assessment (FRIA)
 - Article 50: Transparency for GPAI-facing / chatbot systems
 - Article 53: General-purpose AI model obligations
 - Article 55: Systemic-risk obligations (frontier models)
@@ -232,11 +233,13 @@ _EU_AI_ACT_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         True,
     ),
     (
-        "EU-AIA Art.26(9)",
-        "Where deployers decide to use a high-risk AI system in the area of "
-        "education, employment, or essential services, they shall carry out a "
-        "fundamental rights impact assessment (FRIA) before use.",
-        "Regulation (EU) 2024/1689, Article 26(9)",
+        "EU-AIA Art.27(1)",
+        "Bodies governed by public law, private entities providing public "
+        "services, and deployers of Annex III point 5(b)-(c) systems "
+        "(creditworthiness/credit scoring; life and health insurance risk "
+        "assessment and pricing) shall carry out a fundamental rights impact "
+        "assessment (FRIA) before use.",
+        "Regulation (EU) 2024/1689, Article 27(1)",
         "RiskClassifier — fundamental rights risk tier assessment",
         True,
     ),
@@ -251,10 +254,19 @@ _EU_AI_ACT_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         True,
     ),
     (
+        "EU-AIA Art.50(2)",
+        "Providers of AI systems that generate synthetic audio, image, video, "
+        "or text content shall mark the output as artificially generated "
+        "(machine-readable labelling).",
+        "Regulation (EU) 2024/1689, Article 50(2)",
+        None,
+        False,
+    ),
+    (
         "EU-AIA Art.50(4)",
-        "Providers and deployers of AI systems that generate synthetic audio, "
-        "image, video, or text content shall mark the output as artificially "
-        "generated (machine-readable labelling).",
+        "Deployers of deepfakes, or of AI-generated/manipulated text published "
+        "to inform the public on matters of public interest, shall disclose "
+        "that the content has been artificially generated or manipulated.",
         "Regulation (EU) 2024/1689, Article 50(4)",
         None,
         False,
@@ -270,10 +282,10 @@ _EU_AI_ACT_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         False,  # only applies to GPAI model providers
     ),
     (
-        "EU-AIA Art.53(2)",
-        "Register the general-purpose AI model in the EU AI public database "
-        "where applicable before placing it on the EU market.",
-        "Regulation (EU) 2024/1689, Article 53(2)",
+        "EU-AIA Art.53(1)(d)",
+        "Draw up and make publicly available a sufficiently detailed summary "
+        "of the content used for training of the general-purpose AI model.",
+        "Regulation (EU) 2024/1689, Article 53(1)(d)",
         None,
         False,
     ),
@@ -341,7 +353,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
         "acgs-lite GovernanceEngine — circuit breakers and anomaly detection "
         "protect against errors, faults, and inconsistent data inputs"
     ),
-    "EU-AIA Art.26(9)": (
+    "EU-AIA Art.27(1)": (
         "acgs-lite RiskClassifier — fundamental rights risk tier assessment "
         "scopes FRIA obligations for deployers"
     ),
@@ -404,7 +416,15 @@ class EUAIActFramework:
         items: list[ChecklistItem] = []
         for ref, req, citation, feature, blocking in _EU_AI_ACT_ITEMS:
             # Skip GPAI-only articles unless system is GPAI
-            if ref in ("EU-AIA Art.53(1)", "EU-AIA Art.53(2)", "EU-AIA Art.55(1)") and not is_gpai:
+            if (
+                ref
+                in (
+                    "EU-AIA Art.53(1)",
+                    "EU-AIA Art.53(1)(d)",
+                    "EU-AIA Art.55(1)",
+                )
+                and not is_gpai
+            ):
                 continue
             # For "unacceptable" tier, skip all non-Art.5 items entirely
             if risk_tier == "unacceptable" and not (

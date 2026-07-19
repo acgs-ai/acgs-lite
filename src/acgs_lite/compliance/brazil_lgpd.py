@@ -12,9 +12,8 @@ Sections covered:
 - Article 18: Rights to confirmation, access, and correction
 - Article 20: Review of automated decisions — the AI transparency article
 - Article 37: Records of data processing activities (controller obligations)
-- Article 44: Security incidents and obligations
 - Article 46: Security measures
-- Article 47: Incident response and ANPD notification
+- Article 48: Incident communication to ANPD and data subjects
 
 Article 20 is the most AI-critical: it gives data subjects the right to
 request a review of decisions taken solely by automated means, including
@@ -128,13 +127,13 @@ _LGPD_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "GovernanceEngine — circuit breakers and access controls protect personal data",
         True,
     ),
-    # Article 47 — Breach notification
+    # Article 48 — Breach notification
     (
-        "LGPD Art.47",
+        "LGPD Art.48",
         "In the event of a security incident that may pose risk or harm to "
         "data subjects, communicate this to the ANPD and affected data "
         "subjects within a reasonable period.",
-        "LGPD, Article 47 (Law No. 13,709/2018)",
+        "LGPD, Article 48 (Law No. 13,709/2018)",
         "AuditLog — security incident detection and immutable record for notification",
         True,
     ),
@@ -178,7 +177,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
         "checks before any personal data processing action"
     ),
     "LGPD Art.18(I-II)": (
-        "acgs-lite AuditLog — queryable per-subject processing records satisfy "
+        "acgs-lite AuditLog — queryable per-subject processing records support "
         "rights to confirmation and access"
     ),
     "LGPD Art.18(VII)": (
@@ -194,13 +193,13 @@ _ACGS_LITE_MAP: dict[str, str] = {
     ),
     "LGPD Art.37": (
         "acgs-lite AuditLog — tamper-evident processing records with full "
-        "lifecycle coverage satisfy LGPD record-keeping"
+        "lifecycle coverage support LGPD record-keeping"
     ),
     "LGPD Art.46": (
         "acgs-lite GovernanceEngine — circuit breakers and access controls "
         "protect personal data from unauthorised access"
     ),
-    "LGPD Art.47": (
+    "LGPD Art.48": (
         "acgs-lite AuditLog — security incident detection and immutable record "
         "supports ANPD notification obligations"
     ),

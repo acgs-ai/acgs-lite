@@ -188,14 +188,14 @@ class TestDORAFramework:
         fw = DORAFramework()
         desc = {**base_desc, "is_significant_entity": False}
         checklist = fw.get_checklist(desc)
-        art25 = next((i for i in checklist if i.ref == "DORA Art.25(1)"), None)
+        art25 = next((i for i in checklist if i.ref == "DORA Art.26(1)"), None)
         assert art25 is not None
         assert art25.status == ChecklistStatus.NOT_APPLICABLE
 
     def test_tlpt_required_for_significant_entity(self, financial_desc: dict) -> None:
         fw = DORAFramework()
         checklist = fw.get_checklist(financial_desc)
-        art25 = next((i for i in checklist if i.ref == "DORA Art.25(1)"), None)
+        art25 = next((i for i in checklist if i.ref == "DORA Art.26(1)"), None)
         assert art25 is not None
         assert art25.status == ChecklistStatus.PENDING  # not auto-satisfied
 

@@ -364,7 +364,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--is-significant-entity",
         dest="is_significant_entity",
         action="store_true",
-        help="Significant financial entity (TLPT Art.25 applies)",
+        help="Significant financial entity (TLPT Art.26(1) applies)",
     )
 
     # India DPDP flags

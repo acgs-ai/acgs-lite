@@ -162,7 +162,7 @@ class TestEUAIActChecklistByTier:
         assert all(
             ref.startswith("EU-AIA Art.5") or ref.startswith("EU-AIA Art.50") for ref in refs
         ), (
-            f"Unexpected refs in minimal checklist: {refs - {'EU-AIA Art.5(1)', 'EU-AIA Art.5(2)', 'EU-AIA Art.50(1)', 'EU-AIA Art.50(4)'}}"
+            f"Unexpected refs in minimal checklist: {refs - {'EU-AIA Art.5(1)', 'EU-AIA Art.5(2)', 'EU-AIA Art.50(1)', 'EU-AIA Art.50(2)'}}"
         )
 
     def test_limited_risk_same_as_minimal_no_high_risk_arts(self):

@@ -223,7 +223,7 @@ _COMPONENT_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
         [
             ("nist_ai_rmf", "NIST MAP 1.2"),
             ("eu_ai_act", "EU-AIA Art.9(2)"),
-            ("eu_ai_act", "EU-AIA Art.26(9)"),
+            ("eu_ai_act", "EU-AIA Art.27(1)"),
             ("dora", "DORA Art.6(8)"),
             ("iso_42001", "ISO 42001 §6.1.2"),
             ("singapore_maigf", "MAIGF P1.2"),
@@ -391,7 +391,7 @@ _FILE_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
         "Impact assessment (DPIA / FRIA)",
         [
             ("gdpr", "GDPR Art.35(1)"),
-            ("eu_ai_act", "EU-AIA Art.26(9)"),
+            ("eu_ai_act", "EU-AIA Art.27(1)"),
             ("india_dpdp", "DPDP Art.7(1)"),
             ("brazil_lgpd", "LGPD Art.38"),
         ],
@@ -411,7 +411,7 @@ _FILE_EVIDENCE: list[tuple[str, str, list[tuple[str, str]], float]] = [
         "fria.*",
         "Fundamental Rights Impact Assessment",
         [
-            ("eu_ai_act", "EU-AIA Art.26(9)"),
+            ("eu_ai_act", "EU-AIA Art.27(1)"),
         ],
         0.80,
     ),
@@ -655,7 +655,7 @@ class ACGSLiteImportCollector:
     """Check which acgs-lite components are importable in the current runtime.
 
     Each importable component generates evidence items for the article
-    references it satisfies across all 18 frameworks.
+    references it satisfies across all 20 frameworks.
     """
 
     def collect(self, system_description: dict[str, Any]) -> list[EvidenceItem]:  # noqa: ARG002

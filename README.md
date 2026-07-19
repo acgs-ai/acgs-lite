@@ -621,7 +621,7 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 | OpenAI / Anthropic / LangChain adapters | ✅ **Stable** | Thin validated wrappers; covers completions and streaming |
 | Constitution lifecycle API (HTTP) | 🔶 **Beta** | Draft/review/activate/rollback endpoints are functional; API may evolve |
 | SQLite bundle store, lifecycle persistence | 🔶 **Beta** | WAL-mode; covers single-node; multi-writer not yet hardened |
-| `acgs assess` compliance mapping | 🔶 **Beta** | 18-framework coverage; control mappings improve with each release |
+| `acgs assess` compliance mapping | 🔶 **Beta** | 20-framework coverage; control mappings improve with each release |
 | MCP server integration | 🔶 **Beta** | Single-node; production use requires your own transport hardening |
 | Intervention / quarantine / halt workflow | 🔶 **Beta** | Full path functional; thread-safety hardened; API may evolve |
 | Z3 constraint verifier | 🧪 **Experimental** | Useful for high-risk scenarios; requires separate Z3 install |
@@ -645,7 +645,7 @@ not a blanket production-readiness claim for every deployment.
 | Intervention & Quarantine | Stable | `require_human_review`, `halt_and_alert`, `quarantine` actions |
 | CLI (`acgs validate`, `audit`, `halt`) | Stable | Full local & CI usage |
 
-**Everything else** (constitution lifecycle API, formal verification with Z3/Lean, 18-framework compliance mapping) is **Beta / Experimental** and clearly marked in the Component Stability table above.
+**Everything else** (constitution lifecycle API, formal verification with Z3/Lean, 20-framework compliance mapping) is **Beta / Experimental** and clearly marked in the Component Stability table above.
 
 ---
 
@@ -714,7 +714,7 @@ app = create_mcp_server(constitution=constitution)
 
 ## 📋 Compliance Coverage
 
-ACGS maps governance controls to 18 regulatory frameworks. Run `acgs assess` to generate a compliance report:
+ACGS maps governance controls to 20 regulatory frameworks. Run `acgs assess` to generate a compliance report:
 
 ```bash
 acgs assess --framework eu-ai-act --output report.pdf
@@ -797,7 +797,7 @@ acgs audit --verify-chain
 # Start MCP governance server
 acgs serve --port 8080
 
-# EU AI Act Art. 14(3) kill switch
+# EU AI Act Art. 14(4)(e) kill switch
 acgs halt --agent-id agent-01 --reason "anomalous behaviour detected"
 acgs resume --agent-id agent-01
 ```
@@ -814,7 +814,7 @@ acgs resume --agent-id agent-01
 | [Architecture](https://acgs.ai/docs/architecture) | Engine internals, MACI deep dive |
 | [Integrations](https://acgs.ai/docs/integrations) | OpenAI, Anthropic, LangChain, MCP, A2A |
 | [Integration Decision Guide](./docs/integration-decision-guide.md) | Which adapter when: native vs. framework, streaming, async, MCP vs. in-process |
-| [Compliance](https://acgs.ai/docs/compliance-2026) | 18-framework regulatory mapping |
+| [Compliance](https://acgs.ai/docs/compliance-2026) | 20-framework regulatory mapping |
 | [CLI Reference](https://acgs.ai/docs/cli) | Full command reference |
 | [Why Governance?](https://acgs.ai/docs/why-governance) | The case for deterministic guardrails |
 | [OWASP LLM Top 10](https://acgs.ai/docs/owasp-2026) | ACGS coverage of each risk |

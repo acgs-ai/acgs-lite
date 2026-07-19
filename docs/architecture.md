@@ -29,7 +29,7 @@ graph TD
 
 ### 1. The Constitution
 The **Constitution** is an immutable set of `Rule` objects. Every rule has an `id`, a `pattern` (Regex), a `severity`, and an optional `condition` (Python expression).
-*   **Constitutional Hash**: A SHA-256 hash of the entire rule set. This ensures that the governance logic hasn't been tampered with during deployment.
+*   **Constitutional Hash**: A SHA-256 hash of the entire rule set. This lets you detect tampering during deployment by comparing against the pinned hash.
 
 ### 2. The Governance Engine
 The `GovernanceEngine` is the deterministic "Judge." It evaluates text (input or output) against the Constitution and returns a `ValidationResult`.
