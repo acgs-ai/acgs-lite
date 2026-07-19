@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [2.11.0] - Unreleased
+
 ### Added
 
 - Added a release-proof demo script and a reproducible JSON artifact for fresh-venv verification.
