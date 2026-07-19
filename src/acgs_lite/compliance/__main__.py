@@ -292,7 +292,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m acgs_lite.compliance",
         description="ACGS compliance module — assess, list frameworks, collect evidence",
-        epilog="EU AI Act main high-risk obligations: August 2, 2026 | https://acgs.ai",
+        epilog=(
+            "EU AI Act main high-risk obligations: December 2, 2027 "
+            "(Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus) | "
+            "https://acgs.ai"
+        ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

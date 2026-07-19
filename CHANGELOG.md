@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Aligned release messaging with the currently published package state: `2.10.1` is the latest published package; `2.11.0` remains pending publication.
 
+### Fixed
+
+- Corrected stale EU AI Act high-risk deadline claims (previously "August 2, 2026") across the
+  library (`acgs_lite.eu_ai_act`, `acgs_lite.compliance.eu_ai_act`), the CLI (`acgs_lite.cli`,
+  `acgs_lite.compliance.__main__`, `acgs_lite.commands.eu_ai_act`), generated Markdown/PDF
+  reports (`acgs_lite.report`), project-scaffold templates (`acgs_lite.commands.init`), and docs
+  (`docs/compliance-2026.md`). Per the 2026 Digital Omnibus deferral (Council final approval
+  2026-06-29): Annex III stand-alone high-risk systems now must comply by 2027-12-02; Annex I
+  embedded-product high-risk systems by 2028-08-02.
+
 ## [2.11.0] - Unreleased
 
 ### Security

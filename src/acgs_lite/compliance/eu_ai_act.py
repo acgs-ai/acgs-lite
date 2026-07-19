@@ -25,7 +25,8 @@ Risk tiers:
 Reference: Regulation (EU) 2024/1689 of the European Parliament and of the
 Council (Official Journal of the European Union, 12 July 2024)
 Entered into force: 1 August 2024
-Fully applicable: 2 August 2026 (high-risk AI systems)
+Fully applicable (high-risk): Annex III stand-alone 2 December 2027; Annex I
+embedded-product 2 August 2028 (deferred by the 2026 Digital Omnibus).
 
 Penalties: Up to EUR 35 million or 7% of global annual turnover (Art. 99)
 for prohibited practices; EUR 15 million or 3% for other violations.
@@ -362,7 +363,9 @@ class EUAIActFramework:
     (Arts. 9-15, 26), and transparency requirements for GPAI-facing systems
     and general-purpose AI models (Arts. 50, 53, 55).
 
-    Status: Enacted; fully applicable to high-risk AI systems from 2 August 2026.
+    Status: Enacted; fully applicable (high-risk): Annex III stand-alone systems
+    from 2 December 2027, Annex I embedded-product systems from 2 August 2028
+    (deferred by the 2026 Digital Omnibus).
     Prohibited practices applicable from 2 February 2025.
 
     Penalties:

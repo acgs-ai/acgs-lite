@@ -266,7 +266,10 @@ def compliance_checklist_demo() -> None:
 def main() -> None:
     print("EU AI Act Compliance Demo — acgs-lite")
     print("=" * 50)
-    print("High-risk provisions deadline: 2026-08-02")
+    print(
+        "High-risk provisions deadline: 2027-12-02 "
+        "(Annex III stand-alone; deferred by 2026 Digital Omnibus)"
+    )
 
     classify_system()
     article12_demo()

@@ -370,7 +370,8 @@ class ComplianceChecklist:
             "gate_clear": self.is_gate_clear,
             "blocking_gaps": self.blocking_gaps,
             "items": [item.to_dict() for item in self._items],
-            "high_risk_deadline": "2026-08-02",
+            # Annex III stand-alone high-risk; deferred by 2026 Digital Omnibus (Council approval 2026-06-29)
+            "high_risk_deadline": "2027-12-02",
             "disclaimer": (
                 "Indicative self-assessment only. Not legal advice. "
                 "Consult qualified legal counsel for binding EU AI Act compliance opinions."

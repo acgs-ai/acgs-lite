@@ -7,7 +7,9 @@ Classifies AI systems into one of four risk tiers:
 - LIMITED_RISK — Transparency obligations only (Article 52).
 - MINIMAL_RISK — No mandatory obligations (most AI systems).
 
-Main high-risk deadline: August 2, 2026. Systems must comply before this date.
+Main high-risk deadlines, per the 2026 Digital Omnibus (Council final approval
+2026-06-29): Annex III stand-alone high-risk systems must comply by
+December 2, 2027; Annex I embedded-product high-risk systems by August 2, 2028.
 
 Constitutional Hash: 608508a9bd224290
 
@@ -147,7 +149,9 @@ class ClassificationResult:
     article_basis: str
     obligations: list[str]
     rationale: str
-    high_risk_deadline: str = "2026-08-02"  # EU AI Act enforcement date
+    high_risk_deadline: str = (
+        "2027-12-02"  # Annex III stand-alone high-risk; deferred by 2026 Digital Omnibus
+    )
     disclaimer: str = _DISCLAIMER
 
     @property

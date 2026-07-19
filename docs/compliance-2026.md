@@ -1,12 +1,12 @@
 # 2026 AI Regulatory Compliance: EU AI Act, SB 205, and TRAIGA
 
-**Meta Description**: Ensure your AI agents comply with the 2026 regulatory landscape, including the EU AI Act's main high-risk obligations from August 2, 2026, Colorado SB 205, and Texas TRAIGA using ACGS-Lite.
+**Meta Description**: Ensure your AI agents comply with the 2026 regulatory landscape, including the EU AI Act's main high-risk obligations from December 2, 2027 (Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus), Colorado SB 205, and Texas TRAIGA using ACGS-Lite.
 
 ---
 
-2026 is the year AI regulation became "real." The current EU implementation timeline lists the **EU AI Act** main high-risk obligations for August 2, 2026, while regional laws like **Colorado's SB 205** and **Texas's TRAIGA** go live. Organizations must prove "Reasonable Care" in their AI deployments.
+2026 is the year AI regulation became "real." The current EU implementation timeline lists the **EU AI Act** main high-risk obligations for December 2, 2027 (Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus), while regional laws like **Colorado's SB 205** and **Texas's TRAIGA** go live. Organizations must prove "Reasonable Care" in their AI deployments.
 
-Monitor EU updates before relying on a launch date in legal advice or customer commitments; the Commission has proposed timeline adjustments for some high-risk rules.
+Monitor EU updates before relying on a launch date in legal advice or customer commitments; the 2026 Digital Omnibus (Council final approval 2026-06-29) deferred the main high-risk timeline, and further adjustments remain possible.
 
 ACGS-Lite provides the technical artifacts and runtime controls needed to demonstrate compliance with these mandates.
 

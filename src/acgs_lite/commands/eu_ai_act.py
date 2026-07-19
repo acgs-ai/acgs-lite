@@ -52,7 +52,10 @@ def handler(args: argparse.Namespace) -> int:
     print(f"  Compliance Score:  {report.overall_score:.0%}")
     print(f"  ACGS Coverage:     {report.acgs_lite_total_coverage:.0%}")
     print(f"  Frameworks:        {', '.join(report.frameworks_assessed)}")
-    print("  Main obligations:  August 2, 2026")
+    print(
+        "  Main obligations:  December 2, 2027 "
+        "(Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus)"
+    )
     print("  Max Penalty:       7% global revenue / EUR 35M")
     print()
 
