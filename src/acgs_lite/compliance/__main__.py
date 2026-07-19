@@ -166,6 +166,7 @@ def cmd_assess(args: argparse.Namespace) -> int:
         print("  🟡 MODERATE — Significant work remains.")
     else:
         print("  🔴 AT RISK — Major gaps. Immediate action required.")
+    print("  Indicative self-assessment only — not legal advice or a conformity assessment.")
     print()
 
     output = getattr(args, "output", None)

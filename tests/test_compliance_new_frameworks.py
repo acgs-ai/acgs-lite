@@ -239,7 +239,7 @@ class TestCanadaAIDAFramework:
         fw = CanadaAIDAFramework()
         assert fw.framework_id == "canada_aida"
         assert fw.jurisdiction == "Canada"
-        assert fw.status == "proposed"
+        assert fw.status == "defunct"
         assert fw.enforcement_date is None
 
     def test_checklist_covers_key_sections(self, base_desc: dict) -> None:

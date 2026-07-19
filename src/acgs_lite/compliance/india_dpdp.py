@@ -23,7 +23,9 @@ Significant Data Fiduciary (SDF) obligations (Section 16) include:
 Reference: Digital Personal Data Protection Act, 2023 (India)
            No. 22 of 2023, Ministry of Electronics and Information Technology
 Enacted: August 11, 2023 (Presidential assent)
-Rules: DPDP Rules under development (2024-2025)
+Rules: DPDP Rules 2025 notified 2025-11-13; phased commencement — most
+       procedural provisions in force from 2025-11-14, main compliance
+       duty provisions from 2027-05-13
 
 Penalties: Up to INR 250 crore per instance (≈ USD 30 million) for
 significant data fiduciary violations.
@@ -248,7 +250,9 @@ class IndiaDPDPFramework:
     rights of Data Principals, Significant Data Fiduciary additional obligations,
     and breach notification.
 
-    Status: Enacted August 2023; Rules pending (2024-2025).
+    Status: Enacted August 2023; DPDP Rules 2025 notified 2025-11-13 with phased
+    commencement (most procedural provisions from 2025-11-14; main compliance
+    duty provisions from 2027-05-13).
 
     Penalties: Up to INR 250 crore (≈ USD 30 million) per instance.
 

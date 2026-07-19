@@ -58,7 +58,7 @@ By structurally separating these roles, ACGS is designed so no single compromise
 
 ## Proving Compliance: Tamper-Evident Audit Trails
 
-To comply with frameworks like SOC 2, ISO 42001, or the EU AI Act, you must prove *why* an AI made a decision and prove that the record hasn't been altered.
+Frameworks like SOC 2, ISO 42001, and the EU AI Act expect you to be able to demonstrate why an automated decision was made and that the record hasn't been altered — this component supports that evidence trail.
 
 ACGS utilizes **hash-chained audit logs**. Every governance decision produces an immutable `AuditEntry` chained via SHA-256 hashes. If an auditor wants to know why an agent was permitted to access a specific record on a Tuesday at 3 PM, the audit log provides mathematical proof of the Constitution's state and the Validator's decision at that exact moment.
 

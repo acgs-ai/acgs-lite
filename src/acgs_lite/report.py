@@ -207,7 +207,7 @@ def generate_markdown_report(report_data: dict[str, Any]) -> str:
     lines.append("| SHA-256 tamper-evident audit trail | Art. 12 Record-Keeping | ✅ Active |")
     lines.append("| Transparency disclosure generation | Art. 13 Transparency | ✅ Active |")
     lines.append("| Risk classification engine | Art. 9 Risk Management | ✅ Active |")
-    lines.append("| Multi-framework compliance scoring | Art. 72 Conformity | ✅ Active |")
+    lines.append("| Multi-framework compliance scoring | Art. 43 Conformity | ✅ Active |")
     lines.append("")
 
     # Disclaimer

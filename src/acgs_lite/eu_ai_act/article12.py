@@ -8,8 +8,8 @@ throughout their lifecycle. Logs must be:
 - Retained for at least 10 years (or the system's lifetime, whichever is longer)
 - Sufficient to reconstruct the sequence of events leading to a decision
 
-This module provides a drop-in logging wrapper that satisfies Article 12
-requirements with zero infrastructure dependencies.
+This module provides a drop-in logging wrapper that supports Article 12
+record-keeping requirements with zero infrastructure dependencies.
 
 Constitutional Hash: 608508a9bd224290
 
@@ -25,7 +25,7 @@ Usage::
         call=lambda: llm.complete(prompt),
     )
 
-    # Append-only JSONL export (EU AI Act compliant)
+    # Append-only JSONL export (supports Article 12 record-keeping)
     logger.export_jsonl("audit_trail.jsonl")
 """
 

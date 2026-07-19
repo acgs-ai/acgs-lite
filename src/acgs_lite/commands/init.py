@@ -53,7 +53,7 @@ rules:
 
 _GITLAB_CI_SNIPPET = """\
 # ACGS Governance Gate
-# Validates every MR against constitutional rules
+# Verifies rules.yaml loads and reports the constitutional hash
 # Docs: https://acgs.ai
 # EU AI Act main high-risk obligations: December 2, 2027
 # (Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus)
@@ -70,7 +70,7 @@ governance:
       e = GovernanceEngine(c);
       print(f'Constitutional hash: {c.hash}');
       print(f'Rules loaded: {len(c.rules)}');
-      print('Governance gate: PASS');
+      print('Constitution loaded — hash pinned');
       "
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
@@ -78,7 +78,7 @@ governance:
 
 _GITHUB_ACTIONS_SNIPPET = """\
 # ACGS Governance Gate
-# Validates every PR against constitutional rules
+# Verifies rules.yaml loads and reports the constitutional hash
 # Docs: https://acgs.ai
 # EU AI Act main high-risk obligations: December 2, 2027
 # (Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus)
@@ -104,7 +104,7 @@ jobs:
           e = GovernanceEngine(c)
           print(f'Constitutional hash: {c.hash}')
           print(f'Rules loaded: {len(c.rules)}')
-          print('Governance gate: PASS')
+          print('Constitution loaded — hash pinned')
           "
 """
 

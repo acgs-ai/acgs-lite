@@ -115,7 +115,7 @@ def main() -> int:
     print(f"Side effects before approval: {result['side_effects_before_approval']}")
     print(f"Outcome after human approval: {result['approved_outcome']}")
     print(f"Side effects after approval: {result['side_effects_after_approval']}")
-    print(f"Article 14 compliant: {result['compliant']}")
+    print(f"Article 14 oversight-control checks passed: {result['compliant']}")
     return 0
 
 

@@ -82,11 +82,15 @@ def handler(args: argparse.Namespace) -> int:
     if report.overall_score >= 0.8:
         print("  🟢 STRONG — Address remaining gaps, then request conformity assessment.")
     elif report.overall_score >= 0.5:
-        print("  🟡 MODERATE — Significant work remains before Aug 2, 2026.")
+        print(
+            "  🟡 MODERATE — Significant work remains before December 2, 2027 "
+            "(Annex III stand-alone; deferred by the 2026 Digital Omnibus)."
+        )
     else:
         print("  🔴 AT RISK — Major gaps. Immediate action required.")
     print()
     print("  → Generate full report: acgs report --pdf")
+    print("  Indicative self-assessment only — not legal advice or a conformity assessment.")
     print()
 
     cache_path = Path(".acgs_assessment.json")

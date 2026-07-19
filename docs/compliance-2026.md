@@ -23,7 +23,7 @@ ACGS-Lite provides the technical artifacts and runtime controls needed to demons
 
 ---
 
-## 🇪🇺 EU AI Act (Main high-risk obligations: Aug 2, 2026)
+## 🇪🇺 EU AI Act (Main high-risk obligations: Dec 2, 2027 — Annex III stand-alone; deferred by the 2026 Digital Omnibus)
 
 For agents classified as **"High Risk"** (Education, Employment, Finance, Healthcare), the EU AI Act mandates strict controls.
 

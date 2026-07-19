@@ -175,7 +175,7 @@ _HIGH_RISK_ITEMS: list[tuple[str, str, str | None, bool]] = [
         False,
     ),
     (
-        "Article 72",
+        "Article 43",
         "Conformity assessment: carry out self-assessment (most Annex III systems) "
         "or third-party audit (biometric and law enforcement systems) before deployment.",
         "ComplianceChecklist — generates conformity assessment documentation",
@@ -185,21 +185,21 @@ _HIGH_RISK_ITEMS: list[tuple[str, str, str | None, bool]] = [
 
 _LIMITED_RISK_ITEMS: list[tuple[str, str, str | None, bool]] = [
     (
-        "Article 52(1)",
+        "Article 50(1)",
         "Transparency obligation: inform natural persons that they are interacting "
         "with an AI system, unless this is obvious from context.",
         "TransparencyDisclosure — ai_system_disclosure text field",
         True,
     ),
     (
-        "Article 52(2)",
+        "Article 50(3)",
         "Emotion/biometric disclosure: inform persons when they are subject to "
         "emotion recognition or biometric categorisation systems.",
         None,
         True,
     ),
     (
-        "Article 52(3)",
+        "Article 50(4)",
         "Deepfake labelling: label AI-generated or manipulated images, audio, or "
         "video content so that it is disclosed as artificially generated.",
         None,
@@ -311,7 +311,7 @@ class ComplianceChecklist:
         return True
 
     def auto_populate_acgs_lite(self) -> None:
-        """Mark items that acgs-lite directly satisfies as compliant.
+        """Mark items covered by acgs-lite technical measures as compliant.
 
         Call this after attaching Article12Logger, TransparencyDisclosure,
         and HumanOversightGateway to auto-populate their evidence.
@@ -323,7 +323,7 @@ class ComplianceChecklist:
             "Article 12": ("acgs-lite Article12Logger — automatic tamper-evident JSONL logging"),
             "Article 13": ("acgs-lite TransparencyDisclosure — Article 13 system card generation"),
             "Article 14": ("acgs-lite HumanOversightGateway — configurable HITL approval gates"),
-            "Article 72": ("acgs-lite ComplianceChecklist — conformity assessment documentation"),
+            "Article 43": ("acgs-lite ComplianceChecklist — conformity assessment documentation"),
         }
         for article_ref, evidence in acgs_articles.items():
             self.mark_complete(article_ref, evidence=evidence)

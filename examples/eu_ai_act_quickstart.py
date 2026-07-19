@@ -95,7 +95,7 @@ def article12_demo() -> Article12Logger:
     print(f"Chain valid:    {log.verify_chain()}")
 
     summary = log.compliance_summary()
-    print(f"Article 12 compliant: {summary['compliant']}")
+    print(f"Article 12 record-keeping checks passed: {summary['compliant']}")
 
     # Export append-only JSONL
     log.export_jsonl("/tmp/cv_screener_audit.jsonl")
@@ -151,7 +151,7 @@ def article14_demo() -> None:
     print(f"  Low-impact auto:   {auto.outcome.value}")  # auto_approved
 
     summary = gateway.compliance_summary()
-    print(f"Article 14 compliant: {summary['compliant']}")
+    print(f"Article 14 oversight-control checks passed: {summary['compliant']}")
 
 
 # ---------------------------------------------------------------------------

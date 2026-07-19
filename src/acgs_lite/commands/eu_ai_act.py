@@ -80,10 +80,14 @@ def handler(args: argparse.Namespace) -> int:
     print()
     print(f"  Gate Clear: {'✅ YES' if checklist.is_gate_clear else '❌ NO'}")
     print(f"  Checklist Score: {checklist.compliance_score:.0%}")
+    print("  Indicative self-assessment only — not legal advice or a conformity assessment.")
     print()
 
     if checklist.blocking_gaps:
-        print("  Blocking Gaps (must resolve before Aug 2, 2026 main obligations):")
+        print(
+            "  Blocking Gaps (must resolve before December 2, 2027 main obligations — "
+            "Annex III stand-alone; deferred by the 2026 Digital Omnibus):"
+        )
         for gap in checklist.blocking_gaps:
             print(f"    ❌ {gap}")
         print()
@@ -104,7 +108,10 @@ def handler(args: argparse.Namespace) -> int:
         result = generate_report(report_data, output_path, format=fmt)
         print(f"  ✅ Report generated: {result}")
         print()
-        print("  Hand this to your compliance officer. You're ahead of 99% of companies.")
+        print(
+            "  Attach this self-assessment to your conformity-assessment working file. "
+            "It is not a compliance determination."
+        )
         print()
     except ImportError as e:
         print(f"  ⚠  {e}")

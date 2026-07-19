@@ -16,7 +16,8 @@ Sections covered:
 - § 1798.150: Private right of action for data breaches
 - § 1798.185: CPPA rulemaking — ADMT rules (automated decision-making)
 
-CPPA ADMT rules (draft 2024, expected final 2025):
+CPPA ADMT rules (finalized — OAL approved 2025-09-23, effective 2026-01-01;
+ADMT-specific compliance duties phase in from 2027-01-01):
 - Right to opt out of automated decision-making
 - Right to access information about ADMT logic
 - Right to human review of ADMT decisions with significant effect
@@ -26,9 +27,10 @@ Scope: Applies to for-profit businesses above thresholds that collect
 personal information about California residents.
 
 Reference: Cal. Civ. Code §§ 1798.100-1798.199 (CCPA/CPRA)
-           CPPA Draft Automated Decision-Making Technology Regulations (2024)
+           CPPA Automated Decision-Making Technology Regulations, finalized 2025
 Enforcement: Since July 1, 2020 (CCPA); July 1, 2023 (CPRA amendments)
-ADMT rules: Expected 2025
+ADMT rules: Finalized (OAL approved 2025-09-23); effective 2026-01-01;
+            ADMT-specific compliance duties phase in from 2027-01-01
 
 Penalties: Up to USD 2,500 per unintentional violation; USD 7,500 per
 intentional violation or violation involving minor data.
@@ -232,8 +234,9 @@ class CCPACPRAFramework:
     limits), automated decision-making technology (ADMT) obligations from
     CPPA draft rules (2024), risk assessment, and security requirements.
 
-    Status: CCPA/CPRA enacted and enforced. ADMT rules: draft 2024,
-    expected final 2025.
+    Status: CCPA/CPRA enacted and enforced. ADMT rules: finalized (OAL approved
+    2025-09-23), effective 2026-01-01, with ADMT-specific compliance duties
+    phasing in from 2027-01-01.
 
     Penalties: USD 2,500–7,500 per violation; private right of action for
     security breaches.
@@ -252,7 +255,7 @@ class CCPACPRAFramework:
     framework_id: str = "ccpa_cpra"
     framework_name: str = "California Consumer Privacy Act / CPRA + ADMT Rules (CCPA/CPRA)"
     jurisdiction: str = "California"
-    status: str = "enacted"  # Core CCPA/CPRA enacted; ADMT rules proposed
+    status: str = "enacted"  # Core CCPA/CPRA enacted; ADMT rules finalized 2025-09-23
     enforcement_date: str | None = "2020-07-01"
 
     def get_checklist(self, system_description: dict[str, Any]) -> list[ChecklistItem]:
