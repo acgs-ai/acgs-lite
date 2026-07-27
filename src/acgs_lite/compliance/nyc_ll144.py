@@ -8,8 +8,8 @@ used in New York City:
 - Impact ratio calculations for race/ethnicity and sex categories
 
 Reference: NYC Local Law 144 of 2021; NYC DCWP Rules (Title 6, Ch. 5)
-Effective: July 5, 2023. Enforced by NYC DCWP.
-Penalties: $500 first violation, $1,500 subsequent (per violation).
+Effective Jan 1, 2023; DCWP enforcement since July 5, 2023.
+Penalties: up to $500 first violation, $500-$1,500 subsequent.
 
 Constitutional Hash: 608508a9bd224290
 """
@@ -172,10 +172,10 @@ class NYCLL144Framework:
     and ongoing governance. Applies to employers and employment agencies
     using AEDTs for hiring or promotion decisions in NYC.
 
-    Penalties: $500 first violation, $1,500 each subsequent violation.
+    Penalties: up to $500 first violation, $500-$1,500 subsequent.
     Each use of a non-compliant AEDT on a candidate is a separate violation.
 
-    Status: Enacted. Effective July 5, 2023. Enforced by NYC DCWP.
+    Status: Enacted. Effective Jan 1, 2023; DCWP enforcement since July 5, 2023.
 
     Usage::
 

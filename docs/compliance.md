@@ -1,6 +1,6 @@
 # Compliance
 
-ACGS maps controls across 18 regulatory frameworks globally. Coverage ratios
+ACGS maps controls across 20 regulatory frameworks globally. Coverage ratios
 are SELF-ASSESSED mapping coverage only; they are not certification, regulatory
 approval, adoption proof, or a substitute for legal review.
 

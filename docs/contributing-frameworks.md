@@ -1,6 +1,6 @@
 # Contributing a New Compliance Framework
 
-ACGS covers **18 regulatory frameworks**. Adding a 19th is mostly research — the code is a filled-in protocol class (~200 lines).
+ACGS covers **20 regulatory frameworks**. Adding a 21st is mostly research — the code is a filled-in protocol class (~200 lines).
 
 This guide walks from zero to merged PR.
 

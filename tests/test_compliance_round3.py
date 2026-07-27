@@ -8,7 +8,7 @@ Covers:
 - CCPA/CPRA + ADMT
 - ComplianceReportExporter (text, Markdown, JSON)
 - MultiFrameworkAssessor routing for round-3 jurisdictions
-- 18-framework total count
+- 20-framework total count
 
 Constitutional Hash: 608508a9bd224290
 """
@@ -86,18 +86,19 @@ class TestIndiaDPDPFramework:
         assert any("§6" in r for r in refs)
         assert any("§8" in r for r in refs)
         assert any("§11" in r for r in refs)
-        assert any("§25" in r for r in refs)
+        assert any("§8(6)" in r for r in refs)
 
     def test_sdf_items_not_applicable_for_non_sdf(self, india_desc: dict) -> None:
         fw = IndiaDPDPFramework()
         checklist = fw.get_checklist(india_desc)
-        sdf_items = [i for i in checklist if "§16" in i.ref]
+        sdf_items = [i for i in checklist if "§10(2)" in i.ref]
+        assert sdf_items, "Expected India DPDP SDF items in checklist"
         assert all(i.status == ChecklistStatus.NOT_APPLICABLE for i in sdf_items)
 
     def test_sdf_items_pending_for_sdf(self, india_sdf_desc: dict) -> None:
         fw = IndiaDPDPFramework()
         checklist = fw.get_checklist(india_sdf_desc)
-        sdf_items = [i for i in checklist if "§16(1)(a)" in i.ref]
+        sdf_items = [i for i in checklist if "§10(2)(a)" in i.ref]
         assert any(i.status == ChecklistStatus.PENDING for i in sdf_items)
 
     def test_children_data_items_not_applicable_by_default(self, india_desc: dict) -> None:
@@ -117,16 +118,16 @@ class TestIndiaDPDPFramework:
         checklist = fw.get_checklist(india_desc)
         fw.auto_populate_acgs_lite(checklist)
         compliant_refs = {i.ref for i in checklist if i.status == ChecklistStatus.COMPLIANT}
-        assert "DPDP §8(3)" in compliant_refs
-        assert "DPDP §25(1)" in compliant_refs
+        assert "DPDP §8(4)/(5)" in compliant_refs
+        assert "DPDP §8(6)" in compliant_refs
         assert "DPDP §11(1)" in compliant_refs
 
     def test_section8_5_dpf_contact_not_auto_satisfied(self, india_desc: dict) -> None:
         fw = IndiaDPDPFramework()
         checklist = fw.get_checklist(india_desc)
         fw.auto_populate_acgs_lite(checklist)
-        s85 = next(i for i in checklist if i.ref == "DPDP §8(5)")
-        assert s85.status == ChecklistStatus.PENDING
+        s89 = next(i for i in checklist if i.ref == "DPDP §8(9)")
+        assert s89.status == ChecklistStatus.PENDING
 
     def test_assess_returns_valid_assessment(self, india_desc: dict) -> None:
         fw = IndiaDPDPFramework()
@@ -288,7 +289,7 @@ class TestChinaAIFramework:
         checklist = fw.get_checklist(desc)
         fw.auto_populate_acgs_lite(checklist)
         compliant_refs = {i.ref for i in checklist if i.status == ChecklistStatus.COMPLIANT}
-        assert "CN-ALG Art.4" in compliant_refs
+        assert "CN-ALG Art.21" in compliant_refs
         assert "CN-PIPL Art.24" in compliant_refs
         assert "CN-PIPL Art.51" in compliant_refs
 

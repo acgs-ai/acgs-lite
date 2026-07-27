@@ -145,7 +145,7 @@ _AIDA_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "Retain monitoring records for a period prescribed by regulation "
         "(expected 10 years for high-impact systems).",
         "Bill C-27, AIDA Section 12(2)",
-        "AuditLog — configurable log retention with immutable records",
+        "AuditLog — configurable log retention with tamper-evident records",
         True,
     ),
     # Section 13 — Record-keeping
@@ -233,7 +233,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
     ),
     "AIDA §9(1)": (
         "acgs-lite RiskClassifier — impact assessment with obligation mapping "
-        "across risk tiers satisfies pre-deployment impact assessment"
+        "across risk tiers supports pre-deployment impact assessment"
     ),
     "AIDA §9(2)": (
         "acgs-lite GovernanceEngine — continuous lifecycle monitoring triggers "
@@ -260,8 +260,8 @@ _ACGS_LITE_MAP: dict[str, str] = {
         "and validation detects emerging risks and biased outputs"
     ),
     "AIDA §12(2)": (
-        "acgs-lite AuditLog — configurable log retention with immutable "
-        "records satisfies monitoring record retention obligations"
+        "acgs-lite AuditLog — configurable log retention with tamper-evident "
+        "records supports monitoring record retention obligations"
     ),
     "AIDA §13(1)": (
         "acgs-lite AuditLog — lifecycle audit chain with tamper-evident "
@@ -293,7 +293,10 @@ class CanadaAIDAFramework:
     impact assessment, plain-language disclosure, risk mitigation, monitoring,
     record-keeping, and prohibitions on harmful bias and deception.
 
-    Status: Proposed (Bill C-27); not yet enacted as of 2026-03.
+    Status: Defunct. Bill C-27 (which contained AIDA) died on the Order Paper at
+    prorogation in January 2025 and was not reintroduced as drafted; Canada has no
+    federal AI-specific statute in force as of 2026, though a successor framework
+    is expected.
 
     Penalties (proposed):
     - Administrative penalties up to CAD 10 million or 3% of global revenues
@@ -313,7 +316,7 @@ class CanadaAIDAFramework:
     framework_id: str = "canada_aida"
     framework_name: str = "Canada Artificial Intelligence and Data Act (AIDA / Bill C-27)"
     jurisdiction: str = "Canada"
-    status: str = "proposed"
+    status: str = "defunct"
     enforcement_date: str | None = None  # Not yet enacted
 
     def get_checklist(self, system_description: dict[str, Any]) -> list[ChecklistItem]:

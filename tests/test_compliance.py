@@ -1,6 +1,6 @@
 """Tests for multi-framework AI compliance module.
 
-Covers all 18 compliance frameworks, auto-population of acgs-lite
+Covers all 20 compliance frameworks, auto-population of acgs-lite
 features, the MultiFrameworkAssessor orchestrator, jurisdiction-based
 framework selection, domain routing, cross-framework gap analysis,
 compliance scoring, report exporter, and evidence collection.
@@ -374,8 +374,9 @@ class TestDORA:
         fw = DORAFramework()
         desc = dict(_SYSTEM_DESC, is_significant_entity=False)
         checklist = fw.get_checklist(desc)
-        art25 = [i for i in checklist if "Art.25" in i.ref]
-        assert all(i.status == ChecklistStatus.NOT_APPLICABLE for i in art25)
+        art26 = [i for i in checklist if "Art.26" in i.ref]
+        assert art26, "Expected DORA Art.26(1) TLPT item in checklist"
+        assert all(i.status == ChecklistStatus.NOT_APPLICABLE for i in art26)
 
     def test_auto_populate_marks_acgs_items(self, system_desc: dict) -> None:
         fw = DORAFramework()
@@ -397,7 +398,7 @@ class TestCanadaAIDA:
         fw = CanadaAIDAFramework()
         assert fw.framework_id == "canada_aida"
         assert fw.jurisdiction == "Canada"
-        assert fw.status == "proposed"
+        assert fw.status == "defunct"
         assert fw.enforcement_date is None
 
     def test_checklist_covers_core_sections(self, system_desc: dict) -> None:
@@ -434,10 +435,10 @@ class TestSingaporeMAIGF:
         fw = SingaporeMAIGFFramework()
         checklist = fw.get_checklist(system_desc)
         refs = [i.ref for i in checklist]
-        assert any("P1" in r for r in refs)
-        assert any("P2" in r for r in refs)
-        assert any("P3" in r for r in refs)
-        assert any("P4" in r for r in refs)
+        assert any("Internal Governance" in r for r in refs)
+        assert any("Human Involvement" in r for r in refs)
+        assert any("Operations Management" in r for r in refs)
+        assert any("Stakeholder Interaction" in r for r in refs)
 
     def test_auto_populate_marks_acgs_items(self, system_desc: dict) -> None:
         fw = SingaporeMAIGFFramework()
@@ -504,7 +505,8 @@ class TestIndiaDPDP:
         fw = IndiaDPDPFramework()
         desc = dict(_SYSTEM_DESC, is_significant_data_fiduciary=False)
         checklist = fw.get_checklist(desc)
-        sdf_items = [i for i in checklist if "§16" in i.ref]
+        sdf_items = [i for i in checklist if "§10(2)" in i.ref]
+        assert sdf_items, "Expected India DPDP SDF items in checklist"
         assert all(i.status == ChecklistStatus.NOT_APPLICABLE for i in sdf_items)
 
     def test_conditional_na_for_no_children_data(self) -> None:

@@ -4,26 +4,27 @@ Implements AI-relevant obligations from the Digital Personal Data Protection
 Act, 2023 (Act 22 of 2023), India's first comprehensive data protection law.
 
 Sections covered:
-- Section 4:  Lawfulness of personal data processing
-- Section 6:  Consent requirements
-- Section 8:  Obligations of Data Fiduciary (controller)
-- Section 9:  Processing of children's data
-- Section 11: Right to access and information
-- Section 12: Right to correction and erasure
-- Section 16: Additional obligations of Significant Data Fiduciary (SDF)
-- Section 17: Obligations of Data Processor
-- Section 19: Establishment and powers of Data Protection Board
-- Section 25: Intimation of personal data breach
+- Section 4:     Lawfulness of personal data processing
+- Section 5(1):  Notice before seeking consent
+- Section 6:     Consent requirements
+- Section 8:     Obligations of Data Fiduciary (accuracy, security measures,
+                  breach intimation, erasure, DPO/grievance contact)
+- Section 9:     Processing of children's data
+- Section 10(2): Additional obligations of Significant Data Fiduciary (SDF)
+- Section 11:    Right to access and information
+- Section 12:    Right to correction and erasure
 
-Significant Data Fiduciary (SDF) obligations (Section 16) include:
+Significant Data Fiduciary (SDF) obligations (Section 10(2)) include:
 - Data Protection Impact Assessment (DPIA)
 - Auditing AI systems
-- Algorithmic accountability
+- Algorithmic accountability (further detailed in the DPDP Rules 2025)
 
 Reference: Digital Personal Data Protection Act, 2023 (India)
            No. 22 of 2023, Ministry of Electronics and Information Technology
 Enacted: August 11, 2023 (Presidential assent)
-Rules: DPDP Rules under development (2024-2025)
+Rules: DPDP Rules 2025 notified 2025-11-13; phased commencement — most
+       procedural provisions in force from 2025-11-14, main compliance
+       duty provisions from 2027-05-13
 
 Penalties: Up to INR 250 crore per instance (≈ USD 30 million) for
 significant data fiduciary violations.
@@ -67,46 +68,46 @@ _DPDP_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         True,
     ),
     (
-        "DPDP §6(4)",
+        "DPDP §5(1)",
         "Provide the Data Principal with a clear notice before seeking "
         "consent, specifying personal data to be processed, purpose, and "
         "the manner in which consent may be withdrawn.",
-        "India DPDP Act 2023, Section 6(4)",
+        "India DPDP Act 2023, Section 5(1)",
         "TransparencyDisclosure — notice and consent information in system card",
         True,
     ),
     # Section 8 — Data Fiduciary obligations
     (
-        "DPDP §8(1)",
+        "DPDP §8(3)",
         "Ensure the accuracy, completeness, and consistency of personal data "
         "used in the AI system before and during processing.",
-        "India DPDP Act 2023, Section 8(1)",
+        "India DPDP Act 2023, Section 8(3)",
         None,
         True,
     ),
     (
-        "DPDP §8(3)",
+        "DPDP §8(4)/(5)",
         "Implement appropriate technical and organisational measures to ensure "
         "observance of data processing obligations and prevent unauthorised "
         "access, use, alteration, or deletion of personal data.",
-        "India DPDP Act 2023, Section 8(3)",
+        "India DPDP Act 2023, Section 8(4)/(5)",
         "GovernanceEngine — circuit breakers and access controls prevent unauthorised processing",
         True,
     ),
     (
-        "DPDP §8(5)",
+        "DPDP §8(9)",
         "Publish the contact details of a Data Protection Officer (or "
         "authorised person) to address grievances raised by Data Principals.",
-        "India DPDP Act 2023, Section 8(5)",
+        "India DPDP Act 2023, Section 8(9)",
         None,
         True,
     ),
     (
-        "DPDP §8(6)",
+        "DPDP §8(7)",
         "Erase personal data when the purpose for which it was collected has "
         "been met or when consent is withdrawn, unless retention is required "
         "by applicable law.",
-        "India DPDP Act 2023, Section 8(6)",
+        "India DPDP Act 2023, Section 8(7)",
         None,
         True,
     ),
@@ -148,48 +149,48 @@ _DPDP_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         None,
         True,
     ),
-    # Section 16 — Significant Data Fiduciary (SDF) obligations
+    # Section 10(2) — Significant Data Fiduciary (SDF) obligations
     (
-        "DPDP §16(1)(a)",
+        "DPDP §10(2)(a)",
         "Significant Data Fiduciaries must appoint a Data Protection Officer "
         "based in India who is accountable to the Board of the entity.",
-        "India DPDP Act 2023, Section 16(1)(a)",
+        "India DPDP Act 2023, Section 10(2)(a)",
         None,
         False,  # Only for SDFs
     ),
     (
-        "DPDP §16(1)(b)",
+        "DPDP §10(2)(b)",
         "Significant Data Fiduciaries must appoint an independent data auditor "
         "to evaluate compliance with the Act and rules.",
-        "India DPDP Act 2023, Section 16(1)(b)",
+        "India DPDP Act 2023, Section 10(2)(b)",
         "AuditLog — tamper-evident audit chain supports independent audit",
         False,
     ),
     (
-        "DPDP §16(1)(c)",
+        "DPDP §10(2)(c)",
         "Significant Data Fiduciaries must conduct a Data Protection Impact "
         "Assessment (DPIA) for high-risk AI processing activities.",
-        "India DPDP Act 2023, Section 16(1)(c)",
+        "India DPDP Act 2023, Section 10(2)(c)",
         "RiskClassifier — risk tier assessment scopes DPIA obligations",
         False,
     ),
     (
-        "DPDP §16(2)",
+        "DPDP Rules 2025 (SDF obligations)",
         "Significant Data Fiduciaries must implement additional safeguards "
         "including algorithmic accountability measures ensuring AI outputs "
         "do not pose systemic risk.",
-        "India DPDP Act 2023, Section 16(2)",
+        "Digital Personal Data Protection Rules, 2025 (SDF obligations)",
         "GovernanceEngine — constitutional rule set provides algorithmic accountability",
         False,
     ),
-    # Section 25 — Data breach notification
+    # Section 8(6) — Data breach notification
     (
-        "DPDP §25(1)",
+        "DPDP §8(6)",
         "In the event of a personal data breach, notify each affected Data "
         "Principal and the Data Protection Board in such form and manner as "
         "prescribed.",
-        "India DPDP Act 2023, Section 25(1)",
-        "AuditLog — breach event detection and immutable record for notification",
+        "India DPDP Act 2023, Section 8(6)",
+        "AuditLog — breach event detection and tamper-evident record for notification",
         True,
     ),
 ]
@@ -202,11 +203,11 @@ _ACGS_LITE_MAP: dict[str, str] = {
         "acgs-lite GovernanceEngine — constitutional rules enforce lawful-purpose "
         "checks before any personal data processing action"
     ),
-    "DPDP §6(4)": (
+    "DPDP §5(1)": (
         "acgs-lite TransparencyDisclosure — notice and consent information "
-        "fields in system card satisfy prior notice obligation"
+        "fields in system card support the prior notice obligation"
     ),
-    "DPDP §8(3)": (
+    "DPDP §8(4)/(5)": (
         "acgs-lite GovernanceEngine — circuit breakers and access controls "
         "prevent unauthorised access, use, or alteration of personal data"
     ),
@@ -220,22 +221,22 @@ _ACGS_LITE_MAP: dict[str, str] = {
     ),
     "DPDP §11(1)": (
         "acgs-lite AuditLog — queryable per-subject processing record "
-        "satisfies right to access information obligation"
+        "supports the right to access information obligation"
     ),
-    "DPDP §16(1)(b)": (
+    "DPDP §10(2)(b)": (
         "acgs-lite AuditLog — tamper-evident audit chain with hash integrity "
         "supports independent auditor review"
     ),
-    "DPDP §16(1)(c)": (
+    "DPDP §10(2)(c)": (
         "acgs-lite RiskClassifier — risk tier assessment scopes DPIA "
         "obligations for Significant Data Fiduciaries"
     ),
-    "DPDP §16(2)": (
+    "DPDP Rules 2025 (SDF obligations)": (
         "acgs-lite GovernanceEngine — constitutional rule set provides "
         "algorithmic accountability with full audit trail"
     ),
-    "DPDP §25(1)": (
-        "acgs-lite AuditLog — breach event detection and immutable record "
+    "DPDP §8(6)": (
+        "acgs-lite AuditLog — breach event detection and tamper-evident record "
         "supports notification obligations"
     ),
 }
@@ -248,7 +249,9 @@ class IndiaDPDPFramework:
     rights of Data Principals, Significant Data Fiduciary additional obligations,
     and breach notification.
 
-    Status: Enacted August 2023; Rules pending (2024-2025).
+    Status: Enacted August 2023; DPDP Rules 2025 notified 2025-11-13 with phased
+    commencement (most procedural provisions from 2025-11-14; main compliance
+    duty provisions from 2027-05-13).
 
     Penalties: Up to INR 250 crore (≈ USD 30 million) per instance.
 
@@ -279,7 +282,12 @@ class IndiaDPDPFramework:
         is_sdf = system_description.get("is_significant_data_fiduciary", False)
         processes_children = system_description.get("processes_children_data", False)
 
-        _sdf_refs = {"DPDP §16(1)(a)", "DPDP §16(1)(b)", "DPDP §16(1)(c)", "DPDP §16(2)"}
+        _sdf_refs = {
+            "DPDP §10(2)(a)",
+            "DPDP §10(2)(b)",
+            "DPDP §10(2)(c)",
+            "DPDP Rules 2025 (SDF obligations)",
+        }
         _child_refs = {"DPDP §9(1)", "DPDP §9(3)"}
 
         items: list[ChecklistItem] = []

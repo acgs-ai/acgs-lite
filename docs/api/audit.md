@@ -1,6 +1,6 @@
 # Audit Trail
 
-The audit trail records every governance decision in a SHA-256 chained log. Any tampering is mathematically detectable. Records are immutable once written.
+The log is tamper-evident: altering a recorded entry breaks the hash chain and is detected by verify_chain(). This does not protect against deletion or wholesale rewrite of the log unless the chain head is anchored externally.
 
 ## Class Reference
 

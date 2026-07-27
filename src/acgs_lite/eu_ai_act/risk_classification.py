@@ -4,10 +4,12 @@ Classifies AI systems into one of four risk tiers:
 
 - UNACCEPTABLE — Prohibited practices (Article 5). Must not be deployed.
 - HIGH_RISK    — Regulated use cases (Article 6 + Annex III). Full obligations apply.
-- LIMITED_RISK — Transparency obligations only (Article 52).
+- LIMITED_RISK — Transparency obligations only (Article 50).
 - MINIMAL_RISK — No mandatory obligations (most AI systems).
 
-Main high-risk deadline: August 2, 2026. Systems must comply before this date.
+Main high-risk deadlines, per the 2026 Digital Omnibus (Council final approval
+2026-06-29): Annex III stand-alone high-risk systems must comply by
+December 2, 2027; Annex I embedded-product high-risk systems by August 2, 2028.
 
 Constitutional Hash: 608508a9bd224290
 
@@ -61,7 +63,7 @@ _HIGH_RISK_DOMAINS: frozenset[str] = frozenset(
     }
 )
 
-# Article 52 limited-risk domains
+# Article 50 limited-risk domains
 _LIMITED_RISK_DOMAINS: frozenset[str] = frozenset(
     {
         "chatbot",
@@ -82,7 +84,7 @@ _HIGH_RISK_OBLIGATIONS: list[str] = [
     "Article 14 — Human oversight: design enabling effective human intervention and override",
     "Article 15 — Accuracy, robustness, cybersecurity: declared accuracy levels and testing",
     "Article 16 — Obligations of providers: conformity assessment, CE marking, registration",
-    "Article 72 — Conformity assessment: self-assessment or third-party audit",
+    "Article 43 — Conformity assessment: self-assessment or third-party audit",
 ]
 
 
@@ -147,7 +149,9 @@ class ClassificationResult:
     article_basis: str
     obligations: list[str]
     rationale: str
-    high_risk_deadline: str = "2026-08-02"  # EU AI Act enforcement date
+    high_risk_deadline: str = (
+        "2027-12-02"  # Annex III stand-alone high-risk; deferred by 2026 Digital Omnibus
+    )
     disclaimer: str = _DISCLAIMER
 
     @property
@@ -189,7 +193,7 @@ class RiskClassifier:
     """Classify AI systems under the EU AI Act.
 
     Implements the Article 5 (prohibited) → Article 6 + Annex III (high-risk)
-    → Article 52 (limited-risk) → minimal-risk decision tree.
+    → Article 50 (limited-risk) → minimal-risk decision tree.
 
     Usage::
 
@@ -271,18 +275,22 @@ class RiskClassifier:
                 rationale="; ".join(high_risk_reasons),
             )
 
-        # Stage 3: LIMITED_RISK — Article 52 transparency obligations
+        # Stage 3: LIMITED_RISK — Article 50 transparency obligations
         if domain_normalised in _LIMITED_RISK_DOMAINS:
             return ClassificationResult(
                 level=RiskLevel.LIMITED_RISK,
-                article_basis="Article 52",
+                article_basis="Article 50",
                 obligations=[
-                    "Article 52(1) — Inform users they are interacting with an AI system",
-                    "Article 52(2) — Disclose emotion recognition or biometric categorisation",
-                    "Article 52(3) — Label AI-generated or manipulated content (deepfakes)",
+                    "Article 50(1) — Inform users they are interacting with an AI system",
+                    "Article 50(2) — Mark AI-generated or manipulated content as artificially "
+                    "generated (machine-readable labelling)",
+                    "Article 50(3) — Disclose emotion recognition or biometric categorisation",
+                    "Article 50(4) — Deployers of deepfake or AI-generated/manipulated content "
+                    "must disclose that the content has been artificially generated or "
+                    "manipulated",
                 ],
                 rationale=(
-                    f"Domain '{description.domain}' triggers Article 52 transparency obligations"
+                    f"Domain '{description.domain}' triggers Article 50 transparency obligations"
                 ),
             )
 
@@ -293,7 +301,7 @@ class RiskClassifier:
             obligations=[],
             rationale=(
                 "System does not fall under prohibited practices, Annex III high-risk categories, "
-                "or Article 52 limited-risk transparency obligations. "
+                "or Article 50 limited-risk transparency obligations. "
                 "Voluntary codes of conduct are encouraged."
             ),
         )

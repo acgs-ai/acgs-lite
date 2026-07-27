@@ -565,7 +565,7 @@ def _generate_prioritized_recommendations(
     if feature_refs:
         top_feature = feature_refs.most_common(1)[0]
         recs.append(
-            f"STRENGTH: '{top_feature[0]}' satisfies requirements across "
+            f"STRENGTH: '{top_feature[0]}' provides supporting technical measures across "
             f"{top_feature[1]} frameworks. Leverage this capability further."
         )
 

@@ -175,9 +175,10 @@ _HIGH_RISK_ITEMS: list[tuple[str, str, str | None, bool]] = [
         False,
     ),
     (
-        "Article 72",
-        "Conformity assessment: carry out self-assessment (most Annex III systems) "
-        "or third-party audit (biometric and law enforcement systems) before deployment.",
+        "Article 43",
+        "Conformity assessment: carry out self-assessment (most Annex III systems); "
+        "the third-party notified-body route applies to Annex III pt 1 "
+        "remote-biometric systems where harmonised standards are not fully applied.",
         "ComplianceChecklist — generates conformity assessment documentation",
         True,
     ),
@@ -185,23 +186,31 @@ _HIGH_RISK_ITEMS: list[tuple[str, str, str | None, bool]] = [
 
 _LIMITED_RISK_ITEMS: list[tuple[str, str, str | None, bool]] = [
     (
-        "Article 52(1)",
+        "Article 50(1)",
         "Transparency obligation: inform natural persons that they are interacting "
         "with an AI system, unless this is obvious from context.",
         "TransparencyDisclosure — ai_system_disclosure text field",
         True,
     ),
     (
-        "Article 52(2)",
+        "Article 50(3)",
         "Emotion/biometric disclosure: inform persons when they are subject to "
         "emotion recognition or biometric categorisation systems.",
         None,
         True,
     ),
     (
-        "Article 52(3)",
-        "Deepfake labelling: label AI-generated or manipulated images, audio, or "
-        "video content so that it is disclosed as artificially generated.",
+        "Article 50(2)",
+        "Machine-readable labelling: mark AI-generated or manipulated images, "
+        "audio, or video content as artificially generated.",
+        None,
+        True,
+    ),
+    (
+        "Article 50(4)",
+        "Deployer disclosure: deployers of deepfakes or AI-generated/manipulated "
+        "text published on matters of public interest must disclose that the "
+        "content has been artificially generated or manipulated.",
         None,
         True,
     ),
@@ -311,7 +320,7 @@ class ComplianceChecklist:
         return True
 
     def auto_populate_acgs_lite(self) -> None:
-        """Mark items that acgs-lite directly satisfies as compliant.
+        """Mark items covered by acgs-lite technical measures as compliant.
 
         Call this after attaching Article12Logger, TransparencyDisclosure,
         and HumanOversightGateway to auto-populate their evidence.
@@ -323,7 +332,7 @@ class ComplianceChecklist:
             "Article 12": ("acgs-lite Article12Logger — automatic tamper-evident JSONL logging"),
             "Article 13": ("acgs-lite TransparencyDisclosure — Article 13 system card generation"),
             "Article 14": ("acgs-lite HumanOversightGateway — configurable HITL approval gates"),
-            "Article 72": ("acgs-lite ComplianceChecklist — conformity assessment documentation"),
+            "Article 43": ("acgs-lite ComplianceChecklist — conformity assessment documentation"),
         }
         for article_ref, evidence in acgs_articles.items():
             self.mark_complete(article_ref, evidence=evidence)
@@ -370,7 +379,8 @@ class ComplianceChecklist:
             "gate_clear": self.is_gate_clear,
             "blocking_gaps": self.blocking_gaps,
             "items": [item.to_dict() for item in self._items],
-            "high_risk_deadline": "2026-08-02",
+            # Annex III stand-alone high-risk; deferred by 2026 Digital Omnibus (Council approval 2026-06-29)
+            "high_risk_deadline": "2027-12-02",
             "disclaimer": (
                 "Indicative self-assessment only. Not legal advice. "
                 "Consult qualified legal counsel for binding EU AI Act compliance opinions."

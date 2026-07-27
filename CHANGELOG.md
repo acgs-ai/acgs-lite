@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [2.11.0] - Unreleased
+
 ### Added
 
 - Added a release-proof demo script and a reproducible JSON artifact for fresh-venv verification.
@@ -14,6 +18,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Aligned release messaging with the currently published package state: `2.10.1` is the latest published package; `2.11.0` remains pending publication.
+
+### Fixed
+
+- Corrected stale EU AI Act high-risk deadline claims (previously "August 2, 2026") across the
+  library (`acgs_lite.eu_ai_act`, `acgs_lite.compliance.eu_ai_act`), the CLI (`acgs_lite.cli`,
+  `acgs_lite.compliance.__main__`, `acgs_lite.commands.eu_ai_act`), generated Markdown/PDF
+  reports (`acgs_lite.report`), project-scaffold templates (`acgs_lite.commands.init`), and docs
+  (`docs/compliance-2026.md`). Per the 2026 Digital Omnibus deferral (Council final approval
+  2026-06-29): Annex III stand-alone high-risk systems now must comply by 2027-12-02; Annex I
+  embedded-product high-risk systems by 2028-08-02.
+
+- Corrected numerous stale or fabricated regulatory citations and overclaiming language across
+  the compliance framework modules (`acgs_lite.compliance.*`) and their examples/docs, surfaced
+  by a multi-round adversarial legal-citation review. Highlights: EU AI Act Article 52 → 50 and
+  Article 72 → 43 renumbering with correct Article 50(1)-(4) transparency sub-paragraph mapping;
+  fundamental-rights impact assessment re-cited to Article 27(1) (was 26(9)); GPAI training-data
+  summary duty corrected to Article 53(1)(d) (a fabricated Article 53(2) DB-registration duty
+  removed); DORA article re-pairs across Articles 6, 8, 9, 12, 17, 19, 26, 28, and 30, including
+  the real TLPT citation (Article 26(1), not 25) and a corrected penalty regime description;
+  China AI Governance citation re-pairs across the Algorithm Recommendation, Deep Synthesis, and
+  Generative AI Interim Measures articles, and a corrected (non-fabricated) CAC filing trigger for
+  generative AI services; India DPDP Act section renumbering (notice, accuracy, security, breach,
+  erasure, DPO/grievance contact, and Significant Data Fiduciary obligations moved to their
+  correct sections); Canada AIDA and other framework `status` fields corrected to reflect real
+  enactment state; the true supported-framework count corrected to 20 everywhere it was
+  previously stated as 18 or 19; Singapore MAIGF item references reworded to a descriptive,
+  non-numbered form after the specific PDPC sub-clause numbering could not be independently
+  verified; and several silently-vacuous test assertions (empty-list `all()`/`any()` checks left
+  behind by earlier reference renames) hardened to fail loudly instead of passing without
+  exercising anything. Overclaiming language ("ensures," "mathematically proves," "immutable")
+  was also reworded to accurate, verifiable claims ("supports," "tamper-evident," "detects")
+  throughout the affected modules and documentation.
 
 ## [2.11.0] - Unreleased
 

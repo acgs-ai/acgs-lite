@@ -6,7 +6,7 @@ international baseline for responsible AI and have been endorsed by
 46 countries including all G7 and G20 members.
 
 Reference: OECD Recommendation on Artificial Intelligence (OECD/LEGAL/0449)
-Adopted: May 22, 2019 (updated November 2023)
+Adopted: May 22, 2019 (updated May 2024)
 Endorsed by 46 countries + the European Union.
 
 Constitutional Hash: 608508a9bd224290

@@ -21,7 +21,7 @@ Key obligations:
 - Automated decision-making transparency (PIPL Art.24)
 - Opt-out from algorithmic recommendations (Reg-1, Art.17)
 - Security assessment for generative AI (Reg-3, Art.17)
-- Report mechanism for illegal content (Reg-3, Art.14)
+- Report mechanism for illegal content (Reg-3, Art.15)
 
 Constitutional Hash: 608508a9bd224290
 """
@@ -43,11 +43,12 @@ from acgs_lite.compliance.base import (
 _CHINA_AI_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
     # Reg-1: Algorithm Recommendation Provisions (2022)
     (
-        "CN-ALG Art.4",
+        "CN-ALG Art.21",
         "Algorithmic recommendation service providers shall not use algorithms "
-        "to engage in unfair competition, disrupt market order, or discriminate "
-        "based on user characteristics.",
-        "Algorithm Recommendation Provisions, Article 4 (2022)",
+        "to implement differential or discriminatory treatment of users based "
+        "on their characteristics, including in transaction pricing, in "
+        "violation of fair trading principles.",
+        "Algorithm Recommendation Provisions, Article 21 (2022)",
         "GovernanceEngine — constitutional rules block discriminatory and anti-competitive actions",
         True,
     ),
@@ -62,16 +63,21 @@ _CHINA_AI_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
     ),
     (
         "CN-ALG Art.14",
-        "Do not use algorithm recommendations to push information that is "
-        "false, harmful, illegal, or contrary to socialist core values.",
+        "Algorithmic recommendation service providers shall not create false "
+        "user accounts, or manipulate user accounts to conduct false likes, "
+        "comments, reposts, or website/list rankings that mislead or defraud "
+        "users.",
         "Algorithm Recommendation Provisions, Article 14 (2022)",
         "GovernanceEngine — constitutional content filtering rules",
         True,
     ),
     (
         "CN-ALG Art.16",
-        "Label content generated or distributed by algorithmic recommendation "
-        "systems to ensure users are aware of the algorithmic involvement.",
+        "Algorithmic recommendation service providers shall conspicuously "
+        "inform users that the service uses algorithmic recommendation "
+        "technology, and shall publicize the basic principles, purpose "
+        "intent, and main operating mechanisms of the algorithm in an "
+        "appropriate manner.",
         "Algorithm Recommendation Provisions, Article 16 (2022)",
         "TransparencyDisclosure — algorithmic labelling in system card",
         True,
@@ -88,9 +94,10 @@ _CHINA_AI_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
     # Reg-2: Deep Synthesis Provisions (2023)
     (
         "CN-DS Art.14",
-        "Providers of deep synthesis services shall not generate content that "
-        "undermines national security, disrupts social order, or infringes "
-        "third-party rights.",
+        "Providers of deep synthesis services shall strengthen management of "
+        "training data used to generate deep synthesis content, verifying the "
+        "legality of data sources and establishing data security and personal "
+        "information protection mechanisms for training data.",
         "Deep Synthesis Provisions, Article 14 (2023)",
         "GovernanceEngine — constitutional rules block prohibited content generation classes",
         True,
@@ -105,11 +112,11 @@ _CHINA_AI_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         True,
     ),
     (
-        "CN-DS Art.18",
+        "CN-DS Art.7",
         "Implement content security management systems for deep synthesis "
         "services, including data security and personal information protection "
         "measures.",
-        "Deep Synthesis Provisions, Article 18 (2023)",
+        "Deep Synthesis Provisions, Article 7 (2023)",
         "GovernanceEngine — security controls and anomaly detection",
         True,
     ),
@@ -134,27 +141,28 @@ _CHINA_AI_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
     ),
     (
         "CN-GAI Art.9",
-        "Inform users clearly that they are interacting with a generative AI "
-        "system. Do not impersonate humans or disguise the AI nature of the "
-        "service.",
+        "Generative AI service providers shall bear the responsibilities of "
+        "an online content producer, and where personal information is "
+        "processed, the responsibilities of a personal information handler, "
+        "under applicable law.",
         "Generative AI Interim Measures, Article 9 (2023)",
-        "TransparencyDisclosure — AI system identification in user-facing notices",
+        None,
         True,
     ),
     (
-        "CN-GAI Art.14",
+        "CN-GAI Art.15",
         "Establish complaint and report mechanisms for users to flag "
         "illegal or non-compliant content; process complaints promptly "
         "and preserve records.",
-        "Generative AI Interim Measures, Article 14 (2023)",
+        "Generative AI Interim Measures, Article 15 (2023)",
         "HumanOversightGateway — complaint and report pathway with audit trail",
         True,
     ),
     (
         "CN-GAI Art.17",
-        "Generative AI services with significant public impact or more than "
-        "one million users must file a security assessment with the CAC "
-        "before public release.",
+        "Generative AI services with public opinion attributes or social "
+        "mobilization capability must file a security assessment and "
+        "complete algorithm filing with the CAC before public release.",
         "Generative AI Interim Measures, Article 17 (2023)",
         None,
         False,  # depends on scale/impact threshold
@@ -171,11 +179,11 @@ _CHINA_AI_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         True,
     ),
     (
-        "CN-PIPL Art.24(2)",
+        "CN-PIPL Art.24(3)",
         "For automated decisions with significant impact on personal rights "
         "or interests, provide individuals with the ability to request "
         "explanation and human review.",
-        "Personal Information Protection Law, Article 24(2) (2021)",
+        "Personal Information Protection Law, Article 24(3) (2021)",
         "TransparencyDisclosure — decision explanation fields and review pathway",
         True,
     ),
@@ -213,7 +221,7 @@ _CHINA_AI_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
 # acgs-lite auto-population map
 # ---------------------------------------------------------------------------
 _ACGS_LITE_MAP: dict[str, str] = {
-    "CN-ALG Art.4": (
+    "CN-ALG Art.21": (
         "acgs-lite GovernanceEngine — constitutional rules block discriminatory "
         "and anti-competitive action classes"
     ),
@@ -235,7 +243,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
     "CN-DS Art.17": (
         "acgs-lite TransparencyDisclosure — AI-generated content labelling fields in system card"
     ),
-    "CN-DS Art.18": (
+    "CN-DS Art.7": (
         "acgs-lite GovernanceEngine — security controls and anomaly detection "
         "for deep synthesis services"
     ),
@@ -243,18 +251,15 @@ _ACGS_LITE_MAP: dict[str, str] = {
         "acgs-lite GovernanceEngine — constitutional content prohibition rules "
         "block illegal generative content"
     ),
-    "CN-GAI Art.9": (
-        "acgs-lite TransparencyDisclosure — AI system identification in user-facing notices"
-    ),
-    "CN-GAI Art.14": (
+    "CN-GAI Art.15": (
         "acgs-lite HumanOversightGateway — complaint and report pathway "
         "with audit trail and escalation"
     ),
     "CN-PIPL Art.24": (
         "acgs-lite HumanOversightGateway — human review pathway for impactful "
-        "automated decisions satisfies PIPL opt-out and review obligations"
+        "automated decisions supports PIPL opt-out and review obligations"
     ),
-    "CN-PIPL Art.24(2)": (
+    "CN-PIPL Art.24(3)": (
         "acgs-lite TransparencyDisclosure — decision explanation fields and "
         "HumanOversightGateway review pathway"
     ),
@@ -282,7 +287,8 @@ class ChinaAIFramework:
     Status: All four instruments enacted and enforced by CAC.
 
     Penalties: PIPL — up to CNY 50 million or 5% of prior-year revenue;
-    Generative AI — up to CNY 1 million per infraction.
+    Generative AI Measures: no standalone fines; penalties under CSL/DSL/PIPL,
+    else warnings, orders to correct, or service suspension (Art 21).
 
     Usage::
 
