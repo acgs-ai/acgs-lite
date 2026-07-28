@@ -106,5 +106,5 @@ pip install acgs-lite
 Then paste the snippets above — no API key needed. To govern a real agent framework, see the
 [LangChain guide](../guides/langchain.md) or the [integrations overview](../integrations.md).
 
-If this is useful, [star the repo](https://github.com/dislovelhl/acgs-lite) — it materially
-helps early discovery — and tell us [what *your* agents should never do](https://github.com/dislovelhl/acgs-lite/discussions).
+If this is useful, [star the repo](https://github.com/acgs-ai/acgs-lite) — it materially
+helps early discovery — and tell us [what *your* agents should never do](https://github.com/acgs-ai/acgs-lite/discussions).

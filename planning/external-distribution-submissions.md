@@ -38,7 +38,7 @@ Unlike prompt-only guardrails, `acgs-lite` is aimed at deterministic pre-executi
 
 ## Submission links to use
 
-- Repo: https://github.com/dislovelhl/acgs-lite
+- Repo: https://github.com/acgs-ai/acgs-lite
 - PyPI: https://pypi.org/project/acgs-lite/
 - Quick proof path: `examples/basic_governance/`, `examples/audit_trail/`, `examples/mcp_agent_client.py`
 
@@ -54,7 +54,7 @@ drive-by post.
 **Canonical artifacts to link:**
 - Walkthrough: `docs/blog/what-got-blocked.md` (publish as a gist/blog or link the repo file)
 - LangChain guide: `docs/guides/langchain.md`
-- Repo: https://github.com/dislovelhl/acgs-lite · PyPI: https://pypi.org/project/acgs-lite/
+- Repo: https://github.com/acgs-ai/acgs-lite · PyPI: https://pypi.org/project/acgs-lite/
 
 ## OWASP GenAI Security Project — Slack `#project-top10-for-llm`
 

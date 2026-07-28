@@ -22,7 +22,7 @@ a judgment, just a reflection of current involvement.
 Anyone who opens an issue, a pull request, improves docs, answers a question in
 Discussions, or files a good bug report.
 
-- **How to start:** pick a [`good first issue`](https://github.com/dislovelhl/acgs-lite/labels/good%20first%20issue), comment that you're taking it, open a PR. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- **How to start:** pick a [`good first issue`](https://github.com/acgs-ai/acgs-lite/labels/good%20first%20issue), comment that you're taking it, open a PR. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - **No permissions needed** — fork and PR.
 
 ### 2. Reviewer
@@ -60,7 +60,7 @@ changes) is considered accepted.
   majority of maintainers; the founder breaks ties while the project remains founder-led.
 
 All non-trivial decisions happen in the open — GitHub Issues, PRs, or
-[Discussions](https://github.com/dislovelhl/acgs-lite/discussions) — so the reasoning is
+[Discussions](https://github.com/acgs-ai/acgs-lite/discussions) — so the reasoning is
 preserved for newcomers.
 
 ## Non-negotiables

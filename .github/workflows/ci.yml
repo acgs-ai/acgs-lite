@@ -135,6 +135,26 @@ jobs:
             -m "not slow and not benchmark and not e2e" \
             -q --tb=short
 
+  docs:
+    name: Docs build and link check
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # git-revision-date-localized needs history to date each page.
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install docs toolchain
+        run: pip install -e ".[docs]"
+      # --strict turns broken internal links and missing snippet includes into
+      # build failures, so a blank page can never ship to acgs.ai/docs again.
+      - name: Build documentation
+        run: python -m mkdocs build --strict
+      - name: Check documentation links
+        run: python3 scripts/check_links.py
+
   package:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:

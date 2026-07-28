@@ -112,10 +112,11 @@ agents-sync:
 	$(PYTHON) scripts/sync_agents.py
 
 # Workspace integrity without running the focused test gate: manifest↔index sync,
-# tool-registry liveness, and the make-free readiness summary.
+# tool-registry liveness, documentation link health, and the make-free readiness summary.
 validate:
 	$(PYTHON) scripts/sync_agents.py --check
 	$(PYTHON) scripts/validate_tools.py
+	$(PYTHON) scripts/check_links.py
 	$(TEST_ENV) $(PYTHON) scripts/agent_ready.py --no-run-tests
 
 # Comprehensive pre-handoff gate. Keep validate explicit so the public command

@@ -91,10 +91,11 @@ dev = [
 [project.urls]
 Homepage = "https://acgs.ai"
 Documentation = "https://acgs.ai/docs"
-Repository = "https://github.com/dislovelhl/acgs-lite"
-Issues = "https://github.com/dislovelhl/acgs-lite/issues"
-Changelog = "https://github.com/dislovelhl/acgs-lite/releases"
-PyPI = "https://pypi.org/project/acgs-lite/"
+Repository = "https://github.com/acgs-ai/acgs-lite"
+Issues = "https://github.com/acgs-ai/acgs-lite/issues"
+Changelog = "https://github.com/acgs-ai/acgs-lite/blob/main/CHANGELOG.md"
+"Release Notes" = "https://github.com/acgs-ai/acgs-lite/releases"
+Discussions = "https://github.com/acgs-ai/acgs-lite/discussions"
 
 [tool.setuptools.packages.find]
 where = ["src"]

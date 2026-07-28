@@ -1,0 +1,73 @@
+name: New Integration
+description: Claim and propose a new platform / framework integration adapter
+labels: ["integration", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for adding an integration! Open this issue **before** you start
+        coding so nobody duplicates your work.
+
+        Read [Contributing a New Integration](https://acgs.ai/docs/contributing-integrations)
+        first — every adapter follows the same five-step pattern, and
+        `src/acgs_lite/integrations/anthropic.py` is the reference implementation.
+  - type: input
+    id: platform
+    attributes:
+      label: Platform / framework
+      description: The library or service you want to govern.
+      placeholder: "PydanticAI"
+    validations:
+      required: true
+  - type: input
+    id: package
+    attributes:
+      label: PyPI package and minimum version
+      description: What goes into the optional-dependency extra in `pyproject.toml`.
+      placeholder: "pydantic-ai>=0.1"
+    validations:
+      required: true
+  - type: textarea
+    id: surface
+    attributes:
+      label: Governed surface
+      description: >
+        Which call(s) does the adapter wrap, and where do input validation,
+        the platform call, and output validation + audit sit?
+      placeholder: |
+        - Entry point: Agent.run() / Agent.run_stream()
+        - Input validation before: the model request is dispatched
+        - Output validation after: the final response is assembled
+    validations:
+      required: true
+  - type: dropdown
+    id: modes
+    attributes:
+      label: Execution modes to support
+      multiple: true
+      options:
+        - Sync
+        - Async
+        - Streaming
+        - Tool / function calling
+    validations:
+      required: true
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Governance invariants
+      description: Every adapter must hold these. Confirm you have read them.
+      options:
+        - label: The optional SDK is imported lazily, never at module import time
+          required: true
+        - label: MACI role separation is preserved (an agent never validates its own output)
+          required: true
+        - label: Validation is fail-closed — no side effect without an ALLOW decision
+          required: true
+  - type: input
+    id: claim
+    attributes:
+      label: Are you implementing this yourself?
+      placeholder: "Yes — expect a PR within ~2 weeks"
+    validations:
+      required: true

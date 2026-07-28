@@ -4,7 +4,7 @@ Covers:
 - assess subcommand: text / json / markdown output
 - assess subcommand: --risk-tier, --is-gpai, --framework, --jurisdiction flags
 - assess subcommand: --domain triggers risk-tier auto-inference in output
-- frameworks subcommand: lists all 18 frameworks
+- frameworks subcommand: lists all 20 frameworks
 - evidence subcommand: returns bundle
 - exit codes: 0 on success
 - --help doesn't crash
@@ -44,10 +44,14 @@ def run(argv: list[str]) -> tuple[int, str]:
 
 
 class TestFrameworksCmd:
-    def test_lists_18_frameworks(self):
+    def test_lists_every_registered_framework(self):
+        from acgs_lite.compliance.multi_framework import _FRAMEWORK_REGISTRY
+
         code, out = run(["frameworks"])
         assert code == 0
-        assert "19" in out
+        # The header renders the registry size; assert against the registry itself
+        # so the count can never silently drift out of sync with the CLI banner.
+        assert f"({len(_FRAMEWORK_REGISTRY)})" in out
 
     def test_lists_all_known_ids_in_text_output(self):
         code, out = run(["frameworks"])

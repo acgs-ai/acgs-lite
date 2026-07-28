@@ -8,10 +8,10 @@ Thank you for your interest in contributing to ACGS-Lite! We are building the fo
 
 ## 🚦 New here? Start in 15 minutes
 
-1. Find a [`good first issue`](https://github.com/dislovelhl/acgs-lite/labels/good%20first%20issue) — each is scoped to be completable by a newcomer in under a day, with full context in the issue body.
+1. Find a [`good first issue`](https://github.com/acgs-ai/acgs-lite/labels/good%20first%20issue) — each is scoped to be completable by a newcomer in under a day, with full context in the issue body.
 2. Comment on it to claim it (no need to ask permission for `good first issue`s — just say you're on it).
 3. Set up your environment (below), make the change with a test, open a PR.
-4. Have a question first? Open a [Discussion](https://github.com/dislovelhl/acgs-lite/discussions) — no question is too small.
+4. Have a question first? Open a [Discussion](https://github.com/acgs-ai/acgs-lite/discussions) — no question is too small.
 
 ## 🤝 Our commitment to you
 
@@ -41,7 +41,7 @@ ACGS-Lite is a Python 3.10+ project. We use `ruff` for linting and `pytest` for 
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/dislovelhl/acgs-lite.git
+git clone https://github.com/acgs-ai/acgs-lite.git
 cd acgs-lite
 
 # Option A — uv workspace (recommended, matches CI exactly)

@@ -2,7 +2,7 @@
 ACGS-Lite Compliance Report Generator
 ======================================
 Generates organized, human-readable compliance assessment reports for three
-representative AI system profiles across all 19 supported regulatory frameworks.
+representative AI system profiles across all 20 supported regulatory frameworks.
 
 No API keys required — all assessments run fully offline.
 
@@ -13,7 +13,7 @@ Output directory:
     examples/compliance_reports/reports/
     ├── INDEX.md                      — master summary table, all profiles
     ├── EXPLAINED.md                  — what every field and file type means
-    ├── all_frameworks/               — all 19 frameworks, general AI system
+    ├── all_frameworks/               — all 20 frameworks, general AI system
     │   ├── summary.txt
     │   ├── summary.md
     │   ├── summary.json
@@ -58,7 +58,7 @@ ALL_FRAMEWORK_IDS = sorted(_FRAMEWORK_REGISTRY.keys())
 PROFILES: list[dict] = [
     {
         "profile_id": "all_frameworks",
-        "label": "General AI System — All 19 Frameworks",
+        "label": "General AI System — All 20 Frameworks",
         "description": (
             "A general-purpose AI assistant with audit logging and human oversight enabled. "
             "Assessed against every framework in the registry to show the broadest possible "
@@ -258,7 +258,7 @@ def _build_index(
         f"Generated: {generated_at}",
         "",
         "This directory contains compliance assessment reports for AI systems assessed "
-        "against up to 19 regulatory frameworks using acgs-lite's built-in compliance engine.",
+        "against up to 20 regulatory frameworks using acgs-lite's built-in compliance engine.",
         "",
         "No API keys required. All assessments run offline.",
         "",
@@ -298,7 +298,7 @@ def _build_index(
     lines += [
         "---",
         "",
-        "## All 19 Supported Frameworks",
+        "## All 20 Supported Frameworks",
         "",
         "| ID | Framework | Region/Jurisdiction |",
         "|----|-----------|---------------------|",

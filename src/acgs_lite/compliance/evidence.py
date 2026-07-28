@@ -3,7 +3,7 @@
 Gathers runtime and filesystem signals that substantiate compliance claims.
 Collectors are lightweight — no network calls, no external services — and
 produce :class:`EvidenceItem` records that map directly to article references
-across all 18 supported frameworks.
+across all 20 supported frameworks.
 
 Three built-in collectors:
 
@@ -655,7 +655,7 @@ class ACGSLiteImportCollector:
     """Check which acgs-lite components are importable in the current runtime.
 
     Each importable component generates evidence items for the article
-    references it satisfies across all 18 frameworks.
+    references it satisfies across all 20 frameworks.
     """
 
     def collect(self, system_description: dict[str, Any]) -> list[EvidenceItem]:  # noqa: ARG002
