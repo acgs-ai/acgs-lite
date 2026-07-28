@@ -8,9 +8,9 @@ ACGS currently wraps **Anthropic, OpenAI, LangChain, LiteLLM, Google GenAI, Llam
 
 ## Before You Start
 
-1. Open a [New Integration issue](https://github.com/dislovelhl/acgs-lite/issues/new?template=new_integration.yml) to claim the platform — avoids duplicate work
+1. Open a [New Integration issue](https://github.com/acgs-ai/acgs-lite/issues/new?template=new_integration.yml) to claim the platform — avoids duplicate work
 2. Read `src/acgs_lite/integrations/anthropic.py` — it's the reference implementation with inline comments
-3. Join `#integrations` on Discord if you want live help
+3. Need live help? Ask in [Discussions](https://github.com/acgs-ai/acgs-lite/discussions) — the **Q&A** category is watched by maintainers
 
 ---
 
@@ -204,5 +204,5 @@ Add a row to the integrations table in `docs/integrations.md`:
 ## Getting Help
 
 - Open a draft PR early — we give feedback before the code is complete
-- Ask in `#integrations` on Discord
+- Ask in [Discussions](https://github.com/acgs-ai/acgs-lite/discussions) under **Q&A**
 - Look at `anthropic.py` for streaming support, `langchain.py` for chain wrapping

@@ -1,7 +1,7 @@
 # Contributing
 
 Full contribution guidelines are in
-[CONTRIBUTING.md](https://github.com/dislovelhl/acgs-lite/blob/main/CONTRIBUTING.md).
+[CONTRIBUTING.md](https://github.com/acgs-ai/acgs-lite/blob/main/CONTRIBUTING.md).
 
 ## Quick Summary
 
@@ -34,4 +34,4 @@ make test-cov      # with coverage report
 ## License
 
 ACGS is licensed under Apache-2.0. See the
-[LICENSE](https://github.com/dislovelhl/acgs-lite/blob/main/LICENSE) for details.
+[LICENSE](https://github.com/acgs-ai/acgs-lite/blob/main/LICENSE) for details.

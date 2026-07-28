@@ -7,7 +7,7 @@
 > contract as the load-bearing surface; individual framework class names may
 > still be renamed before they are added to `__all__`.
 
-ACGS covers 19 regulatory frameworks through a unified `ComplianceFramework`
+ACGS covers 20 regulatory frameworks through a unified `ComplianceFramework`
 protocol. Each framework maps rules to ACGS governance features and produces
 structured assessment reports. Frameworks are dispatched via the
 `MultiFrameworkAssessor` registry and addressed by string ID.

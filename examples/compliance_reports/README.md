@@ -1,6 +1,6 @@
 # Compliance Reports
 
-Generates organized, human-readable compliance reports for AI systems across all 19
+Generates organized, human-readable compliance reports for AI systems across all 20
 regulatory frameworks supported by acgs-lite's built-in compliance engine.
 
 ```bash
@@ -17,7 +17,7 @@ No API keys required. All assessments run fully offline.
 reports/
 ├── INDEX.md              — master summary: all profiles, scores, and file map
 ├── EXPLAINED.md          — field-by-field reference for every report format
-├── all_frameworks/       — 19-framework sweep, general AI system
+├── all_frameworks/       — 20-framework sweep, general AI system
 │   ├── summary.txt       — plain-text executive summary (auditors, legal review)
 │   ├── summary.md        — Markdown with tables and status badges
 │   ├── summary.json      — full machine-readable report (CI/CD, dashboards)
@@ -26,7 +26,7 @@ reports/
 │       ├── eu_ai_act.json
 │       ├── nist_ai_rmf.md
 │       ├── nist_ai_rmf.json
-│       └── … (19 frameworks total)
+│       └── … (20 frameworks total)
 ├── healthcare/           — clinical decision-support AI (HIPAA, GDPR, NIST…)
 │   ├── summary.txt / .md / .json
 │   └── by_framework/
@@ -39,7 +39,8 @@ reports/
 ```
 
 > The `reports/` directory is gitignored. Re-run `run.py` to regenerate.
-> See [reports/EXPLAINED.md](reports/EXPLAINED.md) for full field definitions.
+> `run.py` also writes `reports/EXPLAINED.md`, which defines every field —
+> read it after the first run.
 
 ---
 
@@ -47,7 +48,7 @@ reports/
 
 | Profile | Domain | Frameworks |
 |---------|--------|-----------|
-| `all_frameworks` | General-purpose AI | All 19 |
+| `all_frameworks` | General-purpose AI | All 20 |
 | `healthcare` | Clinical decision support | HIPAA, GDPR, NIST AI RMF, ISO 42001, OECD AI |
 | `financial` | Fraud detection | DORA, SOC 2, NIST AI RMF, US Fair Lending, OECD AI, CCPA/CPRA |
 | `hr_recruitment` | CV screening (EU high-risk) | EU AI Act, GDPR, ISO 42001, OECD AI |

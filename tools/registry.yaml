@@ -195,6 +195,17 @@ tools:
     validation: python3 scripts/agent_ready.py --no-run-tests
     owner_module: scripts/agent_ready.py
 
+  - name: check-links-script
+    purpose: Offline documentation link check — dead relative links, dangling anchors, stale repo owners.
+    command: python3 scripts/check_links.py
+    env: []
+    inputs: ["*.md", "*.toml", "*.yml", "*.py"]
+    outputs: ["list of link problems; non-zero exit if any"]
+    failure_modes: ["a documented path was moved or deleted", "a repository URL still points at a former owner"]
+    retry: "Deterministic; never touches the network."
+    validation: python3 scripts/check_links.py
+    owner_module: scripts/check_links.py
+
   - name: governance-regression-script
     purpose: Governance-regression check used by the test-governance gate.
     command: python3 scripts/run_governance_regression.py --check

@@ -1,6 +1,6 @@
 # acgs-lite-rust
 
-Optional Rust accelerator for the [acgs-lite](https://github.com/dislovelhl/acgs-lite)
+Optional Rust accelerator for the [acgs-lite](https://github.com/acgs-ai/acgs-lite)
 governance engine matcher, built with [PyO3](https://pyo3.rs/) and
 [maturin](https://www.maturin.rs/).
 

@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Aligned release messaging with the currently published package state: `2.10.1` is the latest published package; `2.11.0` remains pending publication.
 
-## [2.11.0] - Unreleased
+## 2.11.0 - Unreleased
 
 ### Security
 
@@ -136,7 +136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.gitignore` hardened: `.agents/`, `.bt/`, `.env`, `.env.*` (excluding `.env.example`),
   and root-level `/*.pdf` assessment outputs are now excluded.
 
-## [2.10.0] - 2026-04-23
+## 2.10.0 - 2026-04-23
 
 ### Breaking Changes
 
@@ -267,7 +267,7 @@ Stability table in the README for the stability tier of each subsystem.
 - `StreamingValidator(blocking_severities=None)` — default will change in 3.0.
 - `GovernedAgent(maci_role=<role>, enforce_maci=False)` — default will flip in 3.0.
 
-## [2.8.0] - 2026-04-15
+## 2.8.0 - 2026-04-15
 
 ### Added
 
@@ -292,7 +292,7 @@ Stability table in the README for the stability tier of each subsystem.
 - **Editable install path**: Updated `.pth` file to point to `src/` in the standalone repo
   rather than the old monorepo location.
 
-## [2.7.1] - 2026-04-09
+## 2.7.1 - 2026-04-09
 
 ### Added
 - **Constitutional swarm mesh settlement durability**: `SQLiteSettlementStore` provides a
@@ -407,7 +407,7 @@ Stability table in the README for the stability tier of each subsystem.
 - bandit security warnings in example scripts (pre-existing)
 - LaTeX paper PDF build in release workflow (requires full TeX Live; non-blocking)
 
-## [2026.1.0] - 2026-04-05
+## 2026.1.0 - 2026-04-05
 
 ### Added
 - **2026 Governance Frameworks**: Native support for EU AI Act, Colorado SB 205, and Texas TRAIGA.
@@ -423,7 +423,7 @@ Stability table in the README for the stability tier of each subsystem.
 - **Audit Backend**: Optimized `JSONLAuditBackend` with cryptographic chaining (SHA-256).
 - **Integrations**: Updated Anthropic, OpenAI, and LangChain adapters for 2026 model release lines.
 
-## [2.5.2] - 2026-04-05
+## 2.5.2 - 2026-04-05
 
 ### Added
 - Open-source distribution scaffolding: MkDocs documentation site, CONTRIBUTING.md,
@@ -434,7 +434,7 @@ Stability table in the README for the stability tier of each subsystem.
 - Updated all package URLs to individual GitHub repositories
 - Pinned Node 22 and uv 0.10.9 in eval-rules and GitLab CI
 
-## [2.5.1] - 2026-04-04
+## 2.5.1 - 2026-04-04
 
 ### Added
 - `to_decision_record()` for cross-layer governance evaluation
@@ -443,7 +443,7 @@ Stability table in the README for the stability tier of each subsystem.
 ### Fixed
 - CI test failures in tenant context blocking, OIDC mocking, and audit chain validation
 
-## [2.5.0] - 2026-04-03
+## 2.5.0 - 2026-04-03
 
 ### Added
 - Self-evaluation architecture (Phases 0-3): decision schema, LLM judge, shadow cascade
@@ -461,7 +461,7 @@ Stability table in the README for the stability tier of each subsystem.
 - Upgraded MACI enforcer with risk-level-based escalation paths
 - Improved constitutional validation performance with memoization
 
-## [2.4.0] - 2026-03-15
+## 2.4.0 - 2026-03-15
 
 ### Added
 - GitLab CI/CD integration with merge request governance bot
@@ -474,7 +474,7 @@ Stability table in the README for the stability tier of each subsystem.
 ### Changed
 - Expanded compliance coverage to HIPAA + AI, GDPR Art. 22, ECOA/FCRA, NYC LL 144
 
-## [2.3.0] - 2026-02-20
+## 2.3.0 - 2026-02-20
 
 ### Added
 - MCP Server integration (`acgs-lite[mcp]`)
@@ -486,7 +486,7 @@ Stability table in the README for the stability tier of each subsystem.
 ### Changed
 - Improved audit trail with SHA-256 chain verification
 
-## [2.2.0] - 2026-01-15
+## 2.2.0 - 2026-01-15
 
 ### Added
 - LangChain integration (`GovernanceRunnable`)
@@ -494,7 +494,7 @@ Stability table in the README for the stability tier of each subsystem.
 - `ConstitutionBuilder` fluent API
 - CLI: `acgs init`, `acgs lint`, `acgs test`
 
-## [2.1.0] - 2025-12-01
+## 2.1.0 - 2025-12-01
 
 ### Added
 - OpenAI integration adapter
@@ -502,7 +502,7 @@ Stability table in the README for the stability tier of each subsystem.
 - YAML constitution loading
 - Severity levels (CRITICAL, HIGH, MEDIUM, LOW)
 
-## [2.0.0] - 2025-10-15
+## 2.0.0 - 2025-10-15
 
 ### Added
 - Initial public release
@@ -513,11 +513,10 @@ Stability table in the README for the stability tier of each subsystem.
 - CLI tool (`acgs` / `acgs-lite`)
 - Keyword-based and regex rule matching
 
-[2.5.2]: https://github.com/dislovelhl/acgs-lite/compare/v2.5.1...v2.5.2
-[2.5.1]: https://github.com/dislovelhl/acgs-lite/compare/v2.5.0...v2.5.1
-[2.5.0]: https://github.com/dislovelhl/acgs-lite/compare/v2.4.0...v2.5.0
-[2.4.0]: https://github.com/dislovelhl/acgs-lite/compare/v2.3.0...v2.4.0
-[2.3.0]: https://github.com/dislovelhl/acgs-lite/compare/v2.2.0...v2.3.0
-[2.2.0]: https://github.com/dislovelhl/acgs-lite/compare/v2.1.0...v2.2.0
-[2.1.0]: https://github.com/dislovelhl/acgs-lite/compare/v2.0.0...v2.1.0
-[2.0.0]: https://github.com/dislovelhl/acgs-lite/releases/tag/v2.0.0
+[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v2.10.1...HEAD
+[2.10.1]: https://github.com/acgs-ai/acgs-lite/compare/v2.9.0...v2.10.1
+[2.9.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.8.1...v2.9.0
+[2.8.1]: https://github.com/acgs-ai/acgs-lite/compare/v2.7.2...v2.8.1
+[2.7.2]: https://github.com/acgs-ai/acgs-lite/compare/v2.7.0...v2.7.2
+[2.7.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.6.0...v2.7.0
+[2.6.0]: https://github.com/acgs-ai/acgs-lite/releases/tag/v2.6.0

@@ -230,7 +230,7 @@ def validate_license_key(key: str, secret: str | None = None) -> LicenseInfo:
     # Check expiry
     expiry = struct.unpack(">I", expiry_b)[0]
     if expiry > 0 and time.time() > expiry:
-        raise LicenseExpiredError("License key has expired. Renew at https://acgs2.ai/pricing")
+        raise LicenseExpiredError("License key has expired. Renew at https://acgs.ai/pricing")
 
     return LicenseInfo(tier=decoded_tier, expiry=expiry or None, key=key)
 
@@ -300,13 +300,13 @@ class LicenseManager:
         if info.tier == Tier.FREE:
             raise LicenseError(
                 "EU AI Act compliance requires acgs-lite Pro. "
-                "Get started at https://acgs2.ai/pricing",
+                "Get started at https://acgs.ai/pricing",
                 required_tier=tier,
             )
 
         raise LicenseError(
             f"{feature or 'This feature'} requires acgs-lite {tier.name}. "
             f"You are on the {info.tier.name} plan.\n\n"
-            f"Upgrade at https://acgs2.ai/pricing",
+            "Upgrade at https://acgs.ai/pricing",
             required_tier=tier,
         )

@@ -143,4 +143,4 @@ Prefer the parent repo `CLAUDE.md` and `.claude/rules/` as the authoritative rou
 - Setup date: 2026-04-30
 - MCP registered: yes (user scope, `/home/martin/.bun/bin/gbrain serve`)
 - Memory sync: off (gstack-brain-sync declined — local-only)
-- Current repo policy: read-write (origin: github.com/dislovelhl/acgs-lite)
+- Current repo policy: read-write (origin: github.com/acgs-ai/acgs-lite)

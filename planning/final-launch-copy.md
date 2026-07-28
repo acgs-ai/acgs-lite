@@ -36,7 +36,7 @@ The fastest proof path in the repo is:
 - inspect the audit trail example
 - try the MCP path if you want shared governance infrastructure
 
-Repo: https://github.com/dislovelhl/acgs-lite
+Repo: https://github.com/acgs-ai/acgs-lite
 PyPI: https://pypi.org/project/acgs-lite/
 
 I’d especially love feedback on:
@@ -69,7 +69,7 @@ There’s a simple no-key proof path in the repo:
 - see a safe request pass and unsafe requests get blocked
 - then inspect the audit trail and MCP examples
 
-Repo: https://github.com/dislovelhl/acgs-lite
+Repo: https://github.com/acgs-ai/acgs-lite
 PyPI: https://pypi.org/project/acgs-lite/
 
 If you build agent infrastructure, I’d love blunt feedback on:
@@ -97,7 +97,7 @@ The wedge is not better prompting. It is deterministic runtime governance:
 
 The repo includes a basic blocked-action demo plus an MCP path for shared governance infrastructure.
 
-Repo: https://github.com/dislovelhl/acgs-lite
+Repo: https://github.com/acgs-ai/acgs-lite
 PyPI: https://pypi.org/project/acgs-lite/
 
 Curious whether people here find the MCP/shared-governance angle useful, or whether this should stay framed more broadly as agent runtime policy enforcement.
@@ -115,7 +115,7 @@ It’s a Python governance layer for AI agents:
 
 Runnable demos, no-key proof path, MCP support.
 
-GitHub: https://github.com/dislovelhl/acgs-lite
+GitHub: https://github.com/acgs-ai/acgs-lite
 PyPI: https://pypi.org/project/acgs-lite/
 
 ---
