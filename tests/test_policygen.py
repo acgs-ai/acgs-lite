@@ -130,6 +130,76 @@ class TestPreContextBuilder:
         assert not PreContextBuilder("X", environment="staging").build().is_production()
 
 
+class TestPreContextFromDict:
+    def test_round_trip_fully_populated(self) -> None:
+        pc = (
+            PreContextBuilder("ACME Health", environment="production")
+            .with_objectives("Ship safely")
+            .add_risk_area("pii", "secrets")
+            .add_framework("hipaa")
+            .add_custom_requirement("Never fabricate diagnoses.")
+            .with_seed_keywords("triage", "diagnosis")
+            .with_risk_level(DomainRiskLevel.HIGH)
+            .metadata(owner="team-x")
+            .build()
+        )
+        restored = PreContext.from_dict(pc.to_dict())
+        assert restored == pc
+        assert restored.to_dict() == pc.to_dict()
+
+    def test_round_trip_defaults_only(self) -> None:
+        pc = PreContext(domain="X")
+        restored = PreContext.from_dict(pc.to_dict())
+        assert restored == pc
+        assert restored.to_dict() == pc.to_dict()
+
+    def test_sequence_fields_restored_as_tuples(self) -> None:
+        restored = PreContext.from_dict(
+            {"domain": "X", "objectives": ["a", "b"], "risk_areas": ["pii"]}
+        )
+        assert restored.objectives == ("a", "b")
+        assert restored.risk_areas == ("pii",)
+
+    def test_missing_optional_keys_use_dataclass_defaults(self) -> None:
+        restored = PreContext.from_dict({"domain": "X"})
+        assert restored == PreContext(domain="X")
+
+    def test_missing_required_domain_raises(self) -> None:
+        with pytest.raises(ValueError, match="domain"):
+            PreContext.from_dict({"description": "no domain here"})
+
+    def test_unknown_key_raises(self) -> None:
+        with pytest.raises(ValueError, match="bogus_key"):
+            PreContext.from_dict({"domain": "X", "bogus_key": 1})
+
+    def test_bad_risk_level_raises_with_valid_values_listed(self) -> None:
+        with pytest.raises(ValueError, match="not-a-real-level") as exc_info:
+            PreContext.from_dict({"domain": "X", "risk_level": "not-a-real-level"})
+        message = str(exc_info.value)
+        for level in DomainRiskLevel.__members__.values():
+            assert level.value in message
+
+    @pytest.mark.parametrize(
+        "field",
+        ["objectives", "risk_areas", "frameworks", "custom_requirements", "seed_keywords"],
+    )
+    def test_scalar_string_for_sequence_field_raises(self, field: str) -> None:
+        with pytest.raises(ValueError, match=field):
+            PreContext.from_dict({"domain": "X", field: "pii"})
+
+    @pytest.mark.parametrize(
+        "field",
+        ["objectives", "risk_areas", "frameworks", "custom_requirements", "seed_keywords"],
+    )
+    def test_non_sequence_for_sequence_field_raises(self, field: str) -> None:
+        with pytest.raises(ValueError, match=field):
+            PreContext.from_dict({"domain": "X", field: 123})
+
+    def test_non_mapping_metadata_raises(self) -> None:
+        with pytest.raises(ValueError, match="metadata"):
+            PreContext.from_dict({"domain": "X", "metadata": ["not", "a", "mapping"]})
+
+
 # -- PolicyResearcher -------------------------------------------------------------
 
 
@@ -166,6 +236,15 @@ class TestPolicyResearcher:
         report = PolicyResearcher().research(pc)
         assert report.requirements == ()
         assert any("nonsense-area" in g for g in report.gaps)
+
+    def test_gap_compose_with_unknown_and_known_areas(self) -> None:
+        pc = PreContext(domain="X", risk_areas=("pii", "nonsense-area"))
+        report = PolicyResearcher().research(pc)
+        # Should have exactly one requirement from PII
+        pii_reqs = [r for r in report.requirements if r.source == "risk-area:pii"]
+        assert len(pii_reqs) == 1
+        # Should have a gap starting with "risk-area:nonsense-area" (stable prefix only)
+        assert any(g.startswith("risk-area:nonsense-area") for g in report.gaps)
 
     def test_dedupe_merges_identical_text(self) -> None:
         # Same canonical area added twice (alias dedupe happens at build, so inject
@@ -416,6 +495,11 @@ class TestAdaptiveGenerator:
         # The written file loads as a constitution.
         loaded = acgs_lite.Constitution.from_yaml(str(out))
         assert len(loaded.rules) >= 1
+        # Provenance round-trip: ensure loaded rules have same provenance as original
+        policy = AdaptivePolicyGenerator().generate(_high_risk_prod())
+        assert {r.id: list(r.provenance) for r in loaded.rules} == {
+            r.id: list(r.provenance) for r in policy.constitution.rules
+        }
 
 
 # -- public API -------------------------------------------------------------------
