@@ -185,6 +185,64 @@ class PreContext:
             "metadata": dict(self.metadata),
         }
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> PreContext:
+        """Inverse of :meth:`to_dict`.
+
+        Deterministic and strict (fail-closed, as befits a governance artifact):
+        unknown top-level keys raise ``ValueError`` naming them, a missing
+        ``domain`` raises ``ValueError``, and an unrecognized ``risk_level``
+        raises ``ValueError`` listing the valid values. Sequence fields are
+        restored as tuples to match the dataclass field types; keys absent from
+        ``data`` fall back to the dataclass defaults.
+        """
+        known_keys = {
+            "domain",
+            "description",
+            "objectives",
+            "risk_areas",
+            "frameworks",
+            "environment",
+            "risk_level",
+            "custom_requirements",
+            "seed_keywords",
+            "metadata",
+        }
+        unknown_keys = set(data.keys()) - known_keys
+        if unknown_keys:
+            raise ValueError(f"Unknown PreContext key(s): {', '.join(sorted(unknown_keys))}")
+        if "domain" not in data:
+            raise ValueError("Missing required PreContext key: 'domain'")
+
+        kwargs: dict[str, Any] = {"domain": data["domain"]}
+        if "description" in data:
+            kwargs["description"] = data["description"]
+        if "objectives" in data:
+            kwargs["objectives"] = tuple(data["objectives"])
+        if "risk_areas" in data:
+            kwargs["risk_areas"] = tuple(data["risk_areas"])
+        if "frameworks" in data:
+            kwargs["frameworks"] = tuple(data["frameworks"])
+        if "environment" in data:
+            kwargs["environment"] = data["environment"]
+        if "risk_level" in data:
+            raw_risk_level = data["risk_level"]
+            try:
+                kwargs["risk_level"] = DomainRiskLevel(raw_risk_level)
+            except ValueError as exc:
+                valid_values = ", ".join(level.value for level in DomainRiskLevel)
+                raise ValueError(
+                    f"Invalid risk_level {raw_risk_level!r}; valid values: {valid_values}"
+                ) from exc
+        if "custom_requirements" in data:
+            kwargs["custom_requirements"] = tuple(data["custom_requirements"])
+        if "seed_keywords" in data:
+            kwargs["seed_keywords"] = tuple(data["seed_keywords"])
+        if "metadata" in data:
+            kwargs["metadata"] = dict(data["metadata"])
+
+        return cls(**kwargs)
+
 
 class PreContextBuilder:
     """Robustly assemble a :class:`PreContext`, with deterministic enrichment.

@@ -130,6 +130,56 @@ class TestPreContextBuilder:
         assert not PreContextBuilder("X", environment="staging").build().is_production()
 
 
+class TestPreContextFromDict:
+    def test_round_trip_fully_populated(self) -> None:
+        pc = (
+            PreContextBuilder("ACME Health", environment="production")
+            .with_objectives("Ship safely")
+            .add_risk_area("pii", "secrets")
+            .add_framework("hipaa")
+            .add_custom_requirement("Never fabricate diagnoses.")
+            .with_seed_keywords("triage", "diagnosis")
+            .with_risk_level(DomainRiskLevel.HIGH)
+            .metadata(owner="team-x")
+            .build()
+        )
+        restored = PreContext.from_dict(pc.to_dict())
+        assert restored == pc
+        assert restored.to_dict() == pc.to_dict()
+
+    def test_round_trip_defaults_only(self) -> None:
+        pc = PreContext(domain="X")
+        restored = PreContext.from_dict(pc.to_dict())
+        assert restored == pc
+        assert restored.to_dict() == pc.to_dict()
+
+    def test_sequence_fields_restored_as_tuples(self) -> None:
+        restored = PreContext.from_dict(
+            {"domain": "X", "objectives": ["a", "b"], "risk_areas": ["pii"]}
+        )
+        assert restored.objectives == ("a", "b")
+        assert restored.risk_areas == ("pii",)
+
+    def test_missing_optional_keys_use_dataclass_defaults(self) -> None:
+        restored = PreContext.from_dict({"domain": "X"})
+        assert restored == PreContext(domain="X")
+
+    def test_missing_required_domain_raises(self) -> None:
+        with pytest.raises(ValueError, match="domain"):
+            PreContext.from_dict({"description": "no domain here"})
+
+    def test_unknown_key_raises(self) -> None:
+        with pytest.raises(ValueError, match="bogus_key"):
+            PreContext.from_dict({"domain": "X", "bogus_key": 1})
+
+    def test_bad_risk_level_raises_with_valid_values_listed(self) -> None:
+        with pytest.raises(ValueError, match="not-a-real-level") as exc_info:
+            PreContext.from_dict({"domain": "X", "risk_level": "not-a-real-level"})
+        message = str(exc_info.value)
+        for level in DomainRiskLevel:
+            assert level.value in message
+
+
 # -- PolicyResearcher -------------------------------------------------------------
 
 
