@@ -179,6 +179,26 @@ class TestPreContextFromDict:
         for level in DomainRiskLevel:
             assert level.value in message
 
+    @pytest.mark.parametrize(
+        "field",
+        ["objectives", "risk_areas", "frameworks", "custom_requirements", "seed_keywords"],
+    )
+    def test_scalar_string_for_sequence_field_raises(self, field: str) -> None:
+        with pytest.raises(ValueError, match=field):
+            PreContext.from_dict({"domain": "X", field: "pii"})
+
+    @pytest.mark.parametrize(
+        "field",
+        ["objectives", "risk_areas", "frameworks", "custom_requirements", "seed_keywords"],
+    )
+    def test_non_sequence_for_sequence_field_raises(self, field: str) -> None:
+        with pytest.raises(ValueError, match=field):
+            PreContext.from_dict({"domain": "X", field: 123})
+
+    def test_non_mapping_metadata_raises(self) -> None:
+        with pytest.raises(ValueError, match="metadata"):
+            PreContext.from_dict({"domain": "X", "metadata": ["not", "a", "mapping"]})
+
 
 # -- PolicyResearcher -------------------------------------------------------------
 

@@ -230,14 +230,15 @@ tools:
     owner_module: src/acgs_lite/commands/capabilities.py
 
   - name: policygen
-    purpose: Generate adaptive governance policies from a pre-context brief.
+    purpose: Generate adaptive governance policies from a pre-context brief. Offline and
+      deterministic by default (no LLM, no network call).
     command: acgs policygen generate --brief <brief.json> --out <out.yaml>
-    env: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
     inputs: ["brief JSON file (PreContext.to_dict format)", "--out output path"]
     outputs: ["constitution YAML file (DRAFT artifact)"]
-    failure_modes: ["invalid JSON brief", "malformed pre-context", "LLM generation error",
-      "file I/O error"]
-    retry: "Transient LLM failures are safe to retry; file I/O errors require
+    failure_modes: ["invalid JSON brief", "malformed pre-context",
+      "generated policy did not round-trip (hash mismatch)", "file I/O error"]
+    retry: "The round-trip/validation failure is fail-closed and must not be blindly
+      retried; inspect the brief and generated YAML. File I/O errors require
       investigation."
     validation: make lint
     owner_module: src/acgs_lite/policygen
@@ -245,17 +246,19 @@ tools:
   - name: policygen-scan
     purpose: Statically scan a project's dependency manifests for governance risk-area
       evidence and optionally chain into policy generation. Evidence only -- never
-      activates or grants any capability.
+      activates or grants any capability. Offline and deterministic by default (no LLM,
+      no network call).
     command: acgs policygen scan <path> [--brief-out <brief.json>] [--generate --out <out.yaml>]
-    env: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
     inputs: ["project root directory containing pyproject.toml, requirements.txt, and/or
       package.json"]
     outputs: ["ManifestScanResult JSON report to stdout (DRAFT evidence artifact)",
       "optional PreContext brief JSON (--brief-out)",
       "optional constitution YAML file (--generate --out, DRAFT artifact)"]
     failure_modes: ["scan root is not a directory", "no supported manifest files found",
-      "malformed manifest file", "LLM generation error (with --generate)", "file I/O error"]
-    retry: "Transient LLM failures (with --generate) are safe to retry; file I/O and
-      malformed-manifest errors require investigation."
+      "malformed manifest file", "generated policy did not round-trip (hash mismatch,
+      with --generate)", "file I/O error"]
+    retry: "The round-trip/validation failure is fail-closed and must not be blindly
+      retried; inspect the manifest and generated YAML. File I/O and malformed-manifest
+      errors require investigation."
     validation: make lint
     owner_module: src/acgs_lite/policygen/manifest.py

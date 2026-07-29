@@ -65,7 +65,7 @@ from `src/acgs_lite/policygen/context.py`:
   "frameworks": ["GDPR", "DSA"],
   "risk_areas": ["data-retention", "transparency"],
   "risk_level": "high",
-  "custom_requirements": "..."
+  "custom_requirements": ["..."]
 }
 ```
 
@@ -75,14 +75,8 @@ optional and fall back to defaults if omitted. Unknown keys are rejected. See
 
 ### 2. Generate the policy
 
-Set environment variables for the LLM providers:
-
-```bash
-export OPENAI_API_KEY=<your-key>
-export ANTHROPIC_API_KEY=<your-key>
-```
-
-Run the generator:
+The generator is offline and deterministic by default (`llm_provider` defaults to `None`
+-- no network call, no LLM, no API keys required):
 
 ```bash
 acgs policygen generate --brief brief.json --out policy.constitution.yaml
@@ -98,15 +92,22 @@ It cannot be activated until submitted for human review and approval through the
 lifecycle API. This is the MACI (Monitoring, Accounting, Consistency, Integrity)
 separation requirement — policy decisions require explicit governance approval.
 
-To submit for review:
+The lifecycle CLI tracks a policy by a free-text `policy_id` -- use the output path (e.g.
+`policy.constitution.yaml`) or another stable identifier for the constitution. The
+`review` transition is gated on 2 recorded approvals:
 
 ```bash
-acgs constitution lifecycle submit --constitution policy.constitution.yaml \
-  --reviewer human-reviewer@org.io
+acgs lifecycle register policy.constitution.yaml --actor reviewer-1@org.io
+acgs lifecycle approve policy.constitution.yaml --actor reviewer-1@org.io
+acgs lifecycle approve policy.constitution.yaml --actor reviewer-2@org.io
+acgs lifecycle review policy.constitution.yaml --actor reviewer-1@org.io
 ```
 
-The lifecycle system enforces state transitions (DRAFT → IN_REVIEW → APPROVED), and only
-approved constitutions may be activated.
+The lifecycle system enforces state transitions (draft → review → staged → active), and
+only a policy that has cleared the lint-gate, test-gate, and blast-radius gates may be
+activated. See `acgs lifecycle --help` for the full action set (`register`, `review`,
+`stage`, `activate`, `deprecate`, `archive`, `approve`, `lint-gate`, `test-gate`,
+`status`, `audit`, `summary`).
 
 ## Verify
 
@@ -115,9 +116,9 @@ Check that:
    ```bash
    python3 -c "import yaml; yaml.safe_load(open('policy.constitution.yaml'))"
    ```
-2. The lifecycle submission was recorded:
+2. The lifecycle transition was recorded:
    ```bash
-   acgs constitution lifecycle status --constitution policy.constitution.yaml
+   acgs lifecycle status policy.constitution.yaml
    ```
 3. The policy output contains required sections (rules, rationale, metadata).
 
@@ -128,7 +129,7 @@ Check that:
 | `invalid JSON in brief file` | Malformed JSON | Run `jq . brief.json` |
 | `brief file is not JSON object` | Valid JSON but not object | Wrap in `{}` |
 | `malformed pre-context` | Missing/invalid field | Check PreContext schema |
-| `failed to generate policy` | LLM error or rate limit | Verify API keys |
+| `failed to generate policy` | Round-trip/validation failure (regenerated constitution hash did not match) or a malformed brief -- the generator is offline and deterministic by default, this is not an LLM/network error | Inspect the brief and generated YAML; this failure is fail-closed and must not be blindly retried |
 | `could not write output` | Permission or path error | Verify directory writable |
 | Lifecycle submission rejected | Policy violates constraint | Review lifecycle feedback |
 | `scan root is not a directory` | `<path>` doesn't exist or isn't a dir | Verify the path |

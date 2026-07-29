@@ -8,7 +8,7 @@ Scope: extends the manifest capability adapter shipped in
 `src/acgs_lite/policygen/manifest.py` and the `acgs policygen scan` verb
 (`src/acgs_lite/commands/policygen.py`). See
 [Agent-Native Adaptation Plan](agent-native-adaptation-plan.md) for the parity
-work this builds on, and the [Policygen runbook](../tools/runbooks/policygen.md)
+work this builds on, and the `tools/runbooks/policygen.md` runbook
 for the operator-facing `scan` / `generate` / lifecycle-submit flow this design
 extends without changing.
 
@@ -408,7 +408,7 @@ read-only I/O path.
 
 - [Agent-Native Adaptation Plan](agent-native-adaptation-plan.md) — the
   parity-focused predecessor plan this document extends into Phase 3.
-- [Policygen runbook](../tools/runbooks/policygen.md) — the operator-facing
+- `tools/runbooks/policygen.md` — the operator-facing
   `scan` / `generate` / lifecycle-submit flow every design above still ends
   at.
 - [Adaptive Policy Generation reference](api/policygen.md) — API surface for
