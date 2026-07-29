@@ -7,15 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Added a release-proof demo script and a reproducible JSON artifact for fresh-venv verification.
-
-### Changed
-
-- Aligned release messaging with the currently published package state: `2.10.1` is the latest published package; `2.11.0` remains pending publication.
-
-## 2.11.0 - Unreleased
+## [2.11.0] - 2026-07-28
 
 ### Security
 
@@ -60,6 +52,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added runnable examples and docs for DSPy governance, GitHub Actions,
   pre-commit usage, AI-agent verification, LangChain onboarding, integration
   choice guidance, and what-gets-blocked walkthroughs.
+- Added `examples/release_proof.py`, a release-proof demo that runs without API
+  keys and emits a deterministic JSON artifact for fresh-venv verification. The
+  artifact reports the installed package version rather than a hardcoded one.
+- Added `scripts/check_release_coherence.py`, a guard that fails when a version
+  is presented as released in `CHANGELOG.md` but has no matching git tag.
+- Added `scripts/check_links.py` and wired it into `make validate` and CI so
+  broken repository and documentation links fail the build.
+- Added an experimental `gove` extra (`acgs_lite.gove`, Python >= 3.11) bridging
+  the gove-zone kernel through a `ConstitutionPolicy` adapter. Its receipt format
+  is distinct from `legitimacy` and is not translated between the two.
 
 ### Changed
 
@@ -81,6 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   community scaffolding and Stage 1 ignition content.
 - Updated Rust dependency pins for `spacetimedb`, `wasm-bindgen-test`, and
   `serde_json`.
+- Migrated CI workflows to Blacksmith runners.
+- Triaged the nltk CVE-2026-54293 advisory in `BLOCKERS.md`.
 
 ### Fixed
 
@@ -93,6 +97,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed README audit example usage and the lending example load path in the
   constitutions README.
 - Preserved distinct audit findings when validator errors occur.
+- Capped the `mcp` extra at `mcp>=1.0,<2.0`. MCP SDK 2.0.0 removed
+  `Server.list_tools`, which broke `integrations.mcp_server` against the
+  previously unbounded `mcp>=1.0` requirement.
+- Repaired 49 stale repository URLs that still pointed at the pre-transfer
+  `dislovelhl/acgs-lite` path, and absolutized 28 relative README links so they
+  resolve on the PyPI project page instead of 404ing.
+- Populated the previously blank Security and Changelog documentation pages and
+  enabled `check_paths` so `mkdocs build --strict` catches a recurrence.
+- Fixed broken CHANGELOG version-compare links, an incorrect clone path, and an
+  `acgs2.ai` domain typo; added the two missing GitHub issue templates.
+- Corrected the advertised compliance-framework count to the 20 the registry
+  actually holds, and fixed the test that passed only incidentally.
 
 ### Known limitations
 
@@ -100,8 +116,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   experiment harness is present, but real artifacts require provider API keys,
   committed result JSON, stated datasets/sample sizes, and explicit summaries.
 - There are no independently confirmed production users in this release.
-- PyPI publication is not performed by this packaging unit and remains pending
-  owner action with valid credentials.
+- PyPI publication is performed by the `Publish to PyPI` workflow on a published
+  GitHub Release, using PyPI trusted publishing. Creating that release remains an
+  owner-gated action.
 - Curated-list submission or acceptance, third-party validation, certification,
   and independent adoption remain external outcomes and are not claimed here.
 
@@ -513,7 +530,8 @@ Stability table in the README for the stability tier of each subsystem.
 - CLI tool (`acgs` / `acgs-lite`)
 - Keyword-based and regex rule matching
 
-[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v2.10.1...HEAD
+[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/acgs-ai/acgs-lite/compare/v2.9.0...v2.10.1
 [2.9.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.8.1...v2.9.0
 [2.8.1]: https://github.com/acgs-ai/acgs-lite/compare/v2.7.2...v2.8.1

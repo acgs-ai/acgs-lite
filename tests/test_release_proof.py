@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from acgs_lite import __version__
+
 
 def test_release_proof_script_emits_json(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
@@ -20,7 +22,7 @@ def test_release_proof_script_emits_json(tmp_path: Path) -> None:
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
 
-    assert payload["release"] == "2.10.1"
+    assert payload["release"] == __version__
     assert payload["summary"]["decisions"] == ["ALLOW", "TRANSFORM", "DENY"]
     assert payload["summary"]["executed_side_effects"] == 2
     assert payload["summary"]["denied_execution_blocked"] is True
