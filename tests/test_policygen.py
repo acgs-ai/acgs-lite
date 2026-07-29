@@ -217,6 +217,15 @@ class TestPolicyResearcher:
         assert report.requirements == ()
         assert any("nonsense-area" in g for g in report.gaps)
 
+    def test_gap_compose_with_unknown_and_known_areas(self) -> None:
+        pc = PreContext(domain="X", risk_areas=("pii", "nonsense-area"))
+        report = PolicyResearcher().research(pc)
+        # Should have exactly one requirement from PII
+        pii_reqs = [r for r in report.requirements if r.source == "risk-area:pii"]
+        assert len(pii_reqs) == 1
+        # Should have a gap starting with "risk-area:nonsense-area" (stable prefix only)
+        assert any(g.startswith("risk-area:nonsense-area") for g in report.gaps)
+
     def test_dedupe_merges_identical_text(self) -> None:
         # Same canonical area added twice (alias dedupe happens at build, so inject
         # a raw PreContext with a duplicate to exercise the researcher's own dedupe).
@@ -466,6 +475,11 @@ class TestAdaptiveGenerator:
         # The written file loads as a constitution.
         loaded = acgs_lite.Constitution.from_yaml(str(out))
         assert len(loaded.rules) >= 1
+        # Provenance round-trip: ensure loaded rules have same provenance as original
+        policy = AdaptivePolicyGenerator().generate(_high_risk_prod())
+        assert {r.id: list(r.provenance) for r in loaded.rules} == {
+            r.id: list(r.provenance) for r in policy.constitution.rules
+        }
 
 
 # -- public API -------------------------------------------------------------------
