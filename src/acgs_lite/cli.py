@@ -23,6 +23,7 @@ Commands:
     acgs breaker-status --id X  Check circuit breaker status
     acgs evidence               Collect compliance evidence from runtime + filesystem
     acgs arckit                 Bridge arc-kit artifacts into ACGS governance
+    acgs policygen generate     Generate adaptive governance policy YAML
     acgs lean-smoke             Validate Lean runtime/toolchain configuration
     acgs restore --bundle-id ID --backup-path PATH
                                 Restore active constitution from hot-backup + re-validate
@@ -51,6 +52,7 @@ from acgs_lite.commands import (
     lint,
     observe,
     observe_session,
+    policygen,
     refusal,
     report,
     restore,
@@ -94,6 +96,7 @@ cmd_breaker_status = halt.cmd_breaker_status
 cmd_evidence = evidence.handler
 cmd_lean_smoke = lean_smoke.handler
 cmd_restore = restore.cmd_restore
+cmd_policygen = policygen.handler
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     evidence.add_parser(sub)
     lean_smoke.add_parser(sub)
     restore.add_parser(sub)
+    policygen.add_parser(sub)
 
     return parser
 
@@ -293,6 +297,7 @@ _COMMAND_MAP: dict[str, str] = {
     "evidence": "cmd_evidence",
     "lean-smoke": "cmd_lean_smoke",
     "restore": "cmd_restore",
+    "policygen": "cmd_policygen",
 }
 
 
