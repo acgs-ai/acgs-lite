@@ -22,7 +22,9 @@ from `src/acgs_lite/policygen/context.py`:
 }
 ```
 
-All fields except `custom_requirements` are required. Save as `brief.json`.
+The example shows common fields. The `domain` field is required. All other fields are
+optional and fall back to defaults if omitted. Unknown keys are rejected. See
+`PreContext.to_dict()` for the full key set. Save as `brief.json`.
 
 ### 2. Generate the policy
 
