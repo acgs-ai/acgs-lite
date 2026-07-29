@@ -168,19 +168,36 @@ def _scan(args: argparse.Namespace) -> int:
         if args.out is None:
             print("Error: --out is required when --generate is set", file=sys.stderr)
             return 1
-        return _generate_and_write(result.precontext, args.out)
+        # Surface the scan evidence (matched + unknown packages) alongside the generated
+        # policy summary -- per manifest.py's "unknown packages are never silently dropped"
+        # invariant, --generate must not be the one path that drops them. Plain `generate`
+        # (no scan involved) has no such evidence and is unaffected.
+        extra_payload = {
+            "matched": [list(pair) for pair in result.matched],
+            "unknown": list(result.unknown),
+        }
+        return _generate_and_write(result.precontext, args.out, extra_payload=extra_payload)
 
     print(json.dumps(result.to_dict(), sort_keys=True))
     return 0
 
 
-def _generate_and_write(precontext: PreContext, out: Path) -> int:
+def _generate_and_write(
+    precontext: PreContext,
+    out: Path,
+    *,
+    extra_payload: Mapping[str, Any] | None = None,
+) -> int:
     """Generate a constitution YAML from ``precontext`` and print the JSON summary.
 
     Shared by ``generate`` (built from ``--brief``/flags) and ``scan --generate``
     (built from a manifest scan) so both verbs produce identical DRAFT-artifact
     output. This never submits, approves, or activates the resulting policy --
     that remains a separate, explicit lifecycle step.
+
+    ``extra_payload``, when given, is merged into the printed JSON payload (used by
+    ``scan --generate`` to carry the scan's ``matched``/``unknown`` evidence through to
+    stdout; plain ``generate`` never passes it).
     """
     generator = AdaptivePolicyGenerator()
     try:
@@ -195,11 +212,13 @@ def _generate_and_write(precontext: PreContext, out: Path) -> int:
         print(f"Error: could not write output to {out}: {exc}", file=sys.stderr)
         return 1
 
-    payload = {
+    payload: dict[str, Any] = {
         "summary": generated.summary,
         "rationale": list(generated.rationale),
         "output_path": str(out_path),
     }
+    if extra_payload:
+        payload.update(extra_payload)
     print(json.dumps(payload, sort_keys=True))
     return 0
 

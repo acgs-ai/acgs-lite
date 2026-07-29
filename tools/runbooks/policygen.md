@@ -29,6 +29,22 @@ acgs policygen scan ./my-project --brief-out brief.json
 acgs policygen scan ./my-project --generate --out policy.constitution.yaml
 ```
 
+With `--generate`, stdout carries the usual `generate` payload (`summary`, `rationale`,
+`output_path`) **plus two extra keys, `matched` and `unknown`, copied from the scan** --
+this keeps the scan evidence visible even though `--brief-out`'s `PreContext.to_dict()`
+brief has no `unknown` field of its own (unmapped packages are never silently dropped, per
+the manifest scanner's evidence-only contract):
+
+```json
+{
+  "matched": [["boto3", "production-deploy"], ["stripe", "financial"]],
+  "output_path": "policy.constitution.yaml",
+  "rationale": ["..."],
+  "summary": {"...": "..."},
+  "unknown": ["some-unrecognized-package"]
+}
+```
+
 Exit codes: `0` on success, even when unknown packages are reported (they are evidence, not
 errors). `1` when the path is not a directory or no supported manifest file is found there.
 
@@ -115,6 +131,6 @@ Check that:
 | `failed to generate policy` | LLM error or rate limit | Verify API keys |
 | `could not write output` | Permission or path error | Verify directory writable |
 | Lifecycle submission rejected | Policy violates constraint | Review lifecycle feedback |
-| `Manifest scan root is not a directory` | `scan <path>` does not exist or is a file | Verify the path |
-| `no supported manifest files ... found` | No `pyproject.toml`/`requirements.txt`/`package.json` at root | Point `scan` at the project root, not a subdirectory |
-| `Malformed pyproject.toml` / `Malformed package.json` | Manifest is not valid TOML/JSON | Fix the manifest syntax |
+| `scan root is not a directory` | `<path>` doesn't exist or isn't a dir | Verify the path |
+| `no supported manifest files ... found` | No manifest at root | Point `scan` at the project root |
+| `Malformed pyproject.toml` / `package.json` | Not valid TOML/JSON | Fix the manifest syntax |

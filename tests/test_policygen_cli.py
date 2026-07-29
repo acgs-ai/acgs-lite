@@ -287,7 +287,9 @@ def test_scan_brief_out_round_trips_through_precontext_from_dict(
 def test_scan_generate_end_to_end_produces_parseable_yaml(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (tmp_path / "requirements.txt").write_text("stripe==5.0\nboto3\n", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text(
+        "stripe==5.0\nboto3\nsome-totally-unknown-package==1.2.3\n", encoding="utf-8"
+    )
     out_path = tmp_path / "constitution.yaml"
 
     exit_code = _invoke(["scan", str(tmp_path), "--generate", "--out", str(out_path)])
@@ -300,6 +302,54 @@ def test_scan_generate_end_to_end_produces_parseable_yaml(
     assert payload["summary"]["rule_count"] > 0
     assert isinstance(payload["rationale"], list)
     assert payload["rationale"]
+    # Scan evidence (matched + unknown) must reach stdout even via --generate -- it is
+    # never silently dropped, per manifest.py's governance-evidence invariant.
+    assert ["boto3", "production-deploy"] in payload["matched"]
+    assert ["stripe", "financial"] in payload["matched"]
+    assert "some-totally-unknown-package" in payload["unknown"]
+
+    constitution = Constitution.from_yaml(out_path)
+    assert constitution.rules
+
+
+def test_scan_brief_out_and_generate_combined(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--brief-out and --generate together: brief round-trips AND stdout carries
+    matched/unknown evidence AND the generated YAML parses -- the combination the
+    inaccurate self-review claim (brief-out alone recovers scan evidence) would have
+    been caught by."""
+    (tmp_path / "requirements.txt").write_text(
+        "stripe==5.0\nsome-totally-unknown-package==1.2.3\n", encoding="utf-8"
+    )
+    brief_out = tmp_path / "brief.json"
+    out_path = tmp_path / "constitution.yaml"
+
+    exit_code = _invoke(
+        [
+            "scan",
+            str(tmp_path),
+            "--brief-out",
+            str(brief_out),
+            "--generate",
+            "--out",
+            str(out_path),
+        ]
+    )
+
+    assert exit_code == 0
+
+    # Brief file round-trips through PreContext.from_dict -- but note it carries no
+    # `unknown` field; that's why the payload assertion below matters independently.
+    raw = json.loads(brief_out.read_text(encoding="utf-8"))
+    precontext = PreContext.from_dict(raw)
+    assert precontext.domain == "scanned-project"
+    assert "financial" in precontext.risk_areas
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["output_path"] == str(out_path)
+    assert ["stripe", "financial"] in payload["matched"]
+    assert "some-totally-unknown-package" in payload["unknown"]
 
     constitution = Constitution.from_yaml(out_path)
     assert constitution.rules
