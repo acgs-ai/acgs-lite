@@ -228,3 +228,16 @@ tools:
     retry: "Refresh the manifest and re-run."
     validation: make lint
     owner_module: src/acgs_lite/commands/capabilities.py
+
+  - name: policygen
+    purpose: Generate adaptive governance policies from a pre-context brief.
+    command: acgs policygen generate --brief <brief.json> --out <out.yaml>
+    env: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+    inputs: ["brief JSON file (PreContext.to_dict format)", "--out output path"]
+    outputs: ["constitution YAML file (DRAFT artifact)"]
+    failure_modes: ["invalid JSON brief", "malformed pre-context", "LLM generation error",
+      "file I/O error"]
+    retry: "Transient LLM failures are safe to retry; file I/O errors require
+      investigation."
+    validation: make lint
+    owner_module: src/acgs_lite/policygen
