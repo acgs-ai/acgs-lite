@@ -8,10 +8,12 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
+import acgs_lite.cli as cli
 from acgs_lite import Constitution
 from acgs_lite.cli import build_parser, cmd_policygen
 
@@ -183,6 +185,50 @@ def test_generate_brief_and_domain_mutually_exclusive_exits_1(
     assert exit_code == 1
     assert capsys.readouterr().err
     assert not out_path.exists()
+
+
+def test_generate_unwritable_out_exits_1(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A directory is not a writable file target -> OSError from Path.write_text.
+    unwritable = tmp_path / "not-a-file"
+    unwritable.mkdir()
+
+    exit_code = _invoke(["generate", "--domain", "Foo", "--out", str(unwritable)])
+
+    assert exit_code == 1
+    assert capsys.readouterr().err
+
+
+def test_generate_dispatches_through_command_map_via_main(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise the real `_COMMAND_MAP` lookup + `main()` entry point, not just
+    the handler function, so a dropped map entry or add_parser() call fails
+    this test (per the handler-wiring rule)."""
+    out_path = tmp_path / "constitution.yaml"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "acgs",
+            "policygen",
+            "generate",
+            "--domain",
+            "Lending Risk Engine",
+            "--risk-area",
+            "pii",
+            "--out",
+            str(out_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 0
+    assert out_path.exists()
+    assert Constitution.from_yaml(out_path).rules
 
 
 def test_generate_help_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
