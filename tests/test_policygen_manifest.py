@@ -110,6 +110,42 @@ class TestPyprojectParsing:
         with pytest.raises(ValueError, match="dependencies"):
             scan_manifests(tmp_path)
 
+    def test_unparsable_dependency_spec_reported_as_unknown_not_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        # A non-standard, name-less direct-URL reference: _extract_name cannot
+        # resolve a leading name token from it (starts with "@"). It must be
+        # reported in `unknown` with its raw form -- never silently dropped --
+        # while the normal dependency alongside it is still matched normally.
+        garbage = "@ https://example.com/pkg-1.0-py3-none-any.whl"
+        (tmp_path / "pyproject.toml").write_text(
+            f"""
+            [project]
+            name = "x"
+            dependencies = ["httpx", "{garbage}"]
+            """
+        )
+        result = scan_manifests(tmp_path)
+        assert ("httpx", "network-egress") in result.matched
+        assert garbage in result.unknown
+
+    def test_unparsable_optional_dependency_spec_reported_as_unknown(
+        self, tmp_path: Path
+    ) -> None:
+        garbage = "@ https://example.com/pkg-1.0-py3-none-any.whl"
+        (tmp_path / "pyproject.toml").write_text(
+            f"""
+            [project]
+            name = "x"
+
+            [project.optional-dependencies]
+            dev = ["stripe", "{garbage}"]
+            """
+        )
+        result = scan_manifests(tmp_path)
+        assert ("stripe", "financial") in result.matched
+        assert garbage in result.unknown
+
 
 # -- requirements.txt ----------------------------------------------------------------
 
@@ -175,6 +211,19 @@ class TestPackageJsonParsing:
 
     def test_malformed_json_raises_clear_value_error(self, tmp_path: Path) -> None:
         (tmp_path / "package.json").write_text("{not valid json")
+        with pytest.raises(ValueError, match="Malformed package.json"):
+            scan_manifests(tmp_path)
+
+    def test_deeply_nested_json_raises_value_error_not_recursion_error(
+        self, tmp_path: Path
+    ) -> None:
+        # Adversarial payload: json.loads recurses per nesting level and raises
+        # RecursionError well before the 5 MiB manifest size guard triggers. This
+        # must be converted to the module's ValueError contract, never crash
+        # through as an unrelated exception.
+        depth = 100_000
+        payload = '{"dependencies": ' + ("[" * depth) + ("]" * depth) + "}"
+        (tmp_path / "package.json").write_text(payload)
         with pytest.raises(ValueError, match="Malformed package.json"):
             scan_manifests(tmp_path)
 

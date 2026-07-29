@@ -60,6 +60,16 @@ from acgs_lite.policygen.context import PreContext, PreContextBuilder
 #     drive automated, LLM-based decision-making; the KB's "transparency" entry
 #     requires disclosure of automated decision-making, the closest real vocabulary
 #     match -- there is no dedicated "llm"/"tooling" KB key).
+#     TRADE-OFF (explicit, by design): "transparency" carries no ``workflow_action``
+#     in the KB, while "human-oversight" carries ``REQUIRE_HUMAN_REVIEW``. Mapping
+#     these packages to "transparency" therefore does NOT, on its own, trigger a
+#     human-review workflow requirement. This is deliberate: the mere presence of
+#     an LLM-client package is evidence that automated decision-making exists, not
+#     evidence that the project takes high-impact autonomous actions -- so it maps
+#     to disclosure ("transparency"), not to mandatory review ("human-oversight").
+#     Deployers whose agents built on these packages take high-impact actions
+#     should add "human-oversight" explicitly via the brief (add_risk_area /
+#     custom requirements), not rely on this adapter to infer it from a manifest.
 #   - psycopg, psycopg2, sqlalchemy, pymongo          -> "data-deletion"   (direct DB
 #     write/DDL access; the KB has no dedicated "database" key, and "data-deletion"
 #     -- delete/drop/truncate without approval -- is the closest real match for raw
@@ -206,8 +216,16 @@ def _load_toml_module() -> Any:
         ) from exc
 
 
-def _parse_pyproject(path: Path) -> tuple[list[str], str | None]:
-    """Return (dependency name tokens, project's own declared name) from pyproject.toml."""
+def _parse_pyproject(path: Path) -> tuple[list[str], list[str], str | None]:
+    """Return (parsed dep names, raw unparsable specs, own declared name) from pyproject.toml.
+
+    Any dependency spec that ``_extract_name`` cannot resolve to a leading name
+    token (e.g. a bare/non-standard direct-URL reference, or a non-string TOML
+    value) is captured in the second element with its raw ``str()`` form rather
+    than silently dropped -- mirroring ``_parse_requirements``'s handling of
+    unparsable lines, per the "unknown packages are always reported explicitly"
+    constraint.
+    """
     tomllib = _load_toml_module()
     text = _read_manifest_text(path)
     try:
@@ -222,6 +240,7 @@ def _parse_pyproject(path: Path) -> tuple[list[str], str | None]:
         raise ValueError(f"Malformed pyproject.toml at {path}: '[project]' must be a table")
 
     names: list[str] = []
+    unparsed: list[str] = []
 
     deps = project.get("dependencies", [])
     if not isinstance(deps, list):
@@ -232,6 +251,8 @@ def _parse_pyproject(path: Path) -> tuple[list[str], str | None]:
         name = _extract_name(str(spec))
         if name:
             names.append(name)
+        else:
+            unparsed.append(str(spec).strip())
 
     optional = project.get("optional-dependencies", {})
     if not isinstance(optional, dict):
@@ -248,9 +269,11 @@ def _parse_pyproject(path: Path) -> tuple[list[str], str | None]:
             name = _extract_name(str(spec))
             if name:
                 names.append(name)
+            else:
+                unparsed.append(str(spec).strip())
 
     own_name = project.get("name")
-    return names, own_name if isinstance(own_name, str) and own_name.strip() else None
+    return names, unparsed, own_name if isinstance(own_name, str) and own_name.strip() else None
 
 
 def _parse_requirements(path: Path) -> tuple[list[str], list[str]]:
@@ -278,7 +301,9 @@ def _parse_package_json(path: Path) -> tuple[list[str], str | None]:
     text = _read_manifest_text(path)
     try:
         data = json.loads(text)
-    except json.JSONDecodeError as exc:
+    except Exception as exc:  # json.loads can raise JSONDecodeError, RecursionError
+        # (deeply-nested arrays/objects), etc. -- never crash through an unrelated
+        # exception on hostile input; convert to the module's ValueError contract.
         raise ValueError(f"Malformed package.json at {path}: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"Malformed package.json at {path}: expected a JSON object")
@@ -332,8 +357,9 @@ def scan_manifests(
     pyproject_path = root / "pyproject.toml"
     if pyproject_path.is_file():
         manifests_found.append("pyproject.toml")
-        names, own_name = _parse_pyproject(pyproject_path)
+        names, unparsed, own_name = _parse_pyproject(pyproject_path)
         raw_names.extend(names)
+        unknown_raw.extend(unparsed)
         if own_name:
             self_names.add(_normalize(own_name))
 
