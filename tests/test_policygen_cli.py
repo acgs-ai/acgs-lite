@@ -13,9 +13,8 @@ from pathlib import Path
 
 import pytest
 
-import acgs_lite.cli as cli
 from acgs_lite import Constitution
-from acgs_lite.cli import build_parser, cmd_policygen
+from acgs_lite.cli import build_parser, cmd_policygen, main
 from acgs_lite.policygen import PreContext
 
 
@@ -225,7 +224,7 @@ def test_generate_dispatches_through_command_map_via_main(
     )
 
     with pytest.raises(SystemExit) as exc:
-        cli.main()
+        main()
 
     assert exc.value.code == 0
     assert out_path.exists()
@@ -394,7 +393,7 @@ def test_scan_dispatches_through_command_map_via_main(
     monkeypatch.setattr(sys, "argv", ["acgs", "policygen", "scan", str(tmp_path)])
 
     with pytest.raises(SystemExit) as exc:
-        cli.main()
+        main()
 
     assert exc.value.code == 0
 

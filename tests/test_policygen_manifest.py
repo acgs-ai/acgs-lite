@@ -8,6 +8,7 @@ a risk-area key the PolicyResearcher knowledge base actually knows.
 
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 
@@ -385,7 +386,7 @@ class TestFileSizeGuard:
 
 class TestPublicExport:
     def test_top_level_policygen_exports(self) -> None:
-        import acgs_lite.policygen as policygen_module
+        policygen_module = importlib.import_module("acgs_lite.policygen")
 
         for name in ("CAPABILITY_MAP", "ManifestScanResult", "scan_manifests"):
             assert hasattr(policygen_module, name), name

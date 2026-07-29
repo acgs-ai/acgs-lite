@@ -176,7 +176,7 @@ class TestPreContextFromDict:
         with pytest.raises(ValueError, match="not-a-real-level") as exc_info:
             PreContext.from_dict({"domain": "X", "risk_level": "not-a-real-level"})
         message = str(exc_info.value)
-        for level in DomainRiskLevel:
+        for level in DomainRiskLevel.__members__.values():
             assert level.value in message
 
     @pytest.mark.parametrize(
