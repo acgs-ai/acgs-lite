@@ -16,6 +16,7 @@ import pytest
 import acgs_lite.cli as cli
 from acgs_lite import Constitution
 from acgs_lite.cli import build_parser, cmd_policygen
+from acgs_lite.policygen import PreContext
 
 
 def _invoke(args: list[str]) -> int:
@@ -239,3 +240,120 @@ def test_generate_help_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
 
     assert exc.value.code == 0
     assert "pre-context" in capsys.readouterr().out
+
+
+# --- `acgs policygen scan` -------------------------------------------------------------
+
+
+def test_scan_known_and_unknown_deps_prints_report_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "requirements.txt").write_text(
+        "stripe==5.0\nboto3\nsome-totally-unknown-package==1.2.3\n",
+        encoding="utf-8",
+    )
+
+    exit_code = _invoke(["scan", str(tmp_path)])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["manifests"] == ["requirements.txt"]
+    assert ["boto3", "production-deploy"] in payload["matched"]
+    assert ["stripe", "financial"] in payload["matched"]
+    assert "some-totally-unknown-package" in payload["unknown"]
+    assert payload["precontext"]["domain"] == "scanned-project"
+    # Unknown packages are evidence, not errors -- exit 0, nothing on stderr.
+    assert capsys.readouterr().err == ""
+
+
+def test_scan_brief_out_round_trips_through_precontext_from_dict(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "requirements.txt").write_text("stripe==5.0\n", encoding="utf-8")
+    brief_out = tmp_path / "brief.json"
+
+    exit_code = _invoke(["scan", str(tmp_path), "--brief-out", str(brief_out)])
+
+    assert exit_code == 0
+    capsys.readouterr()  # drain stdout report
+    assert brief_out.exists()
+
+    raw = json.loads(brief_out.read_text(encoding="utf-8"))
+    precontext = PreContext.from_dict(raw)
+    assert precontext.domain == "scanned-project"
+    assert "financial" in precontext.risk_areas
+
+
+def test_scan_generate_end_to_end_produces_parseable_yaml(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "requirements.txt").write_text("stripe==5.0\nboto3\n", encoding="utf-8")
+    out_path = tmp_path / "constitution.yaml"
+
+    exit_code = _invoke(["scan", str(tmp_path), "--generate", "--out", str(out_path)])
+
+    assert exit_code == 0
+    assert out_path.exists()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["output_path"] == str(out_path)
+    assert payload["summary"]["rule_count"] > 0
+    assert isinstance(payload["rationale"], list)
+    assert payload["rationale"]
+
+    constitution = Constitution.from_yaml(out_path)
+    assert constitution.rules
+
+
+def test_scan_no_manifest_found_exits_1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = _invoke(["scan", str(tmp_path)])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "no supported manifest files" in captured.err
+
+
+def test_scan_nonexistent_path_exits_1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    missing = tmp_path / "does-not-exist"
+
+    exit_code = _invoke(["scan", str(missing)])
+
+    assert exit_code == 1
+    assert capsys.readouterr().err
+
+
+def test_scan_generate_without_out_exits_1(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "requirements.txt").write_text("stripe==5.0\n", encoding="utf-8")
+
+    exit_code = _invoke(["scan", str(tmp_path), "--generate"])
+
+    assert exit_code == 1
+    assert "--out is required" in capsys.readouterr().err
+
+
+def test_scan_dispatches_through_command_map_via_main(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise the real `_COMMAND_MAP` lookup + `main()` entry point for `scan`,
+    per the handler-wiring rule (dropped map entries or add_parser() calls must fail
+    this test)."""
+    (tmp_path / "requirements.txt").write_text("stripe==5.0\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["acgs", "policygen", "scan", str(tmp_path)])
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 0
+
+
+def test_scan_help_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["policygen", "scan", "--help"])
+
+    assert exc.value.code == 0
+    assert "manifest" in capsys.readouterr().out

@@ -24,6 +24,7 @@ Commands:
     acgs evidence               Collect compliance evidence from runtime + filesystem
     acgs arckit                 Bridge arc-kit artifacts into ACGS governance
     acgs policygen generate     Generate adaptive governance policy YAML
+    acgs policygen scan         Scan dependency manifests for governance risk evidence
     acgs lean-smoke             Validate Lean runtime/toolchain configuration
     acgs restore --bundle-id ID --backup-path PATH
                                 Restore active constitution from hot-backup + re-validate

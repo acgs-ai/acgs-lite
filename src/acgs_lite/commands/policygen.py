@@ -14,7 +14,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from acgs_lite.policygen import AdaptivePolicyGenerator, PreContext, PreContextBuilder
+from acgs_lite.policygen import (
+    AdaptivePolicyGenerator,
+    PreContext,
+    PreContextBuilder,
+    scan_manifests,
+)
 
 
 def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -69,12 +74,51 @@ def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None
         "--out", type=Path, required=True, help="Output path for the generated constitution YAML"
     )
 
+    scan = policygen_sub.add_parser(
+        "scan",
+        help="Scan a project's dependency manifests for governance risk-area evidence",
+        description=(
+            "Statically scan a project's dependency manifests (pyproject.toml, "
+            "requirements.txt, package.json) and report risk-area evidence as a DRAFT "
+            "artifact. This never activates or grants any capability."
+        ),
+    )
+    scan.add_argument("path", type=Path, help="Project root directory to scan for manifests")
+    scan.add_argument(
+        "--domain",
+        default="scanned-project",
+        help="Governance domain label for the derived pre-context",
+    )
+    scan.add_argument(
+        "--description", default=None, help="Free-text description override for the pre-context"
+    )
+    scan.add_argument(
+        "--brief-out",
+        type=Path,
+        default=None,
+        dest="brief_out",
+        help="Write the derived PreContext brief JSON to this path (for later `generate --brief`)",
+    )
+    scan.add_argument(
+        "--generate",
+        action="store_true",
+        help="Chain into the generate path using the scanned pre-context",
+    )
+    scan.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Output path for the generated constitution YAML (required with --generate)",
+    )
+
 
 def handler(args: argparse.Namespace) -> int:
     """Dispatch policygen subcommands."""
     command = args.policygen_command
     if command == "generate":
         return _generate(args)
+    if command == "scan":
+        return _scan(args)
     print(f"Unknown policygen command: {command}", file=sys.stderr)
     return 1
 
@@ -93,6 +137,51 @@ def _generate(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    return _generate_and_write(precontext, args.out)
+
+
+def _scan(args: argparse.Namespace) -> int:
+    try:
+        result = scan_manifests(args.path, domain=args.domain, description=args.description)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if not result.manifests:
+        print(
+            "Error: no supported manifest files (pyproject.toml, requirements.txt, "
+            f"package.json) found under {args.path}",
+            file=sys.stderr,
+        )
+        return 1
+
+    if args.brief_out is not None:
+        try:
+            args.brief_out.write_text(
+                json.dumps(result.precontext.to_dict(), sort_keys=True), encoding="utf-8"
+            )
+        except OSError as exc:
+            print(f"Error: could not write brief to {args.brief_out}: {exc}", file=sys.stderr)
+            return 1
+
+    if args.generate:
+        if args.out is None:
+            print("Error: --out is required when --generate is set", file=sys.stderr)
+            return 1
+        return _generate_and_write(result.precontext, args.out)
+
+    print(json.dumps(result.to_dict(), sort_keys=True))
+    return 0
+
+
+def _generate_and_write(precontext: PreContext, out: Path) -> int:
+    """Generate a constitution YAML from ``precontext`` and print the JSON summary.
+
+    Shared by ``generate`` (built from ``--brief``/flags) and ``scan --generate``
+    (built from a manifest scan) so both verbs produce identical DRAFT-artifact
+    output. This never submits, approves, or activates the resulting policy --
+    that remains a separate, explicit lifecycle step.
+    """
     generator = AdaptivePolicyGenerator()
     try:
         generated = generator.generate(precontext)
@@ -101,9 +190,9 @@ def _generate(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        out_path = generated.write(args.out)
+        out_path = generated.write(out)
     except OSError as exc:
-        print(f"Error: could not write output to {args.out}: {exc}", file=sys.stderr)
+        print(f"Error: could not write output to {out}: {exc}", file=sys.stderr)
         return 1
 
     payload = {
