@@ -5,6 +5,37 @@ then submit it through the lifecycle review process before activation.
 
 ## Steps
 
+### 0. (Optional) Scan a project for risk-area evidence instead of authoring a brief by hand
+
+`acgs policygen scan <path>` statically scans a project's dependency manifests
+(`pyproject.toml`, `requirements.txt`, `package.json`) and maps declared package names to
+governance risk areas (e.g. `stripe` -> `financial`, `boto3` -> `production-deploy`). It is a
+static, offline, read-only scan: it never imports, introspects, or executes the target
+project's code or any discovered package.
+
+**The scan output is evidence only, exactly like a hand-authored brief -- it is never an
+activation, grant, or authorization of any kind.** Unknown (unmapped) packages are always
+reported explicitly, never silently dropped, and are not treated as errors.
+
+```bash
+# Default: print the ManifestScanResult JSON report to stdout (matched risk areas,
+# unknown packages, manifests found, and the derived pre-context).
+acgs policygen scan ./my-project
+
+# Also write the derived pre-context brief for later `generate --brief` use.
+acgs policygen scan ./my-project --brief-out brief.json
+
+# Chain directly into policy generation (equivalent to scan + generate --brief in one step).
+acgs policygen scan ./my-project --generate --out policy.constitution.yaml
+```
+
+Exit codes: `0` on success, even when unknown packages are reported (they are evidence, not
+errors). `1` when the path is not a directory or no supported manifest file is found there.
+
+Continue to step 3 below (review and approve through lifecycle) for any YAML produced this
+way -- a scan-generated constitution is exactly as much a **DRAFT artifact** as one produced
+from a hand-authored brief, and it is bound by the same no-auto-activation rule.
+
 ### 1. Author a pre-context brief
 
 Create a JSON file documenting the governance domain. Use `PreContext.to_dict()` format
@@ -84,3 +115,6 @@ Check that:
 | `failed to generate policy` | LLM error or rate limit | Verify API keys |
 | `could not write output` | Permission or path error | Verify directory writable |
 | Lifecycle submission rejected | Policy violates constraint | Review lifecycle feedback |
+| `Manifest scan root is not a directory` | `scan <path>` does not exist or is a file | Verify the path |
+| `no supported manifest files ... found` | No `pyproject.toml`/`requirements.txt`/`package.json` at root | Point `scan` at the project root, not a subdirectory |
+| `Malformed pyproject.toml` / `Malformed package.json` | Manifest is not valid TOML/JSON | Fix the manifest syntax |
