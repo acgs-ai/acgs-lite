@@ -15,7 +15,8 @@ from pathlib import Path
 _DEFAULT_RULES_YAML = """\
 # ACGS Constitutional Rules
 # See: https://acgs.ai | pip install acgs
-# EU AI Act main high-risk obligations: August 2, 2026
+# EU AI Act main high-risk obligations: December 2, 2027
+# (Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus)
 
 rules:
   - id: safety-001
@@ -52,8 +53,10 @@ rules:
 
 _GITLAB_CI_SNIPPET = """\
 # ACGS Governance Gate
-# Validates every MR against constitutional rules
-# Docs: https://acgs.ai | EU AI Act main high-risk obligations: August 2, 2026
+# Verifies rules.yaml loads and reports the constitutional hash
+# Docs: https://acgs.ai
+# EU AI Act main high-risk obligations: December 2, 2027
+# (Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus)
 
 governance:
   stage: test
@@ -67,7 +70,7 @@ governance:
       e = GovernanceEngine(c);
       print(f'Constitutional hash: {c.hash}');
       print(f'Rules loaded: {len(c.rules)}');
-      print('Governance gate: PASS');
+      print('Constitution loaded — hash pinned');
       "
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
@@ -75,8 +78,10 @@ governance:
 
 _GITHUB_ACTIONS_SNIPPET = """\
 # ACGS Governance Gate
-# Validates every PR against constitutional rules
-# Docs: https://acgs.ai | EU AI Act main high-risk obligations: August 2, 2026
+# Verifies rules.yaml loads and reports the constitutional hash
+# Docs: https://acgs.ai
+# EU AI Act main high-risk obligations: December 2, 2027
+# (Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus)
 
 name: ACGS Governance
 on:
@@ -99,7 +104,7 @@ jobs:
           e = GovernanceEngine(c)
           print(f'Constitutional hash: {c.hash}')
           print(f'Rules loaded: {len(c.rules)}')
-          print('Governance gate: PASS')
+          print('Constitution loaded — hash pinned')
           "
 """
 
@@ -176,7 +181,10 @@ def handler(args: argparse.Namespace) -> int:
     print("    2. Run: acgs assess")
     print("    3. Run: acgs report --pdf")
     print()
-    print("  EU AI Act main high-risk deadline: August 2, 2026")
+    print(
+        "  EU AI Act main high-risk deadline: December 2, 2027 "
+        "(Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus)"
+    )
     print("  Docs: https://acgs.ai")
 
     return 0

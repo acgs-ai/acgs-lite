@@ -186,7 +186,7 @@ class ComplianceFramework(Protocol):
     framework_id: str
     framework_name: str
     jurisdiction: str
-    status: str  # "enacted" | "proposed" | "voluntary"
+    status: str  # "enacted" | "proposed" | "voluntary" | "defunct"
     enforcement_date: str | None
 
     def get_checklist(self, system_description: dict[str, Any]) -> list[ChecklistItem]:

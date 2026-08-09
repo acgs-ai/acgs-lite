@@ -663,7 +663,7 @@ class TestEUAIActCompliance:
         assert result.requires_article12_logging is True
         assert result.requires_human_oversight is True
         assert len(result.obligations) > 0
-        assert result.high_risk_deadline == "2026-08-02"
+        assert result.high_risk_deadline == "2027-12-02"
 
     async def test_high_risk_biometric_system(self) -> None:
         """Biometric identification (non-law-enforcement) is HIGH_RISK."""

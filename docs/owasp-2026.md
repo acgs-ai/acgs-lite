@@ -15,12 +15,12 @@ The **OWASP Top 10 for Agentic Applications** defines the critical security risk
 | **ASI01** | **Agent Goal Hijack** | **Governed execution boundary**: Validates a proposed action against the Constitution *before* any tool is called. |
 | **ASI02** | **Tool Misuse** | **Deterministic Rule Engine**: Blocks specific high-risk tool patterns (e.g., `DROP TABLE`) regardless of agent intent. |
 | **ASI03** | **Privilege Abuse** | **MACI Role Separation**: Structural separation of Proposer (Agent) and Validator (Governance) prevents self-escalation. |
-| **ASI04** | **Supply Chain** | **Constitutional Hashing**: Ensures the safety rules haven't been tampered with in the deployment pipeline. |
+| **ASI04** | **Supply Chain** | **Constitutional Hashing**: Lets you detect tampering by comparing against the pinned hash. |
 | **ASI05** | **Unsafe Code Execution** | **Fail-Closed Design**: The `@fail_closed` decorator ensures any governance failure defaults to blocking the execution. |
 | **ASI06** | **Context Poisoning** | **Runtime Sanitization**: Every input and output is re-validated, preventing "poisoned" memory from triggering actions. |
 | **ASI07** | **Insecure Inter-Agent Comm.** | **MCP Governance Server**: Provides a centralized, authenticated governance endpoint for all agents in a mesh. |
 | **ASI08** | **Cascading Failures** | **Governance Circuit Breaker**: Automatically halts an agent if it exceeds a violation threshold, preventing a "domino effect." |
-| **ASI09** | **Human-Agent Trust** | **Audit Trail Integrity**: Provides mathematical proof of agent decisions, allowing humans to verify reasoning. |
+| **ASI09** | **Human-Agent Trust** | **Audit Trail Integrity**: Provides tamper-evident records of agent decisions, allowing humans to verify reasoning. |
 | **ASI10** | **Rogue Agents** | **Article 14 Kill-Switch**: A deterministic, non-AI hard stop built into the `GovernedAgent` wrapper. |
 
 ---

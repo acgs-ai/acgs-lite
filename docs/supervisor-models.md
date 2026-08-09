@@ -54,7 +54,7 @@ agent = GovernedAgent(
 
 ## Pattern 2: Deterministic Capability Gating
 
-Capability Gating ensures that an agent is physically unable to access a tool unless the Verification Kernel has issued a cryptographically signed "Token of Approval."
+Capability Gating ensures that an agent is unable to invoke a governed tool wrapper unless the Verification Kernel has issued a cryptographically signed "Token of Approval."
 
 ### How ACGS Enforces Gating
 1.  **Tool Interception**: Every tool in your agent's toolbox is wrapped in a `GovernedCallable`.

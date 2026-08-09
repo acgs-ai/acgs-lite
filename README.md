@@ -401,7 +401,7 @@ See [`examples/agent_quickstart/`](https://github.com/acgs-ai/acgs-lite/tree/mai
 
 ### Governance Engine
 
-The `GovernanceEngine` sits between your agent and its tools. Every action passes through it before execution. Matching rules block or flag the action; the result is an immutable `ValidationResult`.
+The `GovernanceEngine` sits between your agent and its tools. Every action passes through it before execution. Matching rules block or flag the action; the result is a `ValidationResult`.
 
 ```python
 from acgs_lite import Constitution, GovernanceEngine, Rule, Severity
@@ -797,7 +797,7 @@ acgs audit --verify-chain
 # Start MCP governance server
 acgs serve --port 8080
 
-# EU AI Act Art. 14(3) kill switch
+# EU AI Act Art. 14(4)(e) kill switch
 acgs halt --agent-id agent-01 --reason "anomalous behaviour detected"
 acgs resume --agent-id agent-01
 ```

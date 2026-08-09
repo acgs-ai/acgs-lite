@@ -166,6 +166,7 @@ def cmd_assess(args: argparse.Namespace) -> int:
         print("  🟡 MODERATE — Significant work remains.")
     else:
         print("  🔴 AT RISK — Major gaps. Immediate action required.")
+    print("  Indicative self-assessment only — not legal advice or a conformity assessment.")
     print()
 
     output = getattr(args, "output", None)
@@ -292,7 +293,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m acgs_lite.compliance",
         description="ACGS compliance module — assess, list frameworks, collect evidence",
-        epilog="EU AI Act main high-risk obligations: August 2, 2026 | https://acgs.ai",
+        epilog=(
+            "EU AI Act main high-risk obligations: December 2, 2027 "
+            "(Annex III stand-alone high-risk; deferred by the 2026 Digital Omnibus) | "
+            "https://acgs.ai"
+        ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -359,7 +364,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--is-significant-entity",
         dest="is_significant_entity",
         action="store_true",
-        help="Significant financial entity (TLPT Art.25 applies)",
+        help="Financial entity identified per Art.26(8) (TLPT Art.26(1) applies)",
     )
 
     # India DPDP flags
@@ -368,7 +373,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--is-significant-data-fiduciary",
         dest="is_significant_data_fiduciary",
         action="store_true",
-        help="System is a Significant Data Fiduciary (§16 applies)",
+        help="System is a Significant Data Fiduciary (§10(2) applies)",
     )
     dpdp_group.add_argument(
         "--processes-children-data",

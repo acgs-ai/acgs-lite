@@ -188,14 +188,14 @@ class TestDORAFramework:
         fw = DORAFramework()
         desc = {**base_desc, "is_significant_entity": False}
         checklist = fw.get_checklist(desc)
-        art25 = next((i for i in checklist if i.ref == "DORA Art.25(1)"), None)
+        art25 = next((i for i in checklist if i.ref == "DORA Art.26(1)"), None)
         assert art25 is not None
         assert art25.status == ChecklistStatus.NOT_APPLICABLE
 
     def test_tlpt_required_for_significant_entity(self, financial_desc: dict) -> None:
         fw = DORAFramework()
         checklist = fw.get_checklist(financial_desc)
-        art25 = next((i for i in checklist if i.ref == "DORA Art.25(1)"), None)
+        art25 = next((i for i in checklist if i.ref == "DORA Art.26(1)"), None)
         assert art25 is not None
         assert art25.status == ChecklistStatus.PENDING  # not auto-satisfied
 
@@ -239,7 +239,7 @@ class TestCanadaAIDAFramework:
         fw = CanadaAIDAFramework()
         assert fw.framework_id == "canada_aida"
         assert fw.jurisdiction == "Canada"
-        assert fw.status == "proposed"
+        assert fw.status == "defunct"
         assert fw.enforcement_date is None
 
     def test_checklist_covers_key_sections(self, base_desc: dict) -> None:
@@ -312,26 +312,36 @@ class TestSingaporeMAIGFFramework:
         fw = SingaporeMAIGFFramework()
         checklist = fw.get_checklist(base_desc)
         refs = [item.ref for item in checklist]
-        assert any("P1" in r for r in refs), "Missing Principle 1 items"
-        assert any("P2" in r for r in refs), "Missing Principle 2 items"
-        assert any("P3" in r for r in refs), "Missing Principle 3 items"
-        assert any("P4" in r for r in refs), "Missing Principle 4 items"
+        assert any("Internal Governance" in r for r in refs), "Missing Internal Governance items"
+        assert any("Human Involvement" in r for r in refs), "Missing Human Involvement items"
+        assert any("Operations Management" in r for r in refs), (
+            "Missing Operations Management items"
+        )
+        assert any("Stakeholder Interaction" in r for r in refs), (
+            "Missing Stakeholder Interaction items"
+        )
 
     def test_auto_populate_marks_human_oversight_items(self, base_desc: dict) -> None:
         fw = SingaporeMAIGFFramework()
         checklist = fw.get_checklist(base_desc)
         fw.auto_populate_acgs_lite(checklist)
         compliant_refs = {i.ref for i in checklist if i.status == ChecklistStatus.COMPLIANT}
-        assert "MAIGF P1.2" in compliant_refs
-        assert "MAIGF P1.3" in compliant_refs
-        assert "MAIGF P4.2" in compliant_refs
-        assert "MAIGF P4.3" in compliant_refs
+        assert "MAIGF — Internal Governance: human-AI decision model" in compliant_refs
+        assert (
+            "MAIGF — Internal Governance: human review for significant decisions" in compliant_refs
+        )
+        assert "MAIGF — Stakeholder Interaction: feedback & complaint mechanisms" in compliant_refs
+        assert "MAIGF — Stakeholder Interaction: dispute review & redress" in compliant_refs
 
     def test_risk_classifier_items_auto_satisfied(self, base_desc: dict) -> None:
         fw = SingaporeMAIGFFramework()
         checklist = fw.get_checklist(base_desc)
         fw.auto_populate_acgs_lite(checklist)
-        p21 = next(i for i in checklist if i.ref == "MAIGF P2.1")
+        p21 = next(
+            i
+            for i in checklist
+            if i.ref == "MAIGF — Human Involvement: risk-based oversight determination"
+        )
         assert p21.status == ChecklistStatus.COMPLIANT
         assert "RiskClassifier" in (p21.evidence or "")
 
@@ -339,7 +349,9 @@ class TestSingaporeMAIGFFramework:
         fw = SingaporeMAIGFFramework()
         checklist = fw.get_checklist(base_desc)
         fw.auto_populate_acgs_lite(checklist)
-        p32a = next(i for i in checklist if i.ref == "MAIGF P3.2(a)")
+        p32a = next(
+            i for i in checklist if i.ref == "MAIGF — Operations Management: data governance"
+        )
         assert p32a.status == ChecklistStatus.PENDING
 
     def test_assess_returns_valid_assessment(self, base_desc: dict) -> None:

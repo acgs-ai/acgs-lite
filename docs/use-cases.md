@@ -1,10 +1,10 @@
 # Industry Use Cases: Constitutional AI Governance in Practice
 
-**Meta Description**: Explore how the ACGS library is used in healthcare, finance, and legal sectors to ensure AI agent compliance with 2026 regulatory standards.
+**Meta Description**: Explore how the ACGS library is used in healthcare, finance, and legal sectors to support AI agent compliance efforts with 2026 regulatory standards.
 
 ---
 
-In 2026, AI governance is no longer a "nice-to-have"—it's an operational mandate. Regulated industries use ACGS-Lite to deploy autonomous agents that stay within ethical, legal, and fiduciary bounds.
+In 2026, AI governance is no longer a "nice-to-have"—it's an operational mandate. ACGS-Lite is designed for regulated industries deploying autonomous agents that must stay within ethical, legal, and fiduciary bounds.
 
 ## 🏥 Healthcare: Clinical Decision Support
 In healthcare, agents are used for triage, patient monitoring, and administrative tasks. The **EU AI Act** and **Colorado SB 205** classify these as high-risk activities.
@@ -15,7 +15,7 @@ How do you ensure a patient-facing bot doesn't give unauthorized medical advice 
 ### The ACGS Solution
 1.  **Bias Mitigation**: Load a constitution that filters for discriminatory patterns.
 2.  **Escalation Paths**: If an agent detects a high-severity symptom, ACGS-Lite triggers a mandatory human-in-the-loop (HITL) step.
-3.  **Compliance Audit**: Every recommendation is logged with the specific rule that allowed it, meeting the EU AI Act's "traceability" requirement.
+3.  **Compliance Audit**: Every recommendation is logged with the specific rule that allowed it, supporting the EU AI Act's "traceability" requirement.
 
 ---
 
@@ -27,8 +27,8 @@ Preventing "Black Box" decisions that violate the **ECOA** or **Fair Lending** l
 
 ### The ACGS Solution
 1.  **Impact Scoring**: The `ConstitutionalImpactScorer` identifies high-stakes decisions (e.g., loan denial) and requires a secondary "Validator" agent to sign off.
-2.  **Formal Verification**: Use the **Z3 SMT Solver** to mathematically prove that an agent cannot authorize a transaction that exceeds a client's risk profile or account balance.
-3.  **Audit Integrity**: Hash-chained logs prove to FINRA or the SEC that no retroactive changes were made to the decision history.
+2.  **Formal Verification**: Use the **Z3 SMT Solver** to enforce, for governed execution paths, that an agent cannot authorize a transaction that exceeds a client's risk profile or account balance.
+3.  **Audit Integrity**: Hash-chained logs provide tamper-evidence that recorded entries were not altered after the fact, supporting regulatory examinations.
 
 ---
 
@@ -40,8 +40,8 @@ Protecting client-attorney privilege and ensuring agents don't "leak" confidenti
 
 ### The ACGS Solution
 1.  **PII Filtering**: A CRITICAL severity rule blocks any output containing sensitive patterns (SSNs, private addresses, or case-specific IDs).
-2.  **Capability Gating**: Legal agents are "sandboxed" and can only access approved internal databases. Any attempt to query external APIs is blocked by the ACGS engine.
-3.  **IP Guardrails**: Rules prevent the agent from generating text that mimics unauthorized digital personas, complying with 2026 IP and deepfake regulations (like Texas TRAIGA).
+2.  **Capability Gating**: Legal agents are "sandboxed" and can only access approved internal databases. Any attempt routed through governed tools to query external APIs is blocked by the ACGS engine.
+3.  **IP Guardrails**: Rules prevent the agent from generating text that mimics unauthorized digital personas, supporting compliance with 2026 IP and deepfake regulations (like Texas TRAIGA).
 
 ---
 

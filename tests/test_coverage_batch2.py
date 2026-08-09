@@ -2291,7 +2291,7 @@ class TestComplianceChecklist:
 
         cl = ComplianceChecklist(system_id="sys1", risk_level="limited_risk")
         assert len(cl.items) > 0
-        assert any("52" in item.article_ref for item in cl.items)
+        assert any("Article 50(" in item.article_ref for item in cl.items)
 
     def test_minimal_risk_empty(self) -> None:
         from acgs_lite.eu_ai_act.compliance_checklist import ComplianceChecklist

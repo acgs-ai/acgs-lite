@@ -4,7 +4,10 @@ Provides Article 12 (Record-Keeping), Article 13 (Transparency),
 Article 14 (Human Oversight), and risk classification helpers
 for high-risk AI system compliance.
 
-**Deadline: EU AI Act high-risk provisions take effect 2026-08-02.**
+**Deadline: high-risk provisions are deferred by the 2026 Digital Omnibus
+(Council final approval 2026-06-29) — Annex III stand-alone high-risk systems
+must comply by 2027-12-02; Annex I embedded-product high-risk systems by
+2028-08-02.**
 
 Constitutional Hash: 608508a9bd224290
 
@@ -133,7 +136,8 @@ __all__ = [
     "check_license",
 ]
 
-EU_AI_ACT_HIGH_RISK_DEADLINE = "2026-08-02"
+EU_AI_ACT_HIGH_RISK_DEADLINE = "2027-12-02"  # Annex III stand-alone; deferred by 2026 Digital Omnibus (Council approval 2026-06-29)
+EU_AI_ACT_ANNEX_I_HIGH_RISK_DEADLINE = "2028-08-02"  # Annex I embedded-product; deferred by 2026 Digital Omnibus (Council approval 2026-06-29)
 
 
 def check_license() -> dict[str, object]:

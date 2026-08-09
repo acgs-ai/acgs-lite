@@ -6,7 +6,7 @@
 
 In 2026, the **Model Context Protocol (MCP)** has become the universal standard for how agents interact with tools, data, and *governance*. 
 
-By running ACGS-Lite as an MCP server, you can provide a "Single Source of Truth" for safety rules across your entire organization. Whether you are using Claude Desktop, VS Code, Cursor, or a custom multi-agent mesh, they can all call the same governance tools to ensure compliance.
+By running ACGS-Lite as an MCP server, you can provide a "Single Source of Truth" for safety rules across your entire organization. Whether you are using Claude Desktop, VS Code, Cursor, or a custom multi-agent mesh, they can all call the same governance tools so the same safety rules are applied consistently everywhere.
 
 ## Why Use an MCP Governance Server?
 

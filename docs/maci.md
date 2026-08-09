@@ -1,7 +1,7 @@
 # MACI Architecture
 
 MACI (Monitor-Approve-Control-Inspect) enforces separation of powers for AI agents.
-No agent can validate its own output.
+No governed agent can validate its own output.
 
 ## The Four Roles
 
@@ -24,8 +24,10 @@ Cannot execute.  constitution.       approves.        boundary check.
 ## Why Self-Validation Prevention Matters
 
 Without MACI, an agent can propose an action and approve it in the same step.
-This is the AI equivalent of a judge ruling on their own case. MACI makes this
-structurally impossible -- the Proposer role physically cannot call validation functions.
+This is the AI equivalent of a judge ruling on their own case. MACI enforces
+this at runtime: a Proposer-role call to validate() raises MACIViolationError.
+This governs code that goes through the MACI enforcer; it is not an
+OS/process-level boundary.
 
 ## Code Example
 

@@ -418,7 +418,7 @@ class TestComplianceChecklist:
     def test_limited_risk_items(self) -> None:
         cl = ComplianceChecklist(system_id="s1", risk_level="limited_risk")
         assert len(cl.items) > 0
-        assert any("52" in i.article_ref for i in cl.items)
+        assert any("Article 50(" in i.article_ref for i in cl.items)
 
     def test_minimal_risk_empty(self) -> None:
         cl = ComplianceChecklist(system_id="s1", risk_level="minimal_risk")

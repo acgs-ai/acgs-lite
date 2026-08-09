@@ -136,7 +136,7 @@ _IGAMING_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "is processed. AI-driven payout systems must verify that KYC status is "
         "'approved' before initiating a withdrawal transaction.",
         "UKGC LCCP AML-1.1",
-        "AuditLog — immutable audit trail for all governance decisions",
+        "AuditLog — tamper-evident audit trail for all governance decisions",
         True,
     ),
     (
@@ -155,7 +155,7 @@ _IGAMING_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "suspicious activity. AI models used for AML screening must produce "
         "auditable outputs and be reviewed at least annually for bias and drift.",
         "UKGC LCCP AML-2.1",
-        "AuditLog — immutable audit trail for all governance decisions",
+        "AuditLog — tamper-evident audit trail for all governance decisions",
         False,
     ),
     (
@@ -216,7 +216,7 @@ _IGAMING_ITEMS: list[tuple[str, str, str, str | None, bool]] = [
         "players must have a mechanism to request an explanation and challenge "
         "decisions that significantly affect their account.",
         "UKGC LCCP AI-2.2",
-        "AuditLog — immutable audit trail for all governance decisions",
+        "AuditLog — tamper-evident audit trail for all governance decisions",
         False,
     ),
     (
@@ -253,7 +253,7 @@ _ACGS_LITE_MAP: dict[str, str] = {
     "IGAMING-KYC-2.2": (
         "acgs-lite AuditLog — tamper-evident JSONL logging with cryptographic hash "
         "chaining records every KYC status change and withdrawal event, providing "
-        "an immutable audit trail for LCCP AML compliance"
+        "an tamper-evident audit trail for LCCP AML compliance"
     ),
     "IGAMING-KYC-2.4": (
         "acgs-lite AuditLog — all transaction monitoring outputs are logged with "

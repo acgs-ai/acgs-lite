@@ -131,7 +131,7 @@ the wrapped callable before user code runs.
 Receipts and audit logs are complementary:
 
 - the receipt proves authorization for this proposed execution boundary;
-- the audit log proves the governance trail has not been tampered with;
+- the audit log provides tamper-evident, hash-chained evidence that recorded entries were not altered;
 - either proof becoming missing or unverifiable is a fail-closed condition.
 
 ## Signed, Replay-Verifiable Receipts (optional)

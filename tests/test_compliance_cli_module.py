@@ -250,7 +250,7 @@ class TestAssessCmd:
         assert code == 0
         data = json.loads(out)
         dora_items = data["by_framework"]["dora"]["items"]
-        tlpt = next((i for i in dora_items if "Art.25" in i["ref"]), None)
+        tlpt = next((i for i in dora_items if "Art.26" in i["ref"]), None)
         if tlpt:
             assert tlpt["status"] != "not_applicable"
 
@@ -270,7 +270,7 @@ class TestAssessCmd:
         data = json.loads(out)
         items = data["by_framework"]["india_dpdp"]["items"]
         # With SDF flag, SDF items should be PENDING not NOT_APPLICABLE
-        sdf_items = [i for i in items if "Art.16" in i["ref"]]
+        sdf_items = [i for i in items if "§10(2)" in i["ref"]]
         for item in sdf_items:
             assert item["status"] in ("pending", "compliant"), (
                 f"SDF item {item['ref']} should not be N/A with SDF flag"

@@ -79,7 +79,7 @@ class TransparencyDisclosure:
         known_biases: Known data or algorithmic biases.
         data_requirements: Input data requirements.
         performance_metrics: Accuracy, precision, recall, etc.
-        ai_system_disclosure: Text to show end users (Article 52).
+        ai_system_disclosure: Text to show end users (Article 50).
         maintenance_instructions: How to monitor and maintain the system.
     """
 
@@ -110,7 +110,8 @@ class TransparencyDisclosure:
         """Validate that all required Article 13 fields are populated.
 
         Returns:
-            List of missing field names. Empty list means fully compliant.
+            List of missing field names. Empty list means all required disclosure
+            fields are present.
 
         Raises:
             ValueError: If any required fields are missing (convenience form).
@@ -216,7 +217,7 @@ class TransparencyDisclosure:
 
         lines += [
             "",
-            "User Disclosure (Article 52)",
+            "User Disclosure (Article 50)",
             f"{'-' * 20}",
             self.ai_system_disclosure,
             "",
@@ -268,7 +269,7 @@ class TransparencyDisclosure:
 
         lines += [
             "",
-            "## User Disclosure (Article 52)",
+            "## User Disclosure (Article 50)",
             "",
             f"> {self.ai_system_disclosure}",
             "",

@@ -58,7 +58,7 @@ the `jurisdiction` and `domain` keys in each system descriptor.
 
 ---
 
-## Supported Frameworks (19)
+## Supported Frameworks (20)
 
 | Framework ID | Name |
 |---|---|
@@ -81,6 +81,7 @@ the `jurisdiction` and `domain` keys in each system descriptor.
 | `china_ai` | China Algorithmic/GenAI + PIPL |
 | `ccpa_cpra` | California CCPA/CPRA |
 | `igaming` | iGaming / Online Gambling AI |
+| `japan_ai_guidelines` | Japan AI Guidelines for Business (METI/MIC) |
 
 ---
 

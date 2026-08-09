@@ -49,7 +49,7 @@ Add the following to your `claude_desktop_config.json`:
 
 ## 🧰 The Governance Toolset
 
-Once connected, your agent (e.g., Claude 3.5 Sonnet) will "see" these tools and can use them to ensure its own compliance.
+Once connected, your agent (e.g., Claude 3.5 Sonnet) will "see" these tools and can use them to check proposed actions against your governance rules.
 
 ### `validate_action`
 The core tool. It checks a proposed action against the Constitution.
