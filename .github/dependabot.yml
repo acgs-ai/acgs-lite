@@ -10,6 +10,13 @@ updates:
         dependency-type: "development"
       production-dependencies:
         dependency-type: "production"
+    ignore:
+      # mcp 2.0 renames Tool(inputSchema=...) -> input_schema= and drops the
+      # Server.list_tools() / Server.call_tool() decorators that
+      # src/acgs_lite/integrations/mcp_server.py is built on. pyproject pins
+      # mcp>=1.0,<2.0 deliberately; unpin only alongside that migration.
+      - dependency-name: "mcp"
+        versions: [">=2.0"]
     labels:
       - "dependencies"
 
