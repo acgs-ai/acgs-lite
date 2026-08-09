@@ -39,7 +39,8 @@ reports/
 ```
 
 > The `reports/` directory is gitignored. Re-run `run.py` to regenerate.
-> See [reports/EXPLAINED.md](reports/EXPLAINED.md) for full field definitions.
+> `run.py` also writes `reports/EXPLAINED.md`, which defines every field —
+> read it after the first run.
 
 ---
 

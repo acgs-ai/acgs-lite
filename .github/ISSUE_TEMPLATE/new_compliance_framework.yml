@@ -1,0 +1,95 @@
+name: New Compliance Framework
+description: Claim and propose a new regulatory framework mapping
+labels: ["compliance", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for extending ACGS coverage! Open this issue **before** you start
+        so nobody duplicates the research.
+
+        Read [Contributing a New Compliance Framework](https://acgs.ai/docs/contributing-frameworks)
+        first — `src/acgs_lite/compliance/eu_ai_act.py` is the reference
+        implementation of the `ComplianceFramework` protocol.
+  - type: input
+    id: framework
+    attributes:
+      label: Framework name
+      placeholder: "Korea AI Framework Act"
+    validations:
+      required: true
+  - type: input
+    id: framework_id
+    attributes:
+      label: Proposed registry ID
+      description: snake_case, matches the module name under `src/acgs_lite/compliance/`.
+      placeholder: "korea_ai_act"
+    validations:
+      required: true
+  - type: input
+    id: jurisdiction
+    attributes:
+      label: Jurisdiction
+      placeholder: "South Korea"
+    validations:
+      required: true
+  - type: dropdown
+    id: status
+    attributes:
+      label: Legal status
+      options:
+        - enacted
+        - proposed
+        - voluntary
+    validations:
+      required: true
+  - type: input
+    id: effective_date
+    attributes:
+      label: Effective date (if enacted)
+      placeholder: "2026-01-22"
+  - type: textarea
+    id: source
+    attributes:
+      label: Primary sources
+      description: >
+        Link the official statute, regulation, or standard text — not a
+        summary or a blog post. Mappings must be traceable to primary sources.
+      placeholder: |
+        - Official text: https://...
+        - Regulator guidance: https://...
+    validations:
+      required: true
+  - type: textarea
+    id: mapping
+    attributes:
+      label: Control mapping table
+      description: >
+        Which articles/sections apply, and which ACGS features cover them
+        automatically vs. require user action?
+      value: |
+        | Article / Section | Requirement | ACGS coverage | Auto or user action |
+        |---|---|---|---|
+        |  |  |  |  |
+    validations:
+      required: true
+  - type: dropdown
+    id: level
+    attributes:
+      label: Contribution level you're aiming for
+      description: See the contribution ladder in the guide. Level 1 is a fine place to start.
+      options:
+        - "Level 1 — Research only (mapping documented in this issue)"
+        - "Level 2 — Checklist implementation (no engine logic)"
+        - "Level 3 — Full framework (protocol + report + tests)"
+    validations:
+      required: true
+  - type: checkboxes
+    id: disclaimer
+    attributes:
+      label: Scope acknowledgement
+      options:
+        - label: >
+            I understand ACGS mappings are SELF-ASSESSED coverage aids, not legal
+            advice, certification, or regulatory approval.
+          required: true

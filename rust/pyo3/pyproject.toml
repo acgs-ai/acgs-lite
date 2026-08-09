@@ -21,8 +21,8 @@ classifiers = [
 dynamic = ["version"]
 
 [project.urls]
-Homepage = "https://github.com/dislovelhl/acgs-lite"
-Source = "https://github.com/dislovelhl/acgs-lite/tree/main/rust/pyo3"
+Homepage = "https://github.com/acgs-ai/acgs-lite"
+Source = "https://github.com/acgs-ai/acgs-lite/tree/main/rust/pyo3"
 
 [tool.maturin]
 # Produce abi3 wheels so one artifact works on all Python 3.8+ versions.

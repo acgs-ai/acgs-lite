@@ -20,14 +20,14 @@ permissions:
 jobs:
   linux:
     name: linux-${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     strategy:
       fail-fast: false
       matrix:
         target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Build wheels
@@ -44,14 +44,14 @@ jobs:
 
   macos:
     name: macos-${{ matrix.target }}
-    runs-on: macos-latest
+    runs-on: blacksmith-6vcpu-macos-15
     strategy:
       fail-fast: false
       matrix:
         target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Build wheels
@@ -67,10 +67,10 @@ jobs:
 
   windows:
     name: windows-x64
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Build wheels
@@ -86,10 +86,10 @@ jobs:
 
   sdist:
     name: sdist
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Build sdist

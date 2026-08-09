@@ -8,7 +8,7 @@
     "support_level": "documented",
     "request_shape": "openai.response_format.json_schema",
     "evidence_source": "https://developers.openai.com/api/docs/guides/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "legacy",
     "aliases": ["openai:gpt-4"],
     "is_active": true
@@ -22,7 +22,7 @@
     "support_level": "documented",
     "request_shape": "openai.response_format.json_schema",
     "evidence_source": "https://developers.openai.com/api/docs/guides/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "stable",
     "aliases": ["openai:gpt-5.5"],
     "is_active": true
@@ -36,7 +36,7 @@
     "support_level": "documented",
     "request_shape": "openai.response_format.json_schema",
     "evidence_source": "https://developers.openai.com/api/docs/guides/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "legacy",
     "aliases": ["openai:gpt-4o"],
     "is_active": true
@@ -50,7 +50,7 @@
     "support_level": "documented",
     "request_shape": "openai.response_format.json_schema",
     "evidence_source": "https://developers.openai.com/api/docs/guides/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "legacy",
     "aliases": ["openai:gpt-4o-mini"],
     "is_active": true
@@ -64,7 +64,7 @@
     "support_level": "documented",
     "request_shape": "openai.response_format.json_schema",
     "evidence_source": "https://developers.openai.com/api/docs/guides/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "legacy",
     "aliases": ["openai:o1"],
     "is_active": true
@@ -78,7 +78,7 @@
     "support_level": "documented",
     "request_shape": "openai.response_format.json_schema",
     "evidence_source": "https://developers.openai.com/api/docs/guides/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "stable",
     "aliases": ["openai:o3"],
     "is_active": true
@@ -92,7 +92,7 @@
     "support_level": "documented",
     "request_shape": "openai.response_format.json_schema",
     "evidence_source": "https://developers.openai.com/api/docs/guides/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "stable",
     "aliases": ["azure:gpt-5.5"],
     "is_active": true
@@ -106,7 +106,7 @@
     "support_level": "documented",
     "request_shape": "anthropic.output_config.json_schema",
     "evidence_source": "https://platform.claude.com/docs/fr/build-with-claude/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "stable",
     "aliases": ["anthropic:claude-opus-4-6"],
     "is_active": true
@@ -120,7 +120,7 @@
     "support_level": "documented",
     "request_shape": "anthropic.output_config.json_schema",
     "evidence_source": "https://platform.claude.com/docs/fr/build-with-claude/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "stable",
     "aliases": ["anthropic:claude-sonnet-4-6"],
     "is_active": true
@@ -134,7 +134,7 @@
     "support_level": "documented",
     "request_shape": "anthropic.output_config.json_schema",
     "evidence_source": "https://platform.claude.com/docs/fr/build-with-claude/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "legacy",
     "aliases": ["anthropic:claude-sonnet-4-5"],
     "is_active": true
@@ -148,7 +148,7 @@
     "support_level": "documented",
     "request_shape": "anthropic.output_config.json_schema",
     "evidence_source": "https://platform.claude.com/docs/fr/build-with-claude/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "legacy",
     "aliases": ["anthropic:claude-opus-4-5"],
     "is_active": true
@@ -162,7 +162,7 @@
     "support_level": "documented",
     "request_shape": "anthropic.output_config.json_schema",
     "evidence_source": "https://platform.claude.com/docs/fr/build-with-claude/structured-outputs",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "stable",
     "aliases": ["anthropic:claude-haiku-4-5"],
     "is_active": true
@@ -176,7 +176,7 @@
     "support_level": "documented",
     "request_shape": "google.config.json_schema",
     "evidence_source": "https://ai.google.dev/gemini-api/docs/structured-output",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "stable",
     "aliases": ["google:gemini-2.5-pro"],
     "is_active": true
@@ -190,7 +190,7 @@
     "support_level": "documented",
     "request_shape": "google.config.json_schema",
     "evidence_source": "https://ai.google.dev/gemini-api/docs/structured-output",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "stable",
     "aliases": ["google:gemini-2.5-flash", "gemini"],
     "is_active": true
@@ -204,7 +204,7 @@
     "support_level": "documented",
     "request_shape": "google.config.json_schema",
     "evidence_source": "https://ai.google.dev/gemini-api/docs/structured-output",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "stable",
     "aliases": ["google:gemini-2.5-flash-lite"],
     "is_active": true
@@ -218,7 +218,7 @@
     "support_level": "documented",
     "request_shape": "google.config.json_schema",
     "evidence_source": "https://ai.google.dev/gemini-api/docs/structured-output",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "preview",
     "aliases": ["google:gemini-3.1-pro-preview"],
     "is_active": true
@@ -232,7 +232,7 @@
     "support_level": "documented",
     "request_shape": "google.config.json_schema",
     "evidence_source": "https://ai.google.dev/gemini-api/docs/structured-output",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "preview",
     "aliases": ["google:gemini-3-flash-preview"],
     "is_active": true
@@ -246,7 +246,7 @@
     "support_level": "documented",
     "request_shape": "google.config.json_schema",
     "evidence_source": "https://ai.google.dev/gemini-api/docs/structured-output",
-    "checked_at": "2026-05-30",
+    "checked_at": "2026-07-28",
     "stability": "preview",
     "aliases": ["google:gemini-3.1-flash-lite-preview"],
     "is_active": true

@@ -312,11 +312,11 @@ _These edits were **applied** on 2026-05-31 to `planning/community-roadmap.md` (
 
 - **Current:**
 
-  > Have an idea for a direction not listed here? Open a [Discussion](https://github.com/dislovelhl/acgs-lite/discussions) in the **Ideas** category. Significant direction changes follow the decision process in [`GOVERNANCE.md`](GOVERNANCE.md).
+  > Have an idea for a direction not listed here? Open a [Discussion](https://github.com/acgs-ai/acgs-lite/discussions) in the **Ideas** category. Significant direction changes follow the decision process in [`GOVERNANCE.md`](GOVERNANCE.md).
 
 - **Proposed:**
 
-  > Have an idea? Chat with us in real time on [Discord](<INVITE_URL>), or — for anything that needs a durable record — open a [Discussion](https://github.com/dislovelhl/acgs-lite/discussions) in the **Ideas** category. Significant direction changes are decided in Discussions/Issues per [`GOVERNANCE.md`](GOVERNANCE.md); Discord is for conversation, not the system of record.
+  > Have an idea? Chat with us in real time on [Discord](<INVITE_URL>), or — for anything that needs a durable record — open a [Discussion](https://github.com/acgs-ai/acgs-lite/discussions) in the **Ideas** category. Significant direction changes are decided in Discussions/Issues per [`GOVERNANCE.md`](GOVERNANCE.md); Discord is for conversation, not the system of record.
 
 ### A9. `planning/README.md:13-22 (companion-doc map)`
 

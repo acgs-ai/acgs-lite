@@ -665,7 +665,7 @@ class TestCCPACPRA:
 
 
 # ---------------------------------------------------------------------------
-# 3. ComplianceFramework protocol conformance — all 18
+# 3. ComplianceFramework protocol conformance — all 20
 # ---------------------------------------------------------------------------
 
 _ALL_FRAMEWORK_CLASSES = [
@@ -754,7 +754,7 @@ class TestMultiFrameworkAssessor:
         report = assessor.assess(system_desc)
         assert report.acgs_lite_total_coverage > 0.0
 
-    def test_available_frameworks_lists_all_18(self) -> None:
+    def test_available_frameworks_lists_all_registered(self) -> None:
         available = MultiFrameworkAssessor.available_frameworks()
         assert len(available) == 20
         assert "nist_ai_rmf" in available
@@ -893,7 +893,7 @@ class TestJurisdictionSelection:
         fws = assessor.applicable_frameworks("new_york_city", "general")
         assert "nyc_ll144" in fws
 
-    def test_unknown_jurisdiction_returns_all_19(self) -> None:
+    def test_unknown_jurisdiction_returns_all_frameworks(self) -> None:
         assessor = MultiFrameworkAssessor()
         fws = assessor.applicable_frameworks("unknown_place", "unknown_domain")
         assert len(fws) == 20

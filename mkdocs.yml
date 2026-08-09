@@ -2,8 +2,8 @@ site_name: ACGS -- Constitutional AI Governance
 site_description: Constitutional governance infrastructure for AI agents
 site_url: https://acgs.ai/docs
 site_dir: site/docs
-repo_url: https://github.com/dislovelhl/acgs-lite
-repo_name: dislovelhl/acgs-lite
+repo_url: https://github.com/acgs-ai/acgs-lite
+repo_name: acgs-ai/acgs-lite
 edit_uri: edit/main/docs/
 
 plugins:
@@ -32,7 +32,7 @@ extra:
     default: stable
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/dislovelhl/acgs-lite
+      link: https://github.com/acgs-ai/acgs-lite
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/acgs-lite/
 
@@ -125,5 +125,9 @@ markdown_extensions:
   - toc:
       permalink: true
   - pymdownx.snippets:
-      base_path: [".", "../.."]
-      check_paths: false
+      # Resolved against the directory holding this config, so includes work in a
+      # standalone checkout and inside the ACGS monorepo alike.
+      base_path: ["."]
+      # Fail the build on a missing include instead of silently emitting an empty
+      # page — this previously shipped blank Security and Changelog pages.
+      check_paths: true

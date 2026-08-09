@@ -31,15 +31,19 @@ from __future__ import annotations
 
 from acgs_lite.policygen.context import DomainRiskLevel, PreContext, PreContextBuilder
 from acgs_lite.policygen.generator import AdaptivePolicyGenerator, GeneratedPolicy
+from acgs_lite.policygen.manifest import CAPABILITY_MAP, ManifestScanResult, scan_manifests
 from acgs_lite.policygen.research import PolicyRequirement, PolicyResearcher, ResearchReport
 
 __all__ = [
     "AdaptivePolicyGenerator",
+    "CAPABILITY_MAP",
     "DomainRiskLevel",
     "GeneratedPolicy",
+    "ManifestScanResult",
     "PolicyRequirement",
     "PolicyResearcher",
     "PreContext",
     "PreContextBuilder",
     "ResearchReport",
+    "scan_manifests",
 ]

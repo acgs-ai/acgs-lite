@@ -23,7 +23,7 @@ Constitutional Hash: 608508a9bd224290
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -184,6 +184,92 @@ class PreContext:
             "seed_keywords": list(self.seed_keywords),
             "metadata": dict(self.metadata),
         }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> PreContext:
+        """Inverse of :meth:`to_dict`.
+
+        Deterministic and strict (fail-closed, as befits a governance artifact):
+        unknown top-level keys raise ``ValueError`` naming them, a missing
+        ``domain`` raises ``ValueError``, and an unrecognized ``risk_level``
+        raises ``ValueError`` listing the valid values. Sequence fields
+        (``objectives``, ``risk_areas``, ``frameworks``, ``custom_requirements``,
+        ``seed_keywords``) must be an actual sequence (list/tuple) of strings --
+        a bare ``str``/``bytes`` or any other non-sequence value raises
+        ``ValueError`` naming the offending key, rather than silently shredding
+        a string into one-character tuple elements. ``metadata`` must be a
+        mapping; anything else raises ``ValueError``. Sequence fields are
+        restored as tuples to match the dataclass field types; keys absent from
+        ``data`` fall back to the dataclass defaults.
+        """
+        known_keys = {
+            "domain",
+            "description",
+            "objectives",
+            "risk_areas",
+            "frameworks",
+            "environment",
+            "risk_level",
+            "custom_requirements",
+            "seed_keywords",
+            "metadata",
+        }
+        unknown_keys = set(data.keys()) - known_keys
+        if unknown_keys:
+            raise ValueError(f"Unknown PreContext key(s): {', '.join(sorted(unknown_keys))}")
+        if "domain" not in data:
+            raise ValueError("Missing required PreContext key: 'domain'")
+
+        def _coerce_sequence(key: str, value: Any) -> tuple[str, ...]:
+            if isinstance(value, (str, bytes)):
+                raise ValueError(
+                    f"PreContext key {key!r} must be a sequence (list/tuple) of strings, "
+                    f"not a bare {type(value).__name__} (would be split into individual "
+                    "characters)"
+                )
+            if not isinstance(value, Sequence):
+                raise ValueError(
+                    f"PreContext key {key!r} must be a sequence (list/tuple) of strings, "
+                    f"got {type(value).__name__}"
+                )
+            return tuple(value)
+
+        kwargs: dict[str, Any] = {"domain": data["domain"]}
+        if "description" in data:
+            kwargs["description"] = data["description"]
+        if "objectives" in data:
+            kwargs["objectives"] = _coerce_sequence("objectives", data["objectives"])
+        if "risk_areas" in data:
+            kwargs["risk_areas"] = _coerce_sequence("risk_areas", data["risk_areas"])
+        if "frameworks" in data:
+            kwargs["frameworks"] = _coerce_sequence("frameworks", data["frameworks"])
+        if "environment" in data:
+            kwargs["environment"] = data["environment"]
+        if "risk_level" in data:
+            raw_risk_level = data["risk_level"]
+            try:
+                kwargs["risk_level"] = DomainRiskLevel(raw_risk_level)
+            except ValueError as exc:
+                valid_values = ", ".join(level.value for level in DomainRiskLevel)
+                raise ValueError(
+                    f"Invalid risk_level {raw_risk_level!r}; valid values: {valid_values}"
+                ) from exc
+        if "custom_requirements" in data:
+            kwargs["custom_requirements"] = _coerce_sequence(
+                "custom_requirements", data["custom_requirements"]
+            )
+        if "seed_keywords" in data:
+            kwargs["seed_keywords"] = _coerce_sequence("seed_keywords", data["seed_keywords"])
+        if "metadata" in data:
+            raw_metadata = data["metadata"]
+            if not isinstance(raw_metadata, Mapping):
+                raise ValueError(
+                    f"PreContext key 'metadata' must be a mapping, got "
+                    f"{type(raw_metadata).__name__}"
+                )
+            kwargs["metadata"] = dict(raw_metadata)
+
+        return cls(**kwargs)
 
 
 class PreContextBuilder:

@@ -11,13 +11,13 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
@@ -41,11 +41,11 @@ jobs:
             -v --tb=short
 
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: test
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install dependencies
@@ -85,10 +85,10 @@ jobs:
 
   governance-regression:
     name: Governance regression gate
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install dependencies
@@ -98,27 +98,27 @@ jobs:
 
   codeql:
     name: CodeQL
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       actions: read
       contents: read
       security-events: write
     steps:
       - uses: actions/checkout@v7
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@v4.37.3
         with:
           languages: python
           queries: security-and-quality
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@v4.37.3
         with:
           category: "/language:python"
 
   python-fallback:
     name: Python fallback (no Rust companion)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install without Rust companion
@@ -135,11 +135,31 @@ jobs:
             -m "not slow and not benchmark and not e2e" \
             -q --tb=short
 
-  package:
-    runs-on: ubuntu-latest
+  docs:
+    name: Docs build and link check
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+        with:
+          # git-revision-date-localized needs history to date each page.
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install docs toolchain
+        run: pip install -e ".[docs]"
+      # --strict turns broken internal links and missing snippet includes into
+      # build failures, so a blank page can never ship to acgs.ai/docs again.
+      - name: Build documentation
+        run: python -m mkdocs build --strict
+      - name: Check documentation links
+        run: python3 scripts/check_links.py
+
+  package:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install build tools
@@ -151,10 +171,10 @@ jobs:
 
   agent-workspace:
     name: Agent-ready workspace
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install dependencies

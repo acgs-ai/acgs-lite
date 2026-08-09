@@ -1,6 +1,6 @@
 # Contributing a New Compliance Framework
 
-ACGS covers **20 regulatory frameworks**. Adding a 21st is mostly research — the code is a filled-in protocol class (~200 lines).
+ACGS covers **20 regulatory frameworks**. Adding the next one is mostly research — the code is a filled-in protocol class (~200 lines).
 
 This guide walks from zero to merged PR.
 
@@ -8,8 +8,8 @@ This guide walks from zero to merged PR.
 
 ## Before You Start
 
-1. Open a [New Compliance Framework issue](https://github.com/dislovelhl/acgs-lite/issues/new?template=new_compliance_framework.yml)
-2. Read the [EU AI Act implementation](https://github.com/dislovelhl/acgs-lite/blob/main/src/acgs_lite/compliance/eu_ai_act.py) as the reference
+1. Open a [New Compliance Framework issue](https://github.com/acgs-ai/acgs-lite/issues/new?template=new_compliance_framework.yml)
+2. Read the [EU AI Act implementation](https://github.com/acgs-ai/acgs-lite/blob/main/src/acgs_lite/compliance/eu_ai_act.py) as the reference
 3. Check `src/acgs_lite/compliance/` — your target framework may already be in progress
 
 ---

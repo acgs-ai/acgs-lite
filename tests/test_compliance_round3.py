@@ -421,7 +421,7 @@ class TestMultiFrameworkAssessorRound3:
         fws = assessor.applicable_frameworks("united_states", "general")
         assert "ccpa_cpra" in fws
 
-    def test_available_frameworks_lists_all_18(self) -> None:
+    def test_available_frameworks_lists_all_registered(self) -> None:
         assessor = MultiFrameworkAssessor()
         available = assessor.available_frameworks()
         assert len(available) == 20
@@ -446,7 +446,7 @@ class TestMultiFrameworkAssessorRound3:
         assert "india_dpdp" in report.frameworks_assessed
         assert isinstance(report, MultiFrameworkReport)
 
-    def test_explicit_18_framework_run(self) -> None:
+    def test_explicit_all_framework_run(self) -> None:
         assessor = MultiFrameworkAssessor()
         report = assessor.assess(
             {
@@ -601,7 +601,7 @@ class TestComplianceReportExporter:
         assert "My Custom Compliance Report" in exporter.to_text()
         assert "My Custom Compliance Report" in exporter.to_markdown()
 
-    def test_18_framework_exporter_smoke_test(self) -> None:
+    def test_all_framework_exporter_smoke_test(self) -> None:
         assessor = MultiFrameworkAssessor()
         report = assessor.assess(
             {

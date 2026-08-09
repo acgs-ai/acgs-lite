@@ -7,18 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
-
-## [2.11.0] - Unreleased
-
-### Added
-
-- Added a release-proof demo script and a reproducible JSON artifact for fresh-venv verification.
-
-### Changed
-
-- Aligned release messaging with the currently published package state: `2.10.1` is the latest published package; `2.11.0` remains pending publication.
-
 ### Fixed
 
 - Corrected stale EU AI Act high-risk deadline claims (previously "August 2, 2026") across the
@@ -51,7 +39,7 @@ _Nothing yet._
   was also reworded to accurate, verifiable claims ("supports," "tamper-evident," "detects")
   throughout the affected modules and documentation.
 
-## [2.11.0] - Unreleased
+## [2.11.0] - 2026-07-28
 
 ### Security
 
@@ -96,6 +84,16 @@ _Nothing yet._
 - Added runnable examples and docs for DSPy governance, GitHub Actions,
   pre-commit usage, AI-agent verification, LangChain onboarding, integration
   choice guidance, and what-gets-blocked walkthroughs.
+- Added `examples/release_proof.py`, a release-proof demo that runs without API
+  keys and emits a deterministic JSON artifact for fresh-venv verification. The
+  artifact reports the installed package version rather than a hardcoded one.
+- Added `scripts/check_release_coherence.py`, a guard that fails when a version
+  is presented as released in `CHANGELOG.md` but has no matching git tag.
+- Added `scripts/check_links.py` and wired it into `make validate` and CI so
+  broken repository and documentation links fail the build.
+- Added an experimental `gove` extra (`acgs_lite.gove`, Python >= 3.11) bridging
+  the gove-zone kernel through a `ConstitutionPolicy` adapter. Its receipt format
+  is distinct from `legitimacy` and is not translated between the two.
 
 ### Changed
 
@@ -117,6 +115,8 @@ _Nothing yet._
   community scaffolding and Stage 1 ignition content.
 - Updated Rust dependency pins for `spacetimedb`, `wasm-bindgen-test`, and
   `serde_json`.
+- Migrated CI workflows to Blacksmith runners.
+- Triaged the nltk CVE-2026-54293 advisory in `BLOCKERS.md`.
 
 ### Fixed
 
@@ -129,6 +129,18 @@ _Nothing yet._
 - Fixed README audit example usage and the lending example load path in the
   constitutions README.
 - Preserved distinct audit findings when validator errors occur.
+- Capped the `mcp` extra at `mcp>=1.0,<2.0`. MCP SDK 2.0.0 removed
+  `Server.list_tools`, which broke `integrations.mcp_server` against the
+  previously unbounded `mcp>=1.0` requirement.
+- Repaired 49 stale repository URLs that still pointed at the pre-transfer
+  `dislovelhl/acgs-lite` path, and absolutized 28 relative README links so they
+  resolve on the PyPI project page instead of 404ing.
+- Populated the previously blank Security and Changelog documentation pages and
+  enabled `check_paths` so `mkdocs build --strict` catches a recurrence.
+- Fixed broken CHANGELOG version-compare links, an incorrect clone path, and an
+  `acgs2.ai` domain typo; added the two missing GitHub issue templates.
+- Corrected the advertised compliance-framework count to the 20 the registry
+  actually holds, and fixed the test that passed only incidentally.
 
 ### Known limitations
 
@@ -136,8 +148,9 @@ _Nothing yet._
   experiment harness is present, but real artifacts require provider API keys,
   committed result JSON, stated datasets/sample sizes, and explicit summaries.
 - There are no independently confirmed production users in this release.
-- PyPI publication is not performed by this packaging unit and remains pending
-  owner action with valid credentials.
+- PyPI publication is performed by the `Publish to PyPI` workflow on a published
+  GitHub Release, using PyPI trusted publishing. Creating that release remains an
+  owner-gated action.
 - Curated-list submission or acceptance, third-party validation, certification,
   and independent adoption remain external outcomes and are not claimed here.
 
@@ -172,7 +185,7 @@ _Nothing yet._
 - `.gitignore` hardened: `.agents/`, `.bt/`, `.env`, `.env.*` (excluding `.env.example`),
   and root-level `/*.pdf` assessment outputs are now excluded.
 
-## [2.10.0] - 2026-04-23
+## 2.10.0 - 2026-04-23
 
 ### Breaking Changes
 
@@ -303,7 +316,7 @@ Stability table in the README for the stability tier of each subsystem.
 - `StreamingValidator(blocking_severities=None)` — default will change in 3.0.
 - `GovernedAgent(maci_role=<role>, enforce_maci=False)` — default will flip in 3.0.
 
-## [2.8.0] - 2026-04-15
+## 2.8.0 - 2026-04-15
 
 ### Added
 
@@ -328,7 +341,7 @@ Stability table in the README for the stability tier of each subsystem.
 - **Editable install path**: Updated `.pth` file to point to `src/` in the standalone repo
   rather than the old monorepo location.
 
-## [2.7.1] - 2026-04-09
+## 2.7.1 - 2026-04-09
 
 ### Added
 - **Constitutional swarm mesh settlement durability**: `SQLiteSettlementStore` provides a
@@ -443,7 +456,7 @@ Stability table in the README for the stability tier of each subsystem.
 - bandit security warnings in example scripts (pre-existing)
 - LaTeX paper PDF build in release workflow (requires full TeX Live; non-blocking)
 
-## [2026.1.0] - 2026-04-05
+## 2026.1.0 - 2026-04-05
 
 ### Added
 - **2026 Governance Frameworks**: Native support for EU AI Act, Colorado SB 205, and Texas TRAIGA.
@@ -459,7 +472,7 @@ Stability table in the README for the stability tier of each subsystem.
 - **Audit Backend**: Optimized `JSONLAuditBackend` with cryptographic chaining (SHA-256).
 - **Integrations**: Updated Anthropic, OpenAI, and LangChain adapters for 2026 model release lines.
 
-## [2.5.2] - 2026-04-05
+## 2.5.2 - 2026-04-05
 
 ### Added
 - Open-source distribution scaffolding: MkDocs documentation site, CONTRIBUTING.md,
@@ -470,7 +483,7 @@ Stability table in the README for the stability tier of each subsystem.
 - Updated all package URLs to individual GitHub repositories
 - Pinned Node 22 and uv 0.10.9 in eval-rules and GitLab CI
 
-## [2.5.1] - 2026-04-04
+## 2.5.1 - 2026-04-04
 
 ### Added
 - `to_decision_record()` for cross-layer governance evaluation
@@ -479,7 +492,7 @@ Stability table in the README for the stability tier of each subsystem.
 ### Fixed
 - CI test failures in tenant context blocking, OIDC mocking, and audit chain validation
 
-## [2.5.0] - 2026-04-03
+## 2.5.0 - 2026-04-03
 
 ### Added
 - Self-evaluation architecture (Phases 0-3): decision schema, LLM judge, shadow cascade
@@ -497,7 +510,7 @@ Stability table in the README for the stability tier of each subsystem.
 - Upgraded MACI enforcer with risk-level-based escalation paths
 - Improved constitutional validation performance with memoization
 
-## [2.4.0] - 2026-03-15
+## 2.4.0 - 2026-03-15
 
 ### Added
 - GitLab CI/CD integration with merge request governance bot
@@ -510,7 +523,7 @@ Stability table in the README for the stability tier of each subsystem.
 ### Changed
 - Expanded compliance coverage to HIPAA + AI, GDPR Art. 22, ECOA/FCRA, NYC LL 144
 
-## [2.3.0] - 2026-02-20
+## 2.3.0 - 2026-02-20
 
 ### Added
 - MCP Server integration (`acgs-lite[mcp]`)
@@ -522,7 +535,7 @@ Stability table in the README for the stability tier of each subsystem.
 ### Changed
 - Improved audit trail with SHA-256 chain verification
 
-## [2.2.0] - 2026-01-15
+## 2.2.0 - 2026-01-15
 
 ### Added
 - LangChain integration (`GovernanceRunnable`)
@@ -530,7 +543,7 @@ Stability table in the README for the stability tier of each subsystem.
 - `ConstitutionBuilder` fluent API
 - CLI: `acgs init`, `acgs lint`, `acgs test`
 
-## [2.1.0] - 2025-12-01
+## 2.1.0 - 2025-12-01
 
 ### Added
 - OpenAI integration adapter
@@ -538,7 +551,7 @@ Stability table in the README for the stability tier of each subsystem.
 - YAML constitution loading
 - Severity levels (CRITICAL, HIGH, MEDIUM, LOW)
 
-## [2.0.0] - 2025-10-15
+## 2.0.0 - 2025-10-15
 
 ### Added
 - Initial public release
@@ -549,11 +562,11 @@ Stability table in the README for the stability tier of each subsystem.
 - CLI tool (`acgs` / `acgs-lite`)
 - Keyword-based and regex rule matching
 
-[2.5.2]: https://github.com/dislovelhl/acgs-lite/compare/v2.5.1...v2.5.2
-[2.5.1]: https://github.com/dislovelhl/acgs-lite/compare/v2.5.0...v2.5.1
-[2.5.0]: https://github.com/dislovelhl/acgs-lite/compare/v2.4.0...v2.5.0
-[2.4.0]: https://github.com/dislovelhl/acgs-lite/compare/v2.3.0...v2.4.0
-[2.3.0]: https://github.com/dislovelhl/acgs-lite/compare/v2.2.0...v2.3.0
-[2.2.0]: https://github.com/dislovelhl/acgs-lite/compare/v2.1.0...v2.2.0
-[2.1.0]: https://github.com/dislovelhl/acgs-lite/compare/v2.0.0...v2.1.0
-[2.0.0]: https://github.com/dislovelhl/acgs-lite/releases/tag/v2.0.0
+[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.10.1...v2.11.0
+[2.10.1]: https://github.com/acgs-ai/acgs-lite/compare/v2.9.0...v2.10.1
+[2.9.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.8.1...v2.9.0
+[2.8.1]: https://github.com/acgs-ai/acgs-lite/compare/v2.7.2...v2.8.1
+[2.7.2]: https://github.com/acgs-ai/acgs-lite/compare/v2.7.0...v2.7.2
+[2.7.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.6.0...v2.7.0
+[2.6.0]: https://github.com/acgs-ai/acgs-lite/releases/tag/v2.6.0

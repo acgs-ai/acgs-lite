@@ -3,9 +3,10 @@
 Goal: produce a clean, validated release artifact and verify it installs from a fresh
 environment. Agent: `release` (see `agents/release.agent.yaml`).
 
-> Uploading to PyPI (`make publish`) is **owner-gated** — it needs a valid `TWINE_PASSWORD`
-> token. See `BLOCKERS.md` (PyPI token). Never run `make publish` without explicit owner
-> authorization.
+> Uploading to PyPI is **owner-gated**, but it is no longer a manual `twine` step.
+> Publishing is performed by `.github/workflows/publish.yml` when a GitHub Release is
+> published, authenticated with PyPI trusted publishing (OIDC) — no `TWINE_PASSWORD`
+> token is involved. The owner-gated action is *creating the release*.
 
 ## Steps
 
@@ -13,11 +14,20 @@ environment. Agent: `release` (see `agents/release.agent.yaml`).
 # 1. Make sure everything is green and consistent.
 make verify
 
-# 2. Update the changelog for the new version.
+# 2. Bump the version in BOTH places — the publish workflow fails if the tag
+#    and pyproject disagree.
+$EDITOR pyproject.toml            # project.version
+$EDITOR src/acgs_lite/_meta.py    # VERSION
+
+# 3. Update the changelog: date the new version's heading and add its
+#    compare link at the bottom of the file.
 $EDITOR CHANGELOG.md
 
-# 3. Build + validate the package (no upload).
+# 4. Build + validate the package (no upload).
 make publish-dry-run        # = make build && twine check dist/*
+
+# 5. Confirm the release state is coherent once the tag exists.
+python scripts/check_release_coherence.py
 ```
 
 ## Verify a clean install (fresh venv)
@@ -33,9 +43,10 @@ The release proof script is the canonical proof artifact for the current package
 
 ## Publish (owner only)
 
-```bash
-TWINE_PASSWORD=*** make publish
-```
+Merge the release commit to `main`, then publish a GitHub Release whose tag is
+`vX.Y.Z` — matching `pyproject.toml` exactly. That tag creation is what publishes
+the package; `Publish to PyPI` builds the sdist and wheel, runs `twine check`, and
+uploads through trusted publishing.
 
 ## Failure modes
 
@@ -43,4 +54,5 @@ TWINE_PASSWORD=*** make publish
 | --- | --- |
 | `twine check` fails | fix packaging metadata in `pyproject.toml` |
 | fresh install import error | a runtime dep is under an optional extra — move it to `dependencies` |
-| `403` on publish | token expired/missing — owner must renew (see `BLOCKERS.md`) |
+| publish workflow fails on the version check | the release tag does not match `pyproject.toml`; delete the release + tag, correct the version, re-release |
+| publish workflow does not run | the release was saved as a draft — it triggers on `published`, not `created` |

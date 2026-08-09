@@ -3,12 +3,12 @@
 [![PyPI](https://img.shields.io/pypi/v/acgs-lite?color=blue&style=for-the-badge)](https://pypi.org/project/acgs-lite/)
 [![Python](https://img.shields.io/pypi/pyversions/acgs-lite?style=for-the-badge)](https://pypi.org/project/acgs-lite/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-green.svg?style=for-the-badge)](https://www.apache.org/licenses/LICENSE-2.0)
-[![CI](https://img.shields.io/github/actions/workflow/status/dislovelhl/acgs-lite/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/dislovelhl/acgs-lite/actions)
-[![Coverage](https://img.shields.io/badge/tests-passing-brightgreen?style=for-the-badge)](https://github.com/dislovelhl/acgs-lite/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/acgs-ai/acgs-lite/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/acgs-ai/acgs-lite/actions)
+[![Coverage](https://img.shields.io/badge/tests-passing-brightgreen?style=for-the-badge)](https://github.com/acgs-ai/acgs-lite/actions)
 [![Documentation](https://img.shields.io/badge/docs-acgs.ai-brightgreen?style=for-the-badge)](https://acgs.ai/docs)
-[![GitHub stars](https://img.shields.io/github/stars/dislovelhl/acgs-lite?style=social)](https://github.com/dislovelhl/acgs-lite/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/dislovelhl/acgs-lite?style=social)](https://github.com/dislovelhl/acgs-lite/network/members)
-[![Star History](https://img.shields.io/badge/star%20history-chart-yellow?style=social)](https://star-history.com/#dislovelhl/acgs-lite)
+[![GitHub stars](https://img.shields.io/github/stars/acgs-ai/acgs-lite?style=social)](https://github.com/acgs-ai/acgs-lite/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/acgs-ai/acgs-lite?style=social)](https://github.com/acgs-ai/acgs-lite/network/members)
+[![Star History](https://img.shields.io/badge/star%20history-chart-yellow?style=social)](https://star-history.com/#acgs-ai/acgs-lite)
 
 
 **acgs-lite** is a lightweight constitutional governance runtime for agent
@@ -49,10 +49,10 @@ The example keeps side effects in memory, but exercises the adoption wedge:
 ALLOW executes with a valid receipt, TRANSFORM redacts before execution, DENY is
 blocked, receiptless execution is refused, and audit evidence is replay-checked.
 
-Start with [GOAL.md](./GOAL.md) for the Goal v1.0 product boundary and
-[ROADMAP.md](./ROADMAP.md) for the implementation milestones.
+Start with [GOAL.md](https://github.com/acgs-ai/acgs-lite/blob/main/GOAL.md) for the Goal v1.0 product boundary and
+[ROADMAP.md](https://github.com/acgs-ai/acgs-lite/blob/main/ROADMAP.md) for the implementation milestones.
 The stable Runtime Legitimacy Kernel public API is documented in
-[`docs/api/legitimacy.md`](./docs/api/legitimacy.md).
+[`docs/api/legitimacy.md`](https://github.com/acgs-ai/acgs-lite/blob/main/docs/api/legitimacy.md).
 
 Non-goals:
 
@@ -84,15 +84,15 @@ HARD_DENY
 ```
 
 The minimal side-effect membrane example is
-[`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py).
+[`examples/governed_execution_membrane.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/governed_execution_membrane.py).
 The Phoenix example under
-[`examples/phoenix_acgs_governed_agent/`](./examples/phoenix_acgs_governed_agent/)
+[`examples/phoenix_acgs_governed_agent/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/phoenix_acgs_governed_agent)
 shows `request -> decision -> receipt -> bounded execution` telemetry; its
 `governance.decision.*` span attributes are experimental.
 
-**Current status:** the currently published package on PyPI is `2.10.1`; the
-repository also contains `2.11.0` work-in-progress and a fresh-venv proof path.
-PyPI publication remains an owner-gated external action. Production deployment
+**Current status:** the currently published package on PyPI is `2.11.0`, which
+carries the fail-closed hardening described in the changelog and a fresh-venv
+proof path. Production deployment
 properties depend on your constitution, storage, authentication, and operational
 controls, and the project does not claim independent production users or
 compliance certification.
@@ -102,8 +102,8 @@ compliance certification.
 Please report suspected ACGS-Lite governance or security vulnerabilities
 privately to `security@acgs.ai` instead of opening a public issue. The canonical
 supported-version, scope, and disclosure-window policy is in
-[`SECURITY.md`](./SECURITY.md), with a mirrored docs page at
-[`docs/security.md`](./docs/security.md).
+[`SECURITY.md`](https://github.com/acgs-ai/acgs-lite/blob/main/SECURITY.md), with a mirrored docs page at
+[`docs/security.md`](https://github.com/acgs-ai/acgs-lite/blob/main/docs/security.md).
 
 <img width="1280" height="680" alt="ACGS_Lite" src="https://github.com/user-attachments/assets/0d6deeef-40fe-4e8e-9dc0-537744162dff" />
 
@@ -115,12 +115,12 @@ Start here for the shortest local verification paths:
   verifies the repo `agent-index.json` loads through `AgentRegistry`, confirms
   the governance-review route ranks first, and runs the focused agent-discovery
   tests without requiring `make`
-- **AI-agent install verify** — [`examples/agent_quickstart/`](./examples/agent_quickstart/) runs a self-verifying suite: `GovernedCallable` + MACI + AuditLog in one script, exits 0 on success
-- **Goal v1.0 membrane** — [`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py) shows ALLOW / DENY / TRANSFORM decisions, receipts, executor refusal, and audit evidence
+- **AI-agent install verify** — [`examples/agent_quickstart/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/agent_quickstart) runs a self-verifying suite: `GovernedCallable` + MACI + AuditLog in one script, exits 0 on success
+- **Goal v1.0 membrane** — [`examples/governed_execution_membrane.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/governed_execution_membrane.py) shows ALLOW / DENY / TRANSFORM decisions, receipts, executor refusal, and audit evidence
 - **Release proof artifact** — `python examples/release_proof.py --output /tmp/acgs-release-proof.json` writes a deterministic JSON proof another developer can inspect locally
-- **Minimal proof** — [`examples/basic_governance/`](./examples/basic_governance/) shows safe requests passing and unsafe ones blocked before execution
-- **Audit trail demo** — [`examples/audit_trail/`](./examples/audit_trail/) shows the tamper-evident decision chain
-- **Shared infrastructure path** — [`examples/mcp_agent_client.py`](./examples/mcp_agent_client.py) runs governance as shared MCP-compatible infrastructure
+- **Minimal proof** — [`examples/basic_governance/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/basic_governance) shows safe requests passing and unsafe ones blocked before execution
+- **Audit trail demo** — [`examples/audit_trail/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/audit_trail) shows the tamper-evident decision chain
+- **Shared infrastructure path** — [`examples/mcp_agent_client.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/mcp_agent_client.py) runs governance as shared MCP-compatible infrastructure
 - **Compliance mapping example** — `acgs assess --framework eu-ai-act` maps controls to regulatory requirements for review
 
 ## Hero demo
@@ -172,9 +172,9 @@ Expected output:
 
 **Fastest proof path:**
 
-1. **Block an unsafe action** with [`examples/basic_governance/`](./examples/basic_governance/)
-2. **Inspect the audit evidence** with [`examples/audit_trail/`](./examples/audit_trail/)
-3. **Run governance as shared infrastructure** with [`examples/mcp_agent_client.py`](./examples/mcp_agent_client.py)
+1. **Block an unsafe action** with [`examples/basic_governance/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/basic_governance)
+2. **Inspect the audit evidence** with [`examples/audit_trail/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/audit_trail)
+3. **Run governance as shared infrastructure** with [`examples/mcp_agent_client.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/mcp_agent_client.py)
 
 ```bash
 pip install acgs-lite
@@ -216,7 +216,7 @@ Expected output:
 🚫  Blocked: no-pii  — pii
 ```
 
-If you want the full example path, go to [`examples/README.md`](./examples/README.md).
+If you want the full example path, go to [`examples/README.md`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/README.md).
 
 ---
 
@@ -274,7 +274,7 @@ pip install acgs-lite
 > **Upgrading from v2.9.x?** v2.10.0 changed `require_auth` to default to `True`.
 > If you call `create_governance_app()` without an `api_key`, you'll get a `ValueError` at startup.
 > Pass `api_key=os.environ["ACGS_API_KEY"]` or set `require_auth=False` for local dev.
-> See [CHANGELOG](./CHANGELOG.md) for full details.
+> See [CHANGELOG](https://github.com/acgs-ai/acgs-lite/blob/main/CHANGELOG.md) for full details.
 
 With framework integrations:
 
@@ -298,8 +298,8 @@ Copy the prompt below directly into Claude Code, Codex CLI, or any AI coding age
 It installs acgs-lite, runs the self-verifying quickstart, and reports pass/fail — no API keys required.
 
 For Claude Code `PreToolUse` governance, use the canonical hook at
-[`integrations/claude_code/acgs-governance-preuse.sh`](./integrations/claude_code/acgs-governance-preuse.sh)
-and the setup guide in [`integrations/claude_code/README.md`](./integrations/claude_code/README.md).
+[`integrations/claude_code/acgs-governance-preuse.sh`](https://github.com/acgs-ai/acgs-lite/blob/main/integrations/claude_code/acgs-governance-preuse.sh)
+and the setup guide in [`integrations/claude_code/README.md`](https://github.com/acgs-ai/acgs-lite/blob/main/integrations/claude_code/README.md).
 The hook calls a configurable governance sidecar before `Bash`, `Write`, `Edit`,
 and `MultiEdit` run; the default `/x402/check` URL is an external sidecar
 contract, not a bundled acgs-lite server route.
@@ -387,13 +387,13 @@ CONSTRAINTS:
 ### Source installation (from this repo)
 
 ```bash
-git clone https://github.com/dislovelhl/acgs-lite
-cd acgs-lite/packages/acgs-lite
+git clone https://github.com/acgs-ai/acgs-lite.git
+cd acgs-lite
 pip install -e ".[dev]"
 python examples/agent_quickstart/run.py   # exit 0 = all clear
 ```
 
-See [`examples/agent_quickstart/`](./examples/agent_quickstart/) for the full self-verifying suite.
+See [`examples/agent_quickstart/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/agent_quickstart) for the full self-verifying suite.
 
 ---
 
@@ -511,7 +511,7 @@ Honest boundaries:
 - Receipts carry no anti-replay nonce; enforce `request_id` uniqueness at the
   application layer.
 
-See [`docs/api/legitimacy.md`](./docs/api/legitimacy.md) for the full receipt and
+See [`docs/api/legitimacy.md`](https://github.com/acgs-ai/acgs-lite/blob/main/docs/api/legitimacy.md) for the full receipt and
 replay-verification API.
 
 ---
@@ -547,7 +547,7 @@ record = policy.evaluate(ToolCall(name="deploy_feature", args={"env": "staging"}
 `record` is a `gove_zone.decision.DecisionRecord`; hand it to gove-zone's own
 `ChainHashAuditStore` / `DecisionReceipt.from_record` / `execute_with_receipt`
 to reach a signed, gated execution — see
-[`tests/gove/test_conformance_e2e.py`](./tests/gove/test_conformance_e2e.py)
+[`tests/gove/test_conformance_e2e.py`](https://github.com/acgs-ai/acgs-lite/blob/main/tests/gove/test_conformance_e2e.py)
 for the full, working chain.
 
 Honest limitations:
@@ -631,7 +631,7 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 
 ---
 
-## Stable surfaces today (2.10.1 published; 2.11.0 pending)
+## Stable surfaces today (2.11.0 published)
 
 This table describes library surfaces with stable APIs and test coverage. It is
 not a blanket production-readiness claim for every deployment.
@@ -808,28 +808,28 @@ acgs resume --agent-id agent-01
 
 | Guide | Description |
 |-------|-------------|
-| [Examples](./examples/README.md) | Canonical demo path: block, audit, then MCP |
-| [Constitution Templates](./examples/constitutions/README.md) | Reusable constitutions for content moderation, customer service, healthcare, hiring, and lending |
+| [Examples](https://github.com/acgs-ai/acgs-lite/blob/main/examples/README.md) | Canonical demo path: block, audit, then MCP |
+| [Constitution Templates](https://github.com/acgs-ai/acgs-lite/blob/main/examples/constitutions/README.md) | Reusable constitutions for content moderation, customer service, healthcare, hiring, and lending |
 | [Quickstart](https://acgs.ai/docs/quickstart) | Up and running in 5 minutes |
 | [Architecture](https://acgs.ai/docs/architecture) | Engine internals, MACI deep dive |
 | [Integrations](https://acgs.ai/docs/integrations) | OpenAI, Anthropic, LangChain, MCP, A2A |
-| [Integration Decision Guide](./docs/integration-decision-guide.md) | Which adapter when: native vs. framework, streaming, async, MCP vs. in-process |
+| [Integration Decision Guide](https://github.com/acgs-ai/acgs-lite/blob/main/docs/integration-decision-guide.md) | Which adapter when: native vs. framework, streaming, async, MCP vs. in-process |
 | [Compliance](https://acgs.ai/docs/compliance-2026) | 20-framework regulatory mapping |
 | [CLI Reference](https://acgs.ai/docs/cli) | Full command reference |
 | [Why Governance?](https://acgs.ai/docs/why-governance) | The case for deterministic guardrails |
 | [OWASP LLM Top 10](https://acgs.ai/docs/owasp-2026) | ACGS coverage of each risk |
 | [Testing Guide](https://acgs.ai/docs/testing-governance) | Testing governed agents |
-| [Constitution Lifecycle API](./docs/api/lifecycle.md) | HTTP endpoints for draft, review, eval, activation, rollback, and reject |
+| [Constitution Lifecycle API](https://github.com/acgs-ai/acgs-lite/blob/main/docs/api/lifecycle.md) | HTTP endpoints for draft, review, eval, activation, rollback, and reject |
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions! See [CONTRIBUTING.md](https://github.com/acgs-ai/acgs-lite/blob/main/CONTRIBUTING.md) for guidelines.
 
 ```bash
-git clone https://github.com/dislovelhl/acgs-lite
-cd acgs-lite/packages/acgs-lite
+git clone https://github.com/acgs-ai/acgs-lite.git
+cd acgs-lite
 pip install -e ".[dev]"
 pytest tests/ --import-mode=importlib
 ```
@@ -838,7 +838,7 @@ pytest tests/ --import-mode=importlib
 
 ## 📄 License
 
-Apache-2.0. See [LICENSE](LICENSE) for details.
+Apache-2.0. See [LICENSE](https://github.com/acgs-ai/acgs-lite/blob/main/LICENSE) for details.
 
 Commercial enterprise licences (SLA, support, air-gapped deployment) available at [acgs.ai](https://acgs.ai).
 

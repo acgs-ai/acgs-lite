@@ -50,7 +50,7 @@ google = ["google-genai>=1.0"]
 llamaindex = ["llama-index-core>=0.10"]
 gove = ["gove-zone>=0.1.0a1; python_version >= '3.11'"]
 autogen = ["autogen-core>=0.4", "autogen-agentchat>=0.4"]
-mcp = ["mcp>=1.0", "structlog>=21.0"]
+mcp = ["mcp>=1.0,<2.0", "structlog>=21.0"]
 crewai = ["crewai>=0.30"]
 smolagents = ["smolagents>=1.9"]
 swarms = ["swarms>=7.0"]
@@ -91,10 +91,11 @@ dev = [
 [project.urls]
 Homepage = "https://acgs.ai"
 Documentation = "https://acgs.ai/docs"
-Repository = "https://github.com/dislovelhl/acgs-lite"
-Issues = "https://github.com/dislovelhl/acgs-lite/issues"
-Changelog = "https://github.com/dislovelhl/acgs-lite/releases"
-PyPI = "https://pypi.org/project/acgs-lite/"
+Repository = "https://github.com/acgs-ai/acgs-lite"
+Issues = "https://github.com/acgs-ai/acgs-lite/issues"
+Changelog = "https://github.com/acgs-ai/acgs-lite/blob/main/CHANGELOG.md"
+"Release Notes" = "https://github.com/acgs-ai/acgs-lite/releases"
+Discussions = "https://github.com/acgs-ai/acgs-lite/discussions"
 
 [tool.setuptools.packages.find]
 where = ["src"]

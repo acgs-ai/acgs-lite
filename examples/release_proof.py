@@ -16,13 +16,14 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from acgs_lite import __version__  # noqa: E402
 from governed_execution_membrane import run_demo  # noqa: E402
 
 
 def build_payload() -> dict[str, Any]:
     result = run_demo()
     return {
-        "release": "2.10.1",
+        "release": __version__,
         "proof_type": "governed_execution_membrane",
         "summary": {
             "decisions": result["decisions"],
