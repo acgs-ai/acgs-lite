@@ -101,7 +101,7 @@ mypy_extensions==1.1.0
 nest-asyncio==1.6.0
 networkx==3.6.1
 nh3==0.3.6
-nltk==3.10.0
+nltk==3.10.2
 numpy==2.4.6
 openai==2.44.0
 opentelemetry-api==1.43.0
