@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-08-15
+
 ### Added
 
 - AMD GAIA adapter (`acgs_lite.integrations.gaia`): a duck-typed
@@ -571,7 +573,8 @@ Stability table in the README for the stability tier of each subsystem.
 - CLI tool (`acgs` / `acgs-lite`)
 - Keyword-based and regex rule matching
 
-[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v2.11.0...HEAD
+[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v2.12.0...HEAD
+[2.12.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/acgs-ai/acgs-lite/compare/v2.9.0...v2.10.1
 [2.9.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.8.1...v2.9.0

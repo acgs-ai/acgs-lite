@@ -90,7 +90,7 @@ The Phoenix example under
 shows `request -> decision -> receipt -> bounded execution` telemetry; its
 `governance.decision.*` span attributes are experimental.
 
-**Current status:** the currently published package on PyPI is `2.11.0`, which
+**Current status:** the currently published package on PyPI is `2.12.0`, which
 carries the fail-closed hardening described in the changelog and a fresh-venv
 proof path. Production deployment
 properties depend on your constitution, storage, authentication, and operational
@@ -631,7 +631,7 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 
 ---
 
-## Stable surfaces today (2.11.0 published)
+## Stable surfaces today (2.12.0 published)
 
 This table describes library surfaces with stable APIs and test coverage. It is
 not a blanket production-readiness claim for every deployment.
