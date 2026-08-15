@@ -193,6 +193,7 @@ test-examples:
 	$(TEST_ENV) $(PYTHON) examples/maci_separation/main.py
 	$(TEST_ENV) $(PYTHON) examples/audit_trail/main.py
 	$(TEST_ENV) $(PYTHON) examples/mock_stub_testing/main.py
+	$(TEST_ENV) $(PYTHON) examples/gaia_amd/main.py
 	@echo "All examples passed."
 
 # ── Quality ───────────────────────────────────────────────────────────────────

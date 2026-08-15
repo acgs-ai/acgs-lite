@@ -83,6 +83,7 @@ nav:
   - Integration Decision Guide: integration-decision-guide.md
   - Guides:
       - Govern a LangChain Agent: guides/langchain.md
+      - Govern AMD GAIA tool calls: guides/gaia.md
       - What Gets Blocked (Walkthrough): blog/what-got-blocked.md
   - Compliance: compliance.md
   - MACI Architecture: maci.md

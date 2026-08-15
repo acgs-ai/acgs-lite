@@ -24,6 +24,7 @@ ACGS-Lite is designed to be framework-agnostic. It provides native adapters for 
 | **AutoGen** | `acgs-lite[autogen]` | `GovernedModelClient` | Experimental |
 | **CrewAI** | `acgs-lite[crewai]` | `GovernedCrew` | Experimental |
 | **PydanticAI** | `acgs-lite[all]` | `GovernedAgent` | **New (2026)** |
+| **AMD GAIA** | `acgs-lite` | `build_gaia_components` / `AcgsLitePolicyEngine` | Local — duck-typed `PolicyEngine` for AMD GAIA |
 
 ---
 

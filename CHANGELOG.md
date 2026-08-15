@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- AMD GAIA adapter (`acgs_lite.integrations.gaia`): a duck-typed
+  `PolicyEngine` plus checkpoint / receipt / policy-binding seams so
+  GAIA can swap the in-repo tag stub for a constitution-backed engine.
+  GAIA risk tags stay a floor; `GAIA_AUTO_APPROVE_TOOLS` is ignored;
+  missing adapter surfaces fail closed. Local and tested; not a claim
+  that AMD ships this by default.
+
 ### Fixed
 
 - Corrected stale EU AI Act high-risk deadline claims (previously "August 2, 2026") across the

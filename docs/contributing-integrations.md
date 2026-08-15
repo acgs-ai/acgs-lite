@@ -2,7 +2,7 @@
 
 **This is the easiest meaningful code contribution to ACGS.** Adding a new platform integration typically takes 1–3 hours and follows a well-worn pattern.
 
-ACGS currently wraps **Anthropic, OpenAI, LangChain, LiteLLM, Google GenAI, LlamaIndex, AutoGen, CrewAI, A2A, MCP, GitLab CI, DSPy, and Haystack**.
+ACGS currently wraps **Anthropic, OpenAI, LangChain, LiteLLM, Google GenAI, LlamaIndex, AutoGen, CrewAI, A2A, MCP, GitLab CI, DSPy, Haystack, and AMD GAIA's PolicyEngine Protocol**.
 
 ---
 
