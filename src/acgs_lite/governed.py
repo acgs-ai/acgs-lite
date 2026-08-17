@@ -56,6 +56,12 @@ from acgs_lite.legitimacy.invocation import (
     bind_policy,
     reject_method_spoof_kwargs,
 )
+from acgs_lite.legitimacy.ledger import (
+    AttemptStatus,
+    ConsumeDecision,
+    InProcessGrantLedger,
+    digest_output,
+)
 from acgs_lite.legitimacy.receipt import DecisionReceipt
 from acgs_lite.legitimacy.signing import (
     SIGNATURE_SCOPE_EXECUTION,
@@ -71,6 +77,7 @@ from acgs_lite.provider_capabilities import (
 from acgs_lite.serialization import iter_governance_payloads, serialize_for_governance
 
 T = TypeVar("T")
+_PROCEED = object()
 
 
 @runtime_checkable
@@ -662,6 +669,7 @@ class GovernedCallable:
         self.authorization_profile = resolve_profile(authorization_profile)
         self.trusted_issuer_keys = dict(trusted_issuer_keys or {})
         self._authority = ExecutionAuthority()
+        self._ledger = InProcessGrantLedger()
 
     def issue_grant(
         self, target: Callable[..., Any], /, *args: Any, **kwargs: Any
@@ -681,7 +689,12 @@ class GovernedCallable:
         invocation = bind_invocation(func, args, kwargs)
         policy = bind_policy(self.constitution)
         receipt = build_issue_receipt(func=func, invocation=invocation, policy=policy)
-        return self._authority.issue(receipt=receipt, invocation=invocation, policy=policy)
+        return self._authority.issue(
+            receipt=receipt,
+            invocation=invocation,
+            policy=policy,
+            single_use=True,
+        )
 
     def _validate_payloads(
         self,
@@ -703,7 +716,7 @@ class GovernedCallable:
 
     def _gate(
         self, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> None:
+    ) -> ConsumeDecision | None:
         tokens = extract_authorization_kwargs(kwargs)
         production = self.authorization_profile is AuthorizationProfile.PRODUCTION
         if production:
@@ -740,7 +753,20 @@ class GovernedCallable:
                 human_approval=None,
                 trust_kwargs=False,
             )
-            return
+            if isinstance(grant, ExecutionGrant) and grant.single_use:
+                attempt_id = tokens.get("execution_attempt_id") or uuid.uuid4().hex
+                if not isinstance(attempt_id, str) or not attempt_id:
+                    raise LegitimacyInvariantError(
+                        "execution_attempt_id must be a non-empty string"
+                    )
+                return self._ledger.consume(
+                    grant_id=grant.grant_id,
+                    attempt_id=attempt_id,
+                    receipt_hash=grant.receipt.receipt_hash,
+                    invocation=invocation,
+                    policy=policy,
+                )
+            return None
 
         if grant is not None:
             if not isinstance(grant, ExecutionGrant):
@@ -754,7 +780,7 @@ class GovernedCallable:
                 human_approval=tokens.get("human_approval"),
                 trust_kwargs=False,
             )
-            return
+            return None
         self._enforce_receipt(
             receipt,
             func=func,
@@ -763,6 +789,7 @@ class GovernedCallable:
             human_approval=tokens.get("human_approval"),
             trust_kwargs=True,
         )
+        return None
 
     def _enforce_receipt(
         self,
@@ -786,6 +813,31 @@ class GovernedCallable:
             actual_call=actual_call,
             human_approval=human_approval,
             audit_log=self.audit_log,
+        )
+
+    def _recovered_result(self, outcome: ConsumeDecision | None) -> Any:
+        if outcome is None or outcome.mode == "proceed":
+            return _PROCEED
+        if outcome.record.status is AttemptStatus.COMPLETED:
+            return outcome.result
+        raise LegitimacyInvariantError(f"attempt already {outcome.record.status.value}")
+
+    def _finalize_attempt(
+        self,
+        outcome: ConsumeDecision | None,
+        status: AttemptStatus,
+        *,
+        result: Any = None,
+        error_code: str | None = None,
+    ) -> None:
+        if outcome is None:
+            return
+        self._ledger.finalize(
+            attempt_id=outcome.record.attempt_id,
+            status=status,
+            result=result,
+            error_code=error_code,
+            output_sha256=digest_output(result) if status is AttemptStatus.COMPLETED else None,
         )
 
     def _verify_signed_production(
@@ -852,23 +904,30 @@ class GovernedCallable:
 
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                self._gate(func, args, kwargs)
+                outcome = self._gate(func, args, kwargs)
+                recovered = self._recovered_result(outcome)
+                if recovered is not _PROCEED:
+                    return recovered
 
-                # Z3 Runtime boundary check
-                if Z3_AVAILABLE and policies:
-                    runtime_res = verify_callable_arguments(func, args, kwargs, policies)
-                    if runtime_res.verified and not runtime_res.satisfiable:
-                        raise ConstitutionalViolationError(
-                            f"Action violates mathematical constraints: {runtime_res.counterexample}",
-                            rule_id="Z3-CONSTRAINT-VIOLATION",
-                        )
+                try:
+                    if Z3_AVAILABLE and policies:
+                        runtime_res = verify_callable_arguments(func, args, kwargs, policies)
+                        if runtime_res.verified and not runtime_res.satisfiable:
+                            raise ConstitutionalViolationError(
+                                f"Action violates mathematical constraints: {runtime_res.counterexample}",
+                                rule_id="Z3-CONSTRAINT-VIOLATION",
+                            )
 
-                for payload in iter_governance_payloads(*args, kwargs):
-                    engine.validate(payload, agent_id=agent_id)
-                result = await func(*args, **kwargs)
-                output_payload = serialize_for_governance(result)
-                if output_payload:
-                    engine.validate(output_payload, agent_id=f"{agent_id}:output")
+                    for payload in iter_governance_payloads(*args, kwargs):
+                        engine.validate(payload, agent_id=agent_id)
+                    result = await func(*args, **kwargs)
+                    output_payload = serialize_for_governance(result)
+                    if output_payload:
+                        engine.validate(output_payload, agent_id=f"{agent_id}:output")
+                except Exception:
+                    self._finalize_attempt(outcome, AttemptStatus.FAILED, error_code="exception")
+                    raise
+                self._finalize_attempt(outcome, AttemptStatus.COMPLETED, result=result)
                 return result
 
             async_wrapper.issue_grant = (  # type: ignore[attr-defined]
@@ -881,23 +940,30 @@ class GovernedCallable:
 
             @functools.wraps(func)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-                self._gate(func, args, kwargs)
+                outcome = self._gate(func, args, kwargs)
+                recovered = self._recovered_result(outcome)
+                if recovered is not _PROCEED:
+                    return recovered
 
-                # Z3 Runtime boundary check
-                if Z3_AVAILABLE and policies:
-                    runtime_res = verify_callable_arguments(func, args, kwargs, policies)
-                    if runtime_res.verified and not runtime_res.satisfiable:
-                        raise ConstitutionalViolationError(
-                            f"Action violates mathematical constraints: {runtime_res.counterexample}",
-                            rule_id="Z3-CONSTRAINT-VIOLATION",
-                        )
+                try:
+                    if Z3_AVAILABLE and policies:
+                        runtime_res = verify_callable_arguments(func, args, kwargs, policies)
+                        if runtime_res.verified and not runtime_res.satisfiable:
+                            raise ConstitutionalViolationError(
+                                f"Action violates mathematical constraints: {runtime_res.counterexample}",
+                                rule_id="Z3-CONSTRAINT-VIOLATION",
+                            )
 
-                for payload in iter_governance_payloads(*args, kwargs):
-                    engine.validate(payload, agent_id=agent_id)
-                result = func(*args, **kwargs)
-                output_payload = serialize_for_governance(result)
-                if output_payload:
-                    engine.validate(output_payload, agent_id=f"{agent_id}:output")
+                    for payload in iter_governance_payloads(*args, kwargs):
+                        engine.validate(payload, agent_id=agent_id)
+                    result = func(*args, **kwargs)
+                    output_payload = serialize_for_governance(result)
+                    if output_payload:
+                        engine.validate(output_payload, agent_id=f"{agent_id}:output")
+                except Exception:
+                    self._finalize_attempt(outcome, AttemptStatus.FAILED, error_code="exception")
+                    raise
+                self._finalize_attempt(outcome, AttemptStatus.COMPLETED, result=result)
                 return result
 
             sync_wrapper.issue_grant = (  # type: ignore[attr-defined]

@@ -56,6 +56,7 @@ class ExecutionGrant:
     subjects: tuple[str, ...]
     issued_at: str
     expires_at: str | None
+    single_use: bool
     binding_mac: str
 
     def to_evidence_dict(self) -> dict[str, Any]:
@@ -71,6 +72,7 @@ class ExecutionGrant:
             "subjects": list(self.subjects),
             "issued_at": self.issued_at,
             "expires_at": self.expires_at,
+            "single_use": self.single_use,
         }
 
 
@@ -88,6 +90,7 @@ class ExecutionAuthority:
         invocation: InvocationBinding,
         policy: PolicyBinding,
         expires_at: str | None = None,
+        single_use: bool = True,
     ) -> ExecutionGrant:
         issued_at = datetime.now(timezone.utc).isoformat()
         grant_id = uuid.uuid4().hex
@@ -101,6 +104,7 @@ class ExecutionAuthority:
             subjects=invocation.subjects,
             issued_at=issued_at,
             expires_at=expires_at,
+            single_use=single_use,
         )
         return ExecutionGrant(
             grant_id=grant_id,
@@ -113,6 +117,7 @@ class ExecutionAuthority:
             subjects=invocation.subjects,
             issued_at=issued_at,
             expires_at=expires_at,
+            single_use=single_use,
             binding_mac=mac,
         )
 
@@ -135,6 +140,7 @@ class ExecutionAuthority:
             subjects=grant.subjects,
             issued_at=grant.issued_at,
             expires_at=grant.expires_at,
+            single_use=grant.single_use,
         )
         if not hmac.compare_digest(expected, grant.binding_mac):
             raise LegitimacyInvariantError("grant authenticity check failed")
@@ -168,6 +174,7 @@ class ExecutionAuthority:
         subjects: tuple[str, ...],
         issued_at: str,
         expires_at: str | None,
+        single_use: bool,
     ) -> str:
         payload = {
             "grant_id": grant_id,
@@ -179,6 +186,7 @@ class ExecutionAuthority:
             "subjects": list(subjects),
             "issued_at": issued_at,
             "expires_at": expires_at,
+            "single_use": single_use,
         }
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
         digest = hmac.new(
@@ -201,7 +209,7 @@ def build_issue_receipt(
         allowed_scope=invocation.scope,
         allowed_subjects=invocation.subjects,
         expires_at=None,
-        single_use=False,
+        single_use=True,
     )
     return DecisionReceipt.create(
         request_id=f"grant-{uuid.uuid4().hex}",
@@ -282,6 +290,7 @@ def extract_authorization_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         raise LegitimacyInvariantError("exactly one authorization token is permitted")
     human_approval = kwargs.pop("human_approval", None)
     present["human_approval"] = human_approval
+    present["execution_attempt_id"] = kwargs.pop("execution_attempt_id", None)
     return present
 
 

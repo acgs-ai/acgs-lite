@@ -272,6 +272,7 @@ def test_hand_constructed_grant_blocked() -> None:
         subjects=real.subjects,
         issued_at=real.issued_at,
         expires_at=real.expires_at,
+        single_use=real.single_use,
         binding_mac=real.binding_mac,
     )
     with pytest.raises(LegitimacyInvariantError, match="grant"):
