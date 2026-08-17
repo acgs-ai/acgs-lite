@@ -20,7 +20,7 @@ import logging
 import os
 import uuid
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol, TypeVar, cast, runtime_checkable
 
 _log = logging.getLogger(__name__)
@@ -34,11 +34,33 @@ from acgs_lite.constitution.refusal_reasoning import RefusalReasoningEngine
 from acgs_lite.constrained_output import attach_response_format
 from acgs_lite.engine import GovernanceEngine
 from acgs_lite.errors import ConstitutionalViolationError, GovernanceError
+from acgs_lite.legitimacy.authorization import (
+    AuthorizationProfile,
+    ExecutionAuthority,
+    ExecutionGrant,
+    authorization_envelope_json,
+    build_issue_receipt,
+    extract_authorization_kwargs,
+    parse_authorization_envelope,
+    resolve_profile,
+)
 from acgs_lite.legitimacy.invariants import (
+    LegitimacyInvariantError,
     normalize_actual_call,
     validate_receipt_for_execution,
 )
+from acgs_lite.legitimacy.invocation import (
+    InvocationBinding,
+    PolicyBinding,
+    bind_invocation,
+    bind_policy,
+    reject_method_spoof_kwargs,
+)
 from acgs_lite.legitimacy.receipt import DecisionReceipt
+from acgs_lite.legitimacy.signing import (
+    SIGNATURE_SCOPE_EXECUTION,
+    SignedReceipt,
+)
 from acgs_lite.maci import MACIEnforcer, MACIRole
 from acgs_lite.provider_capabilities import (
     CapabilityStability,
@@ -625,6 +647,8 @@ class GovernedCallable:
         *,
         agent_id: str = "callable",
         strict: bool = True,
+        authorization_profile: AuthorizationProfile | str | None = None,
+        trusted_issuer_keys: Mapping[str, str] | None = None,
     ) -> None:
         self.constitution = constitution or Constitution.default()
         self.agent_id = agent_id
@@ -635,11 +659,172 @@ class GovernedCallable:
             strict=strict,
             audit_mode="full",
         )
+        self.authorization_profile = resolve_profile(authorization_profile)
+        self.trusted_issuer_keys = dict(trusted_issuer_keys or {})
+        self._authority = ExecutionAuthority()
+
+    def issue_grant(
+        self, target: Callable[..., Any], /, *args: Any, **kwargs: Any
+    ) -> ExecutionGrant:
+        """Mint a same-instance grant after constitutional validation.
+
+        Never invokes ``target``. Refuses a caller-created receipt so a forged
+        ALLOW cannot be wrapped into a capability.
+        """
+        if "receipt" in kwargs or "decision_receipt" in kwargs or "acgs_receipt" in kwargs:
+            raise TypeError("issue_grant refuses caller-created receipts")
+        func = inspect.unwrap(target)
+        tokens = extract_authorization_kwargs(kwargs)
+        if any(tokens.get(name) is not None for name in tokens):
+            raise TypeError("issue_grant refuses authorization transport kwargs")
+        self._validate_payloads(func, args, kwargs, invoke_denied=True)
+        invocation = bind_invocation(func, args, kwargs)
+        policy = bind_policy(self.constitution)
+        receipt = build_issue_receipt(func=func, invocation=invocation, policy=policy)
+        return self._authority.issue(receipt=receipt, invocation=invocation, policy=policy)
+
+    def _validate_payloads(
+        self,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        *,
+        invoke_denied: bool,
+    ) -> None:
+        del func, invoke_denied
+        for payload in iter_governance_payloads(*args, kwargs):
+            result = self.engine.validate(payload, agent_id=self.agent_id)
+            if not getattr(result, "valid", True):
+                raise ConstitutionalViolationError(
+                    "constitution denied the invocation",
+                    rule_id="EXECUTION-GRANT-DENIED",
+                    action=str(payload),
+                )
+
+    def _gate(
+        self, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> None:
+        tokens = extract_authorization_kwargs(kwargs)
+        production = self.authorization_profile is AuthorizationProfile.PRODUCTION
+        if production:
+            reject_method_spoof_kwargs(func, kwargs)
+        invocation = bind_invocation(func, args, kwargs)
+        policy = bind_policy(self.constitution)
+        grant = tokens.get("execution_grant") or tokens.get("acgs_grant")
+        signed = tokens.get("signed_receipt")
+        grant_id = tokens.get("grant_id")
+        receipt = tokens.get("decision_receipt") or tokens.get("acgs_receipt")
+
+        if production:
+            if grant_id is not None:
+                raise LegitimacyInvariantError(
+                    "grant id is not executable until a ledger is configured"
+                )
+            if grant is None and signed is None:
+                raise LegitimacyInvariantError("unsigned receipt is not executable")
+            if tokens.get("human_approval") is not None:
+                raise LegitimacyInvariantError("raw human_approval is not executable in production")
+            verified_receipt: DecisionReceipt | None = None
+            if grant is not None:
+                if not isinstance(grant, ExecutionGrant):
+                    raise LegitimacyInvariantError("Invalid execution grant type")
+                self._authority.verify(grant, invocation=invocation, policy=policy)
+                verified_receipt = grant.receipt
+            else:
+                verified_receipt = self._verify_signed_production(signed, invocation, policy)
+            self._enforce_receipt(
+                verified_receipt,
+                func=func,
+                args=args,
+                kwargs=kwargs,
+                human_approval=None,
+                trust_kwargs=False,
+            )
+            return
+
+        if grant is not None:
+            if not isinstance(grant, ExecutionGrant):
+                raise LegitimacyInvariantError("Invalid execution grant type")
+            self._authority.verify(grant, invocation=invocation, policy=policy)
+            self._enforce_receipt(
+                grant.receipt,
+                func=func,
+                args=args,
+                kwargs=kwargs,
+                human_approval=tokens.get("human_approval"),
+                trust_kwargs=False,
+            )
+            return
+        self._enforce_receipt(
+            receipt,
+            func=func,
+            args=args,
+            kwargs=kwargs,
+            human_approval=tokens.get("human_approval"),
+            trust_kwargs=True,
+        )
+
+    def _enforce_receipt(
+        self,
+        receipt: DecisionReceipt | None,
+        *,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        human_approval: dict[str, Any] | None,
+        trust_kwargs: bool,
+    ) -> None:
+        actual_call = normalize_actual_call(
+            fallback_method=func.__name__,
+            args=args,
+            kwargs=kwargs,
+            func=func,
+            trust_kwargs=trust_kwargs,
+        )
+        validate_receipt_for_execution(
+            receipt,
+            actual_call=actual_call,
+            human_approval=human_approval,
+            audit_log=self.audit_log,
+        )
+
+    def _verify_signed_production(
+        self,
+        signed: object,
+        invocation: InvocationBinding,
+        policy: PolicyBinding,
+    ) -> DecisionReceipt:
+        if not isinstance(signed, SignedReceipt):
+            raise LegitimacyInvariantError("Invalid signed receipt type")
+        if signed.signature_scope != SIGNATURE_SCOPE_EXECUTION:
+            raise LegitimacyInvariantError("unsigned receipt is not executable")
+        if not signed.authorization_json:
+            raise LegitimacyInvariantError(
+                "execution signature is missing an authorization envelope"
+            )
+        expected = self.trusted_issuer_keys.get(signed.key_id)
+        if expected is None:
+            raise LegitimacyInvariantError("signed receipt key is not pinned")
+        if not signed.verify(expected):
+            raise LegitimacyInvariantError("signed receipt authenticity check failed")
+        envelope = parse_authorization_envelope(signed.authorization_json)
+        expected_json = authorization_envelope_json(invocation, policy)
+        expected_envelope = parse_authorization_envelope(expected_json)
+        if envelope.get("argument_digest") != expected_envelope["argument_digest"]:
+            raise LegitimacyInvariantError("invocation binding mismatch")
+        if envelope.get("method_id") != expected_envelope["method_id"]:
+            raise LegitimacyInvariantError("grant method identity mismatch")
+        if envelope.get("policy_digest") != expected_envelope["policy_digest"]:
+            raise LegitimacyInvariantError("policy binding mismatch")
+        if envelope.get("scope") != expected_envelope["scope"]:
+            raise LegitimacyInvariantError("invocation scope mismatch")
+        if envelope.get("subjects") != expected_envelope["subjects"]:
+            raise LegitimacyInvariantError("invocation subjects mismatch")
+        return signed.receipt
 
     def __call__(self, func: Callable[..., T]) -> Callable[..., T]:
         engine = self.engine
         agent_id = self.agent_id
-        audit_log = self.audit_log
 
         # SMT / Z3 integration
         from acgs_lite.z3_verify import (
@@ -667,23 +852,7 @@ class GovernedCallable:
 
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                receipt = cast(
-                    DecisionReceipt | None,
-                    kwargs.pop("decision_receipt", kwargs.pop("acgs_receipt", None)),
-                )
-                human_approval = kwargs.pop("human_approval", None)
-                actual_call = normalize_actual_call(
-                    fallback_method=func.__name__,
-                    args=args,
-                    kwargs=kwargs,
-                    func=func,
-                )
-                validate_receipt_for_execution(
-                    receipt,
-                    actual_call=actual_call,
-                    human_approval=human_approval,
-                    audit_log=audit_log,
-                )
+                self._gate(func, args, kwargs)
 
                 # Z3 Runtime boundary check
                 if Z3_AVAILABLE and policies:
@@ -702,28 +871,17 @@ class GovernedCallable:
                     engine.validate(output_payload, agent_id=f"{agent_id}:output")
                 return result
 
+            async_wrapper.issue_grant = (  # type: ignore[attr-defined]
+                lambda *grant_args, **grant_kwargs: self.issue_grant(
+                    func, *grant_args, **grant_kwargs
+                )
+            )
             return cast(Callable[..., T], async_wrapper)
         else:
 
             @functools.wraps(func)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-                receipt = cast(
-                    DecisionReceipt | None,
-                    kwargs.pop("decision_receipt", kwargs.pop("acgs_receipt", None)),
-                )
-                human_approval = kwargs.pop("human_approval", None)
-                actual_call = normalize_actual_call(
-                    fallback_method=func.__name__,
-                    args=args,
-                    kwargs=kwargs,
-                    func=func,
-                )
-                validate_receipt_for_execution(
-                    receipt,
-                    actual_call=actual_call,
-                    human_approval=human_approval,
-                    audit_log=audit_log,
-                )
+                self._gate(func, args, kwargs)
 
                 # Z3 Runtime boundary check
                 if Z3_AVAILABLE and policies:
@@ -742,4 +900,9 @@ class GovernedCallable:
                     engine.validate(output_payload, agent_id=f"{agent_id}:output")
                 return result
 
+            sync_wrapper.issue_grant = (  # type: ignore[attr-defined]
+                lambda *grant_args, **grant_kwargs: self.issue_grant(
+                    func, *grant_args, **grant_kwargs
+                )
+            )
             return cast(Callable[..., T], sync_wrapper)

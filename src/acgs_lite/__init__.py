@@ -85,6 +85,12 @@ from acgs_lite.errors import (
 from acgs_lite.events import EventBus, GovernanceEvent, get_event_bus
 from acgs_lite.fail_closed import fail_closed as fail_closed
 from acgs_lite.governed import GovernedAgent, GovernedCallable
+from acgs_lite.legitimacy.authorization import (
+    AsyncGrantResolver,
+    AuthorizationProfile,
+    ExecutionGrant,
+    GrantResolver,
+)
 from acgs_lite.licensing import LicenseInfo, LicenseManager, Tier
 from acgs_lite.maci import MACIEnforcer, MACIRole
 from acgs_lite.production import (
@@ -356,6 +362,10 @@ __all__ = [
     # Wrappers
     "GovernedAgent",
     "GovernedCallable",
+    "AuthorizationProfile",
+    "ExecutionGrant",
+    "GrantResolver",
+    "AsyncGrantResolver",
     "VerificationResult",
     "Z3VerificationGate",
     "NullVerificationGate",
@@ -602,6 +612,11 @@ _STABILITY_BETA: frozenset[str] = frozenset(
         "PreContext",
         "PreContextBuilder",
         "ResearchReport",
+        # Execution authorization (in-process grants; production profile is opt-in)
+        "AuthorizationProfile",
+        "ExecutionGrant",
+        "GrantResolver",
+        "AsyncGrantResolver",
     }
 )
 

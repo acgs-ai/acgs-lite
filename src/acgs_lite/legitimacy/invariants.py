@@ -67,22 +67,33 @@ def normalize_actual_call(
     kwargs: dict[str, Any],
     args: tuple[Any, ...] = (),
     func: Callable[..., Any] | None = None,
+    trust_kwargs: bool = True,
 ) -> ActualCall:
-    """Normalize call metadata before invariant comparison."""
+    """Normalize call metadata before invariant comparison.
+
+    When ``trust_kwargs`` is false (production), method identity comes only from
+    ``fallback_method`` / the decorated function. Caller-supplied
+    ``governance_method``, ``method``, and ``action`` cannot override it.
+    """
     bound_arguments = _bind_call_arguments(func, args, kwargs)
-    method = str(
-        kwargs.get("governance_method")
-        or kwargs.get("method")
-        or kwargs.get("action")
-        or fallback_method
-    )
-    scope_value = kwargs.get("governance_scope", kwargs.get("scope"))
-    if scope_value is None:
+    if trust_kwargs:
+        method = str(
+            kwargs.get("governance_method")
+            or kwargs.get("method")
+            or kwargs.get("action")
+            or fallback_method
+        )
+        scope_value = kwargs.get("governance_scope", kwargs.get("scope"))
+        if scope_value is None:
+            scope_value = _first_bound_value(bound_arguments, _SCOPE_ARGUMENT_NAMES)
+        raw_subjects = kwargs.get("governance_subjects", kwargs.get("subjects", ()))
+        if raw_subjects in (None, ()):
+            raw_subjects = _subjects_from_bound_arguments(bound_arguments)
+    else:
+        method = fallback_method
         scope_value = _first_bound_value(bound_arguments, _SCOPE_ARGUMENT_NAMES)
-    scope = str(scope_value) if scope_value is not None else None
-    raw_subjects = kwargs.get("governance_subjects", kwargs.get("subjects", ()))
-    if raw_subjects in (None, ()):
         raw_subjects = _subjects_from_bound_arguments(bound_arguments)
+    scope = str(scope_value) if scope_value is not None else None
     subjects = _coerce_subjects(raw_subjects)
     return ActualCall(method=method, scope=scope, subjects=subjects)
 

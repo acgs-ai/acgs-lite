@@ -33,6 +33,9 @@ from acgs_lite.legitimacy.receipt import DecisionReceipt, ExecutionBoundary
 # Domain-separation prefix: prevents a receipt signature from ever being replayed
 # as a signature over some other acgs-lite message that happens to share bytes.
 RECEIPT_SIGNING_DOMAIN = b"acgs-receipt-v1\x00"
+EXECUTION_SIGNING_DOMAIN = b"acgs-execution-v1\x00"
+SIGNATURE_SCOPE_RECEIPT = "receipt"
+SIGNATURE_SCOPE_EXECUTION = "execution"
 
 SIGNATURE_ALGORITHM = "ed25519"
 
@@ -60,6 +63,16 @@ def _signing_message(receipt: DecisionReceipt) -> bytes:
     field a verifier later re-checks with ``receipt.verify_hash()``.
     """
     return RECEIPT_SIGNING_DOMAIN + receipt.receipt_hash.encode("utf-8")
+
+
+def _execution_signing_message(receipt: DecisionReceipt, authorization_json: str) -> bytes:
+    """v2 message: receipt commitment plus the authorization envelope."""
+    return (
+        EXECUTION_SIGNING_DOMAIN
+        + receipt.receipt_hash.encode("utf-8")
+        + b"\x00"
+        + authorization_json.encode("utf-8")
+    )
 
 
 @runtime_checkable
@@ -163,6 +176,8 @@ class SignedReceipt:
     public_key: str
     signature: str
     signed_at: str
+    signature_scope: str = SIGNATURE_SCOPE_RECEIPT
+    authorization_json: str | None = None
 
     def verify(self, expected_public_key: str) -> bool:
         """Verify authenticity against a public key the caller already trusts.
@@ -192,15 +207,22 @@ class SignedReceipt:
             return verify_signature(
                 self.algorithm,
                 self.public_key,
-                _signing_message(self.receipt),
+                self._signed_message(),
                 self.signature,
             )
         except (ReceiptSigningUnavailable, ValueError):
             return False
 
+    def _signed_message(self) -> bytes:
+        if self.signature_scope == SIGNATURE_SCOPE_EXECUTION:
+            if not self.authorization_json:
+                raise ValueError("execution-scope signature requires authorization_json")
+            return _execution_signing_message(self.receipt, self.authorization_json)
+        return _signing_message(self.receipt)
+
     def to_dict(self) -> dict[str, Any]:
         """Project to a JSON-compatible dict for transport to an independent verifier."""
-        return {
+        payload: dict[str, Any] = {
             "receipt": self.receipt.to_receipt_dict(),
             "algorithm": self.algorithm,
             "key_id": self.key_id,
@@ -208,12 +230,22 @@ class SignedReceipt:
             "signature": self.signature,
             "signed_at": self.signed_at,
         }
+        if self.signature_scope != SIGNATURE_SCOPE_RECEIPT or self.authorization_json:
+            payload["signature_scope"] = self.signature_scope
+            payload["authorization_json"] = self.authorization_json
+        return payload
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SignedReceipt:
         # from_dict is the untrusted-wire entry point; a malformed payload must fail
         # closed with a domain error, not leak a bare KeyError to the caller.
         try:
+            authorization_json = data.get("authorization_json")
+            if authorization_json is not None and not isinstance(authorization_json, str):
+                raise TypeError("authorization_json must be a string")
+            signature_scope = data.get("signature_scope") or SIGNATURE_SCOPE_RECEIPT
+            if not isinstance(signature_scope, str):
+                raise TypeError("signature_scope must be a string")
             return cls(
                 receipt=_receipt_from_dict(data["receipt"]),
                 algorithm=data["algorithm"],
@@ -221,6 +253,8 @@ class SignedReceipt:
                 public_key=data["public_key"],
                 signature=data["signature"],
                 signed_at=data["signed_at"],
+                signature_scope=signature_scope,
+                authorization_json=authorization_json,
             )
         except (KeyError, TypeError) as exc:
             raise ValueError(f"malformed signed-receipt payload: {exc}") from exc
@@ -242,6 +276,32 @@ def sign_receipt(
         public_key=signer.public_key_hex(),
         signature=signer.sign(_signing_message(receipt)),
         signed_at=signed_at or datetime.now(timezone.utc).isoformat(),
+        signature_scope=SIGNATURE_SCOPE_RECEIPT,
+        authorization_json=None,
+    )
+
+
+def sign_execution_authorization(
+    receipt: DecisionReceipt,
+    signer: ReceiptSigner,
+    *,
+    authorization_json: str,
+    signed_at: str | None = None,
+) -> SignedReceipt:
+    """Sign receipt hash plus the canonical authorization envelope (v2 execution scope)."""
+    if not receipt.verify_hash():
+        raise ValueError("refusing to sign a receipt whose hash does not match its payload")
+    if not authorization_json:
+        raise ValueError("execution authorization JSON is required")
+    return SignedReceipt(
+        receipt=receipt,
+        algorithm=signer.algorithm,
+        key_id=signer.key_id,
+        public_key=signer.public_key_hex(),
+        signature=signer.sign(_execution_signing_message(receipt, authorization_json)),
+        signed_at=signed_at or datetime.now(timezone.utc).isoformat(),
+        signature_scope=SIGNATURE_SCOPE_EXECUTION,
+        authorization_json=authorization_json,
     )
 
 
@@ -278,11 +338,15 @@ def _receipt_from_dict(data: Mapping[str, Any]) -> DecisionReceipt:
 
 __all__ = [
     "Ed25519ReceiptSigner",
+    "EXECUTION_SIGNING_DOMAIN",
     "RECEIPT_SIGNING_DOMAIN",
     "ReceiptSigner",
     "ReceiptSigningUnavailable",
     "SIGNATURE_ALGORITHM",
+    "SIGNATURE_SCOPE_EXECUTION",
+    "SIGNATURE_SCOPE_RECEIPT",
     "SignedReceipt",
+    "sign_execution_authorization",
     "sign_receipt",
     "verify_signature",
 ]
