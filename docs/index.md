@@ -16,6 +16,10 @@ The standard `GovernedAgent` path provides deterministic input/output validation
 
 ## Quickstart
 
+`pip install` does not ship `examples/`. Start with the
+[5-minute membrane](guides/five-minute-membrane.md) (receipt + executor
+refusal), or wrap an existing callable:
+
 ```python
 from acgs_lite import Constitution, GovernedAgent, MACIRole
 
@@ -66,6 +70,7 @@ Explore the architecture and setup guides to integrate ACGS into your agentic wo
 - [Advanced Governance Patterns](supervisor-models.md) -- Verification Kernels & Supervisor Models
 - [MCP Governance Guide](mcp-guide.md) -- Master the Model Context Protocol
 - [Testing Governance](testing-governance.md) -- Verifying fail-closed governance behavior
+- [5-minute membrane](guides/five-minute-membrane.md) -- pip-only ALLOW / DENY / TRANSFORM + receipt refusal
 - [Quickstart](quickstart.md) -- Install and govern your first agent
 - [Integrations](integrations.md) -- Guides for Anthropic, OpenAI, LangChain, AutoGen, CrewAI, and more
 - [Telegram Webhook Integration](telegram-webhook.md) -- Safe Telegram bot intake with path-secret + header-token verification

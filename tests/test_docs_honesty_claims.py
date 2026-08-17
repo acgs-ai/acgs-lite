@@ -49,6 +49,63 @@ def test_banned_public_social_proof_strings_absent() -> None:
     assert not offenders, "unsupported public social-proof claims remain: " + ", ".join(offenders)
 
 
+def test_readme_does_not_tell_pip_users_to_run_repo_examples() -> None:
+    readme = _read(REPO_ROOT / "README.md")
+    examples_readme = _read(REPO_ROOT / "examples" / "README.md")
+    offenders = []
+    for label, text in (("README.md", readme), ("examples/README.md", examples_readme)):
+        if re.search(r"pip install acgs-lite(?:==[0-9.]+)?\s*\npython examples/", text):
+            offenders.append(label)
+    assert not offenders, (
+        "pip-only users cannot run repo example paths; offenders: " + ", ".join(offenders)
+    )
+
+
+def test_readme_hero_uses_fail_closed_default_engine() -> None:
+    readme = _read(REPO_ROOT / "README.md")
+    match = re.search(r"```python\n(.*?)```", readme, flags=re.DOTALL)
+    assert match, "README has no python hero block"
+    hero = match.group(1)
+    assert "GovernanceEngine" in hero
+    assert "strict=False" not in hero
+    assert "wire transfer" in hero
+
+
+def test_readme_compliance_ratios_are_self_assessed() -> None:
+    ratio_pattern = re.compile(r"\|\s*\*\*[^|]+\*\*.*\|\s*\d+/\d+\s*\|")
+    offenders = []
+    for line_number, line in enumerate(_read(REPO_ROOT / "README.md").splitlines(), start=1):
+        if ratio_pattern.search(line) and "SELF-ASSESSED mapping coverage" not in line:
+            offenders.append(f"README.md:{line_number}: {line}")
+    assert not offenders, "unlabeled README compliance ratios remain:\n" + "\n".join(offenders)
+
+
+def test_example_readmes_state_prove_and_non_claims() -> None:
+    required = ("## What this proves", "## What this does not claim")
+    paths = (
+        REPO_ROOT / "examples" / "basic_governance" / "README.md",
+        REPO_ROOT / "examples" / "audit_trail" / "README.md",
+        REPO_ROOT / "examples" / "agent_quickstart" / "README.md",
+    )
+    offenders = []
+    for path in paths:
+        text = _read(path)
+        missing = [heading for heading in required if heading not in text]
+        if missing:
+            offenders.append(f"{path.relative_to(REPO_ROOT)} missing {missing}")
+        if re.search(r"pip install acgs-lite(?:==[0-9.]+)?\s*\npython examples/", text):
+            offenders.append(f"{path.relative_to(REPO_ROOT)} pip+examples first-run")
+    assert not offenders, "example README honesty gaps:\n" + "\n".join(offenders)
+
+
+def test_five_minute_guide_states_fail_closed_refusals() -> None:
+    guide = _read(REPO_ROOT / "docs" / "guides" / "five-minute-membrane.md")
+    assert "No legitimacy receipt, no execution" in guide
+    assert "Decision DENY_GOAL does not permit execution" in guide
+    assert "What this does not claim" in guide
+    assert "examples/` is **not** shipped on PyPI" in guide or "not** shipped on PyPI" in guide
+
+
 def test_empty_production_users_table_is_reframed() -> None:
     readme = _read(REPO_ROOT / "README.md")
     placeholder_row = "| *(" + "your " + "org here" + ")*"

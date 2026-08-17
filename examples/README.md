@@ -8,16 +8,20 @@ Runnable quickstarts covering the core runtime-governance and MACI patterns in `
 If you only try four things, do them in this order:
 
 ### 1. Check a side effect before execution
-Run [`governed_execution_membrane.py`](./governed_execution_membrane.py) first.
+
+`pip install` does **not** ship this directory. After install, copy
+[docs/guides/five-minute-membrane.md](../docs/guides/five-minute-membrane.md).
+From a clone:
 
 ```bash
-pip install acgs-lite
-python examples/governed_execution_membrane.py
+python examples/membrane_5min.py
 ```
 
-This shows the Goal v1.0 path: LLM reasoning -> constitutional check -> decision
+Richer walkthrough: [`governed_execution_membrane.py`](./governed_execution_membrane.py).
+
+This is the Goal v1.0 path: LLM reasoning -> constitutional check -> decision
 receipt -> governed execution. The executor refuses to run without a valid
-receipt.
+receipt (`No legitimacy receipt, no execution`).
 
 ### 2. Block an unsafe action
 Run [`basic_governance/`](./basic_governance/) first.
@@ -50,11 +54,13 @@ This is the shared-service story: agent actions can be validated against a gover
 ## Quickstart
 
 ```bash
-pip install acgs-lite
+# Clone required — PyPI does not ship examples/
+pip install -e .
+python examples/membrane_5min.py
 python examples/basic_governance/main.py
 
 # Optional: MCP example
-pip install "acgs-lite[mcp]"
+pip install -e ".[mcp]"
 python examples/mcp_agent_client.py
 ```
 
@@ -62,6 +68,7 @@ python examples/mcp_agent_client.py
 
 | Example | What it teaches | Difficulty |
 |---------|----------------|------------|
+| [`membrane_5min.py`](membrane_5min.py) | Pip-only 5-minute membrane: ALLOW / TRANSFORM / DENY / missing-receipt refusal | ⭐ Beginner |
 | [`governed_execution_membrane.py`](governed_execution_membrane.py) | Goal v1.0 side-effect membrane: ALLOW / DENY / TRANSFORM, receipts, executor refusal, audit evidence | ⭐ Beginner |
 | [`agent_quickstart/`](agent_quickstart/) | **AI-agent install verify**: `GovernedCallable` + MACI + AuditLog in one script; exits 0 on success | ⭐ Beginner |
 | [`mcp_agent_client.py`](mcp_agent_client.py) | **MCP Governance Hub**: Connect an agent to a centralized safety server | ⭐⭐ Intermediate |

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- First-run path is now pip-only: README hero is a fail-closed 5-line snippet, and
+  `docs/guides/five-minute-membrane.md` plus `examples/membrane_5min.py` show
+  ALLOW / TRANSFORM / DENY / missing-receipt refusal. `pip install` does not
+  ship `examples/`; the previous `pip install && python examples/...` command
+  was unrunnable for a package-only install.
+- Honesty pass: dropped the static tests-passing / star-history badges, labeled
+  README compliance ratios as SELF-ASSESSED mapping coverage, and refreshed
+  `GOAL.md` current-column facts for v2.12.0.
+
 ### Added
 
 - Opt-in production execution grants: `GovernedCallable(..., authorization_profile="production")`
