@@ -55,11 +55,12 @@ This is the shared-service story: agent actions can be validated against a gover
 
 ```bash
 # Clone required — PyPI does not ship examples/
+pip install -e .
 python examples/membrane_5min.py
 python examples/basic_governance/main.py
 
 # Optional: MCP example
-pip install "acgs-lite[mcp]"
+pip install -e ".[mcp]"
 python examples/mcp_agent_client.py
 ```
 

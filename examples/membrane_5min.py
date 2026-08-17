@@ -25,6 +25,7 @@ from acgs_lite import (
     Severity,
 )
 from acgs_lite.legitimacy import (
+    BASELINE_CONSTRAINT_MARKER,
     ActualCall,
     DecisionReceipt,
     ExecutionBoundary,
@@ -42,10 +43,10 @@ def authorize(engine, constitution, text, *, method, tenant, subject):
     policy_version = f"{constitution.version}:{constitution.hash}"
     body, state, decision_type = text, "DENY", "DENY_GOAL"
     transform = rationale = None
-    constraints = tuple(v.rule_id for v in result.violations) or ("denied",)
+    constraints = tuple(v.rule_id for v in result.violations) or (BASELINE_CONSTRAINT_MARKER,)
 
     if result.valid:
-        state, decision_type, constraints = "ALLOW", "ALLOW", ("matched",)
+        state, decision_type, constraints = "ALLOW", "ALLOW", (BASELINE_CONSTRAINT_MARKER,)
     elif any(v.rule_id == "no-raw-ssn" for v in result.violations):
         redacted = SSN_RE.sub("[REDACTED-SSN]", text)
         if engine.validate(redacted, agent_id="runtime:transform", strict=False).valid:
@@ -105,7 +106,7 @@ def run_demo() -> dict[str, object]:
         ],
     )
     audit = AuditLog()
-    engine = GovernanceEngine(constitution, audit_log=audit, strict=False, audit_mode="full")
+    engine = GovernanceEngine(constitution, audit_log=audit, audit_mode="full")
     maci = MACIEnforcer()
     maci.assign_role("tool-executor", MACIRole.EXECUTOR)
     outbox: list[str] = []

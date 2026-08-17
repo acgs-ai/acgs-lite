@@ -34,6 +34,7 @@ from acgs_lite import (
     Severity,
 )
 from acgs_lite.legitimacy import (
+    BASELINE_CONSTRAINT_MARKER,
     ActualCall,
     DecisionReceipt,
     ExecutionBoundary,
@@ -51,10 +52,10 @@ def authorize(engine, constitution, text, *, method, tenant, subject):
     policy_version = f"{constitution.version}:{constitution.hash}"
     body, state, decision_type = text, "DENY", "DENY_GOAL"
     transform = rationale = None
-    constraints = tuple(v.rule_id for v in result.violations) or ("denied",)
+    constraints = tuple(v.rule_id for v in result.violations) or (BASELINE_CONSTRAINT_MARKER,)
 
     if result.valid:
-        state, decision_type, constraints = "ALLOW", "ALLOW", ("matched",)
+        state, decision_type, constraints = "ALLOW", "ALLOW", (BASELINE_CONSTRAINT_MARKER,)
     elif any(v.rule_id == "no-raw-ssn" for v in result.violations):
         redacted = SSN_RE.sub("[REDACTED-SSN]", text)
         if engine.validate(redacted, agent_id="runtime:transform", strict=False).valid:
@@ -114,7 +115,7 @@ def main() -> None:
         ],
     )
     audit = AuditLog()
-    engine = GovernanceEngine(constitution, audit_log=audit, strict=False, audit_mode="full")
+    engine = GovernanceEngine(constitution, audit_log=audit, audit_mode="full")
     maci = MACIEnforcer()
     maci.assign_role("tool-executor", MACIRole.EXECUTOR)
 
@@ -252,8 +253,9 @@ exact call.
   independently hosted audit store.
 - Unsigned receipts prove integrity of the payload, not *who* signed them.
   Ed25519 signing is an optional `crypto` extra and is not used here.
-- `strict=False` on the engine is a demo inspection mode. Do not copy it into a
-  production executor path.
+- Per-call `validate(..., strict=False)` is a demo inspection mode so DENY can
+  be receipted. Do not copy it into a production executor path. The engine is
+  constructed with the default fail-closed `strict=True`.
 - This does not prove production hardening, multi-tenant isolation,
   certification, or that any third party runs acgs-lite.
 - Keyword / regex constitutions are exact-match policy, not semantic
