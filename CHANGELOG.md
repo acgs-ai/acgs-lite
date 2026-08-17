@@ -24,12 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejects self-minted unsigned `DecisionReceipt` values. The executable tokens are a
   same-instance `ExecutionGrant` from `issue_grant()`, or a v2 execution-scope
   `SignedReceipt` whose envelope matches the current invocation and a pinned issuer
-  key. Grant IDs are not executable yet (ledger is a later change). Grants bind
-  `module:qualname` plus a typed canonical argument digest. The default profile
-  remains compatibility so existing receipt-passing callers keep working.
-  In-process HMAC authenticity is process-scoped, not a distributed capability;
-  replay/single-use consumption is not provided. `DecisionReceipt` and
-  `ExecutionBoundary` field schemas are unchanged.
+  key. Grants bind `module:qualname` plus a typed canonical argument digest.
+  The default profile remains compatibility so existing receipt-passing callers
+  keep working. In-process HMAC authenticity is process-scoped, not a
+  distributed capability. Production `issue_grant()` mints single-use grants
+  consumed by an in-process ledger: a second attempt id is rejected, the same
+  attempt id recovers a completed result, an in-flight or failed attempt is
+  not re-executed, and concurrent races admit exactly one winner. The ledger is
+  not durable across processes. `DecisionReceipt` and `ExecutionBoundary` field
+  schemas are unchanged. Grant IDs are still not a wire capability.
 
 ## [2.12.0] - 2026-08-15
 

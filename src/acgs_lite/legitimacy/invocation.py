@@ -28,6 +28,7 @@ CONTROL_KWARGS = frozenset(
         "signed_receipt",
         "grant_id",
         "human_approval",
+        "execution_attempt_id",
     }
 )
 

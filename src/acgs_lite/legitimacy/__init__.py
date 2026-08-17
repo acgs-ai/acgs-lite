@@ -35,6 +35,11 @@ from acgs_lite.legitimacy.invocation import (
     canonical_argument_digest,
     trusted_method_id,
 )
+from acgs_lite.legitimacy.ledger import (
+    AttemptStatus,
+    ExecutionAttemptRecord,
+    InProcessGrantLedger,
+)
 from acgs_lite.legitimacy.receipt import (
     BASELINE_CONSTRAINT_MARKER,
     DecisionReceipt,
@@ -63,15 +68,18 @@ __all__ = [
     "ActualCall",
     "ArgumentNotDigestible",
     "AsyncGrantResolver",
+    "AttemptStatus",
     "AuthorizationProfile",
     "DecisionEvaluator",
     "DecisionReceipt",
     "DecisionState",
     "Ed25519ReceiptSigner",
+    "ExecutionAttemptRecord",
     "ExecutionAuthority",
     "ExecutionBoundary",
     "ExecutionGrant",
     "GrantResolver",
+    "InProcessGrantLedger",
     "InvocationBinding",
     "LegitimacyInvariantError",
     "PolicyBinding",
