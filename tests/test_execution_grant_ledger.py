@@ -69,6 +69,61 @@ def test_implicit_attempt_id_is_single_use() -> None:
     assert calls == ["acct-1:10"]
 
 
+def test_in_flight_same_attempt_does_not_reexecute() -> None:
+    calls: list[str] = []
+    started = threading.Event()
+    release = threading.Event()
+    guard = GovernedCallable(
+        Constitution.default(),
+        authorization_profile=AuthorizationProfile.PRODUCTION,
+    )
+
+    @guard
+    def transfer(account_id: str, amount: int) -> str:
+        calls.append(f"{account_id}:{amount}")
+        started.set()
+        assert release.wait(timeout=2)
+        return "sent"
+
+    grant = transfer.issue_grant("acct-1", 10)
+    result: list[object] = []
+
+    def first() -> None:
+        result.append(
+            transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
+        )
+
+    thread = threading.Thread(target=first)
+    thread.start()
+    assert started.wait(timeout=2)
+    with pytest.raises(LegitimacyInvariantError, match="already in flight"):
+        transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
+    release.set()
+    thread.join(timeout=2)
+    assert result == ["sent"]
+    assert calls == ["acct-1:10"]
+
+
+def test_failed_attempt_retry_does_not_reexecute() -> None:
+    calls: list[str] = []
+    guard = GovernedCallable(
+        Constitution.default(),
+        authorization_profile=AuthorizationProfile.PRODUCTION,
+    )
+
+    @guard
+    def transfer(account_id: str, amount: int) -> str:
+        calls.append(f"{account_id}:{amount}")
+        raise RuntimeError("downstream failed")
+
+    grant = transfer.issue_grant("acct-1", 10)
+    with pytest.raises(RuntimeError, match="downstream failed"):
+        transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
+    with pytest.raises(LegitimacyInvariantError, match="already failed"):
+        transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
+    assert calls == ["acct-1:10"]
+
+
 def test_concurrent_single_use_has_one_winner() -> None:
     calls: list[str] = []
     guard = GovernedCallable(

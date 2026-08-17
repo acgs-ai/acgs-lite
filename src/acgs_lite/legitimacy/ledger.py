@@ -104,14 +104,14 @@ class InProcessGrantLedger:
             if self._bindings.get(grant_id) != binding:
                 raise LegitimacyInvariantError("grant cannot move across invocation bindings")
             record = self._attempts[existing]
+            if record.status is AttemptStatus.STARTED:
+                raise LegitimacyInvariantError("attempt already in flight")
             if record.status is AttemptStatus.COMPLETED:
                 return ConsumeDecision(
                     mode="recover",
                     record=record,
                     result=self._results.get(existing),
                 )
-            if record.status is AttemptStatus.STARTED:
-                return ConsumeDecision(mode="proceed", record=record)
             return ConsumeDecision(mode="recover", record=record, result=None)
 
     def finalize(
