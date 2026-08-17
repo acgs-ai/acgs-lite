@@ -4,62 +4,89 @@
 [![Python](https://img.shields.io/pypi/pyversions/acgs-lite?style=for-the-badge)](https://pypi.org/project/acgs-lite/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-green.svg?style=for-the-badge)](https://www.apache.org/licenses/LICENSE-2.0)
 [![CI](https://img.shields.io/github/actions/workflow/status/acgs-ai/acgs-lite/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/acgs-ai/acgs-lite/actions)
-[![Coverage](https://img.shields.io/badge/tests-passing-brightgreen?style=for-the-badge)](https://github.com/acgs-ai/acgs-lite/actions)
 [![Documentation](https://img.shields.io/badge/docs-acgs.ai-brightgreen?style=for-the-badge)](https://acgs.ai/docs)
-[![GitHub stars](https://img.shields.io/github/stars/acgs-ai/acgs-lite?style=social)](https://github.com/acgs-ai/acgs-lite/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/acgs-ai/acgs-lite?style=social)](https://github.com/acgs-ai/acgs-lite/network/members)
-[![Star History](https://img.shields.io/badge/star%20history-chart-yellow?style=social)](https://star-history.com/#acgs-ai/acgs-lite)
 
+**Headline:** No valid receipt. No side effect.
 
-**acgs-lite** is a lightweight constitutional governance runtime for agent
-execution. It is not an agent framework. Agent frameworks keep responsibility
-for reasoning, planning, model calls, memory, and tool selection; `acgs-lite`
-sits between that reasoning and real-world side effects.
+**acgs-lite** is the constitutional governance membrane between agent reasoning
+and real-world execution. It is not an agent framework. Agent frameworks keep
+responsibility for planning, model calls, memory, and tool selection;
+`acgs-lite` decides whether a proposed side effect may run.
 
 Core invariant:
 
 > No valid constitutional authorization, no side effect.
 
-The governed execution flow is:
-
 ```text
 LLM reasoning → constitutional check → decision receipt → governed execution
 ```
 
-Use `acgs-lite` before executing tools, workflows, API calls, file operations,
-transactions, or other side effects. It checks the proposed action against a
-versioned constitution, returns an explicit decision, issues a receipt the
-executor can verify, and records audit evidence for later inspection.
+### Current status & non-claims
 
-A tamper-evident audit log proves a record was not *altered*. With the optional
-`crypto` extra, `acgs-lite` goes further: every decision receipt can be
-**Ed25519-signed and independently replay-verifiable**, so a third party holding
-only the signer's public key can prove *who* decided and re-derive the
-ALLOW / DENY / TRANSFORM verdict — without trusting the operator. See
-[Signed, Replay-Verifiable Receipts](#signed-replay-verifiable-receipts).
+- **Public package:** v2.12.0 on PyPI. Apache-2.0. Beta.
+- **Local proofs exist.** Receipt-gated execution, MACI role checks, and an
+  in-process SHA-256 audit chain are implemented and tested.
+- **No independently confirmed production users yet.**
+- **Not certified. Not regulator-approved.** Production properties depend on
+  *your* constitution, storage, authentication, and operational controls.
+- **`pip install` does not ship `examples/`.** Do not run a repo path after
+  install. Use the 5-line snippet below, or the
+  [5-minute membrane page](docs/guides/five-minute-membrane.md).
 
-Try the membrane locally:
+### 5-line quickstart
 
-```bash
-pip install acgs-lite
-python examples/governed_execution_membrane.py
+Works after `pip install acgs-lite==2.12.0`. Default engine is fail-closed: the
+last line **raises**.
+
+```python
+from acgs_lite import Constitution, ConstitutionalViolationError, GovernanceEngine
+engine = GovernanceEngine(Constitution.from_yaml_str(
+    "rules:\n  - {id: no-wire, text: Block unauthorized wires, severity: critical, keywords: [wire transfer]}"))
+print(engine.validate("send invoice email", agent_id="demo").valid)  # True
+engine.validate("wire transfer $1000", agent_id="demo")              # raises
 ```
 
-The example keeps side effects in memory, but exercises the adoption wedge:
-ALLOW executes with a valid receipt, TRANSFORM redacts before execution, DENY is
-blocked, receiptless execution is refused, and audit evidence is replay-checked.
+Expected:
 
-Start with [GOAL.md](https://github.com/acgs-ai/acgs-lite/blob/main/GOAL.md) for the Goal v1.0 product boundary and
-[ROADMAP.md](https://github.com/acgs-ai/acgs-lite/blob/main/ROADMAP.md) for the implementation milestones.
-The stable Runtime Legitimacy Kernel public API is documented in
-[`docs/api/legitimacy.md`](https://github.com/acgs-ai/acgs-lite/blob/main/docs/api/legitimacy.md).
+```text
+True
+ConstitutionalViolationError: Action blocked by rule no-wire: Block unauthorized wires
+```
 
-Non-goals:
+That is the check. The [5-minute membrane](docs/guides/five-minute-membrane.md)
+is the executor gate: ALLOW with a receipt, TRANSFORM (PII redaction), DENY of a
+wire, and refusal of a missing receipt
+(`No legitimacy receipt, no execution`).
 
-- ACGS does not approve raw goals as executable authority.
-- ACGS does not replace human review for decisions that require structured approval.
-- ACGS does not own the agent planner, model runtime, memory layer, or tool
-  orchestration loop.
+<details>
+<summary>What it is / what it is not</summary>
+
+**What it is**
+
+- A pre-execution membrane: proposed side effect → constitutional check →
+  Decision Receipt → executor gate.
+- Deterministic ALLOW / DENY / TRANSFORM-style outcomes under a versioned
+  constitution.
+- Executor refusal when the receipt is missing, denied, tampered, stale, or
+  mismatched to the actual call.
+- A tamper-evident audit chain you can inspect and `verify_chain()`.
+
+**What it is not**
+
+- Not an agent framework. It does not own model calls, planning, memory, tool
+  selection, retries, or orchestration.
+- Not a logger you bolt on after the tool ran.
+- Not a compliance certificate, regulator approval, or production-readiness stamp.
+- Not a claim that anyone outside this repo is using it in production.
+
+With the optional `crypto` extra, receipts can be Ed25519-signed and
+replay-verified. See
+[Signed, Replay-Verifiable Receipts](#signed-replay-verifiable-receipts).
+
+</details>
+
+<details>
+<summary>Decision taxonomy and membrane contract</summary>
 
 For every governed side-effect path, ACGS aims to provide:
 
@@ -83,148 +110,64 @@ DENY_GOAL
 HARD_DENY
 ```
 
-The minimal side-effect membrane example is
-[`examples/governed_execution_membrane.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/governed_execution_membrane.py).
-The Phoenix example under
-[`examples/phoenix_acgs_governed_agent/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/phoenix_acgs_governed_agent)
-shows `request -> decision -> receipt -> bounded execution` telemetry; its
-`governance.decision.*` span attributes are experimental.
+Only `ALLOW` and `ALLOW_WITH_CONTROLS` can reach execution. Unknown, denied,
+review, transform, replan, and hard-deny states are not executable by default.
 
-**Current status:** the currently published package on PyPI is `2.12.0`, which
-carries the fail-closed hardening described in the changelog and a fresh-venv
-proof path. Production deployment
-properties depend on your constitution, storage, authentication, and operational
-controls, and the project does not claim independent production users or
-compliance certification.
+Start with [GOAL.md](./GOAL.md) for the product boundary and
+[ROADMAP.md](./ROADMAP.md) for milestones. The Runtime Legitimacy Kernel is
+documented in [`docs/api/legitimacy.md`](./docs/api/legitimacy.md).
+
+Non-goals:
+
+- ACGS does not approve raw goals as executable authority.
+- ACGS does not replace human review for decisions that require structured approval.
+- ACGS does not own the agent planner, model runtime, memory layer, or tool
+  orchestration loop.
+
+</details>
 
 ## Security Disclosure
 
 Please report suspected ACGS-Lite governance or security vulnerabilities
 privately to `security@acgs.ai` instead of opening a public issue. The canonical
 supported-version, scope, and disclosure-window policy is in
-[`SECURITY.md`](https://github.com/acgs-ai/acgs-lite/blob/main/SECURITY.md), with a mirrored docs page at
-[`docs/security.md`](https://github.com/acgs-ai/acgs-lite/blob/main/docs/security.md).
-
-<img width="1280" height="680" alt="ACGS_Lite" src="https://github.com/user-attachments/assets/0d6deeef-40fe-4e8e-9dc0-537744162dff" />
+[`SECURITY.md`](./SECURITY.md), with a mirrored docs page at
+[`docs/security.md`](./docs/security.md).
 
 ## Recommended starting points
 
-Start here for the shortest local verification paths:
+**After `pip install` (no clone):**
 
+- **5-line fail-closed check** — the snippet above
+- **5-minute membrane** — [docs/guides/five-minute-membrane.md](docs/guides/five-minute-membrane.md)
+  (ALLOW / TRANSFORM / DENY / missing-receipt refusal + audit chain)
+
+**After cloning this repo:**
+
+- **Pip-only script in-tree** — `python examples/membrane_5min.py`
+- **Richer membrane walkthrough** — [`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py)
 - **Agent readiness gate** — `python3 scripts/agent_ready.py --run-tests`
-  verifies the repo `agent-index.json` loads through `AgentRegistry`, confirms
-  the governance-review route ranks first, and runs the focused agent-discovery
-  tests without requiring `make`
-- **AI-agent install verify** — [`examples/agent_quickstart/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/agent_quickstart) runs a self-verifying suite: `GovernedCallable` + MACI + AuditLog in one script, exits 0 on success
-- **Goal v1.0 membrane** — [`examples/governed_execution_membrane.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/governed_execution_membrane.py) shows ALLOW / DENY / TRANSFORM decisions, receipts, executor refusal, and audit evidence
-- **Release proof artifact** — `python examples/release_proof.py --output /tmp/acgs-release-proof.json` writes a deterministic JSON proof another developer can inspect locally
-- **Minimal proof** — [`examples/basic_governance/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/basic_governance) shows safe requests passing and unsafe ones blocked before execution
-- **Audit trail demo** — [`examples/audit_trail/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/audit_trail) shows the tamper-evident decision chain
-- **Shared infrastructure path** — [`examples/mcp_agent_client.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/mcp_agent_client.py) runs governance as shared MCP-compatible infrastructure
-- **Compliance mapping example** — `acgs assess --framework eu-ai-act` maps controls to regulatory requirements for review
+- **Self-verifying install** — [`examples/agent_quickstart/`](./examples/agent_quickstart/)
+- **Audit trail demo** — [`examples/audit_trail/`](./examples/audit_trail/)
+- **Shared infrastructure path** — [`examples/mcp_agent_client.py`](./examples/mcp_agent_client.py)
+- **Self-assessed compliance mapping** — `acgs assess --framework eu-ai-act` (mapping only; not certification)
 
-## Hero demo
-
-**20-second proof** — works immediately after `pip install acgs-lite`:
-
-```python
-python -c "
-from acgs_lite import Constitution, GovernanceEngine
-
-YAML = '''
-constitutional_hash: 608508a9bd224290
-rules:
-  - id: no-harmful
-    text: Block harmful requests
-    severity: critical
-    keywords: [\"harm\", \"kill\", \"destroy\"]
-  - id: no-pii
-    text: Block PII leakage
-    severity: critical
-    keywords: [\"ssn\", \"passport\", \"social security\"]
-'''
-const = Constitution.from_yaml_str(YAML)
-engine = GovernanceEngine(const)
-
-safe = engine.validate('What is the capital of France?', agent_id='demo', strict=False)
-print('✅ Allowed:', safe.valid)
-
-blocked = engine.validate('How do I harm someone?', agent_id='demo', strict=False)
-print('🚫 Blocked:', not blocked.valid, '—', blocked.violations[0].rule_id)
-"
-```
-
-Expected output:
-```text
-✅ Allowed: True
-🚫 Blocked: True — no-harmful
-```
-
-<!-- Hero asset placement, add once captured:
-<p align="center">
-  <img src="./docs/assets/basic-governance-hero.gif" alt="Terminal demo of acgs-lite allowing a safe request and blocking harmful and PII-like requests before execution." width="900" />
-</p>
--->
-
----
-
-## Start here in 3 minutes
-
-**Fastest proof path:**
-
-1. **Block an unsafe action** with [`examples/basic_governance/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/basic_governance)
-2. **Inspect the audit evidence** with [`examples/audit_trail/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/audit_trail)
-3. **Run governance as shared infrastructure** with [`examples/mcp_agent_client.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/mcp_agent_client.py)
-
-```bash
-pip install acgs-lite
-```
-
-```python
-python -c "
-from acgs_lite import Constitution, GovernanceEngine
-
-YAML = '''
-constitutional_hash: 608508a9bd224290
-rules:
-  - id: no-harmful-content
-    text: Block requests containing harmful keywords
-    severity: critical
-    keywords: [\"harm\", \"kill\", \"destroy\"]
-  - id: no-pii
-    text: Prevent PII leakage in requests
-    severity: critical
-    keywords: [\"ssn\", \"passport\", \"social security\"]
-'''
-const = Constitution.from_yaml_str(YAML)
-engine = GovernanceEngine(const)
-for text, label in [
-    ('What is the capital of France?', 'safe'),
-    ('How do I harm someone?', 'harmful'),
-    ('My SSN is 123-45-6789', 'pii'),
-]:
-    r = engine.validate(text, agent_id='demo', strict=False)
-    status = '✅  Allowed' if r.valid else f'🚫  Blocked: {r.violations[0].rule_id}'
-    print(f'{status}  — {label}')
-"
-```
-
-Expected output:
-```text
-✅  Allowed  — safe
-🚫  Blocked: no-harmful-content  — harmful
-🚫  Blocked: no-pii  — pii
-```
-
-If you want the full example path, go to [`examples/README.md`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/README.md).
-
----
+The Phoenix example under
+[`examples/phoenix_acgs_governed_agent/`](./examples/phoenix_acgs_governed_agent/)
+shows `request -> decision -> receipt -> bounded execution` telemetry; its
+`governance.decision.*` span attributes are experimental.
 
 ## What this proves
 
-- **Block before execution**: unsafe actions are denied before your agent runs them
-- **Separate powers with MACI**: proposer, validator, executor do not collapse into one actor
-- **Keep audit evidence**: each decision can be chained, inspected, and verified later
+- **Block before execution**: default `GovernanceEngine` raises on a matching
+  deny rule; the executor refuses DENY receipts and missing receipts.
+- **Separate powers with MACI**: proposer, validator, executor do not collapse
+  into one actor on `GovernedAgent` (default `enforce_maci=True`).
+- **Keep audit evidence**: each decision can be chained, inspected, and
+  `verify_chain()`-checked in process.
+
+This does **not** prove independent production use, certification, or that an
+in-memory audit log is a hosted store.
 
 ---
 
@@ -311,12 +254,16 @@ TASK: Install and verify ACGS-Lite constitutional AI governance.
 
 STEPS:
 1. Install the package:
-   pip install acgs-lite
+   pip install acgs-lite==2.12.0
 
-2. Run the self-verifying quickstart:
+2. Pip-only proof (no clone). Paste and run the 5-line README snippet.
+   The last line must raise ConstitutionalViolationError for "wire transfer $1000".
+
+3. If you cloned this repo, also run:
+   python examples/membrane_5min.py
    python examples/agent_quickstart/run.py
 
-3. Expected outcome — every line should show ✅:
+4. Expected outcome for the cloned quickstart — every line should show ✅:
    ✅  safe request passes through
    ✅  PII blocked by rule 'no-pii'
    ✅  destructive op blocked by 'no-destructive'
@@ -328,7 +275,7 @@ STEPS:
    ✅  All assertions passed — ACGS-Lite is correctly installed.
    Exit code: 0
 
-4. If any ❌ appears, report the failing assertion and the full traceback.
+5. If any ❌ appears, report the failing assertion and the full traceback.
    Do NOT set strict=False to work around failures — diagnose root cause.
 
 CONSTRAINTS:
@@ -714,22 +661,25 @@ app = create_mcp_server(constitution=constitution)
 
 ## 📋 Compliance Coverage
 
-ACGS maps governance controls to 20 regulatory frameworks. Run `acgs assess` to generate a compliance report:
+`acgs assess` produces a **self-assessed mapping** of library controls to
+external frameworks. Ratios below are mapping coverage only. They are not
+certification, regulatory approval, adoption proof, or a substitute for legal
+review.
 
 ```bash
 acgs assess --framework eu-ai-act --output report.pdf
 ```
 
-| Framework | Coverage | Key Controls |
-|-----------|----------|--------------|
-| **EU AI Act (High-Risk)** | Art. 9, 10, 13, 14, 17 | Risk management, human oversight, transparency |
-| **NIST AI RMF** | 7 / 16 functions | Govern, Map, Measure, Manage |
-| **SOC 2 + AI** | 10 / 16 criteria | CC6, CC7, CC9 trust service criteria |
-| **HIPAA + AI** | 9 / 15 safeguards | PHI detection, access controls, audit controls |
-| **GDPR Art. 22** | 10 / 12 requirements | Automated decision-making, right to explanation |
-| **CCPA / CPRA** | 8 / 10 rights | Opt-out, data minimisation, transparency |
+| Framework | Mapping Coverage | Review Context |
+|-----------|------------------|--------------|
+| **EU AI Act (High-Risk)** | SELF-ASSESSED mapping coverage: Art. 9, 10, 13, 14, 17 | Risk management, human oversight, transparency |
+| **NIST AI RMF** | SELF-ASSESSED mapping coverage: 7/16 | Govern, Map, Measure, Manage |
+| **SOC 2 + AI** | SELF-ASSESSED mapping coverage: 10/16 | CC6, CC7, CC9 trust service criteria |
+| **HIPAA + AI** | SELF-ASSESSED mapping coverage: 9/15 | PHI detection, access controls, audit controls |
+| **GDPR Art. 22** | SELF-ASSESSED mapping coverage: 10/12 | Automated decision-making, right to explanation |
+| **CCPA / CPRA** | SELF-ASSESSED mapping coverage: 8/10 | Opt-out, data minimisation, transparency |
 | **ISO 42001** | Clause 6, 8, 9, 10 | AI management system controls |
-| **OWASP LLM Top 10** | 9 / 10 risks | Prompt injection, insecure output, data poisoning |
+| **OWASP LLM Top 10** | SELF-ASSESSED mapping coverage: 9/10 | Prompt injection, insecure output, data poisoning |
 
 ---
 
@@ -810,7 +760,8 @@ acgs resume --agent-id agent-01
 |-------|-------------|
 | [Examples](https://github.com/acgs-ai/acgs-lite/blob/main/examples/README.md) | Canonical demo path: block, audit, then MCP |
 | [Constitution Templates](https://github.com/acgs-ai/acgs-lite/blob/main/examples/constitutions/README.md) | Reusable constitutions for content moderation, customer service, healthcare, hiring, and lending |
-| [Quickstart](https://acgs.ai/docs/quickstart) | Up and running in 5 minutes |
+| [5-minute membrane](docs/guides/five-minute-membrane.md) | Pip-only ALLOW / TRANSFORM / DENY + receipt refusal |
+| [Quickstart](https://acgs.ai/docs/quickstart) | Install, wrap a callable, then inspect examples after a clone |
 | [Architecture](https://acgs.ai/docs/architecture) | Engine internals, MACI deep dive |
 | [Integrations](https://acgs.ai/docs/integrations) | OpenAI, Anthropic, LangChain, MCP, A2A |
 | [Integration Decision Guide](https://github.com/acgs-ai/acgs-lite/blob/main/docs/integration-decision-guide.md) | Which adapter when: native vs. framework, streaming, async, MCP vs. in-process |

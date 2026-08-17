@@ -101,37 +101,36 @@ later commit, and the project has moved off bus factor 1.
 
 ### Success Criteria
 
-| Criterion | Metric | Current | Target | By when |
+| Criterion | Metric | Current (2026-08-17) | Target | By when |
 |---|---|---|---|---|
-| Usage-as-governance (primary, maps to North Star) | Independent (non-maintainer) repos/services that import `acgs_lite` and invoke a governance decision at a real side-effect boundary, verified by public source or written confirmation | 0 | ≥3 independent projects, with ≥1 still integrated at 90 days (retention) | 2026-12-31 |
-| Core invariant empirically proven with a meaningfulness floor | ≥3 experiments on a REAL LLM + real AuditLog (not seeded RNG) using a recognized dataset (real HumanEval/SWE-bench subset, stated min sample size, ≥2 model providers), headline X1 hypothesis resolved to a non-zero interpretable result or explicitly retired, with committed `*_results.json` + `summary.json` | 0 real experiments (all 6 are simulations, no result JSON committed); X1 currently delta 0.0 | ≥3 real experiments meeting the floor + X1 resolved/retired | 2026-10-31 |
-| Adversarial bypass coverage incl. out-of-distribution attack | Committed adversarial suite covering all five fail-closed triggers (authorization, constitution version, policy staleness, receipt integrity, audit-evidence verifiability) — not just carrier/receipt vectors — incl. ≥1 externally-contributed/OOD attack the maintainer did not author; 0 successful bypasses | Hardening exists in src; no committed pass/fail artifact; vectors are self-authored and carrier/receipt-only | 0 bypasses across all five trigger classes incl. ≥1 external attack | 2026-10-31 |
-| Fail-closed is the DEFAULT | MACI hard-enforced without `enforce_maci=True`; bundled Claude Code hook route (no external `/x402/check` sidecar) without owning orchestration; Legitimacy Kernel graded Stable with passing tests | MACI advisory by default; hook depends on unbundled sidecar; kernel partially realized, not Stable | All three closed | 2026-10-31 |
-| Governance-regression safety (no silent weakening) | Adversarial suite runs in CI on every PR; constitutional hash + receipt-binding invariants asserted unchanged unless explicitly versioned; no release may re-open a previously-closed bypass vector | No regression/mutation gate; ~47 unreleased hardening commits unguarded | CI regression gate live; 0 reopened vectors | 2026-09-30 |
-| Zero unsupported claims on public surfaces (precondition) | Live "Featured in Awesome LLM Security" badge unless inclusion confirmed; "community favorites" framing; empty production table presented as social proof; self-assessed compliance percentages surfaced as adoption proof; unlabeled simulations | Badge live (unconfirmed), "most shared" framing vs 2 stars, empty production table, compliance % on README, X1–X6 unlabeled | 0 unverified claims; "recommended starting points" framing; production table populated or honestly reframed; compliance framed as self-assessment only; every research result line prefixed "SIMULATION (seed=42), not empirical benchmark" or replaced with real results | 2026-08-01 |
-| Security-disclosure posture | Presence of SECURITY.md + working vulnerability-disclosure channel + stated triage/disclosure window | None | SECURITY.md live; disclosure channel working; window committed | 2026-09-30 |
-| Bus factor exceeds 1 with responsive maintenance | External merged contributors; median time-to-first-response over a trailing 30-day window with a minimum-N denominator | 0 external contributors; TTFR unmeasured (no inbound) | Bus factor ≥2 (≥1 external merged PR) AND median TTFR ≤48h once N≥3 inbound items in window | 2026-12-31 |
-| Canonical release shipped, positioning committed | Released version (>v2.10.1) on PyPI capturing the unreleased hardening with a populated CHANGELOG; GOAL.md + `governed_execution_membrane.py` committed; clean install verified from a fresh venv | v2.11.0 release commit on main with populated CHANGELOG; publish automated via GitHub Release + PyPI trusted publishing (no token required); positioning committed; fresh-venv install + release proof verified | v2.11.0+ published, CHANGELOG filled, positioning committed, fresh-venv install verified | 2026-08-31 |
+| Usage-as-governance (primary, maps to North Star) | Independent (non-maintainer) repos/services that import `acgs_lite` and invoke a governance decision at a real side-effect boundary, verified by public source or written confirmation | 0 independently confirmed | ≥3 independent projects, with ≥1 still integrated at 90 days (retention) | 2026-12-31 |
+| Core invariant empirically proven with a meaningfulness floor | ≥3 experiments on a REAL LLM + real AuditLog (not seeded RNG) using a recognized dataset (real HumanEval/SWE-bench subset, stated min sample size, ≥2 model providers), headline X1 hypothesis resolved to a non-zero interpretable result or explicitly retired, with committed `*_results.json` + `summary.json` | Harness exists; committed `research/results/real_llm/summary.json` is a placeholder (`simulated: true`, `experiments: []`). X1 not resolved/retired | ≥3 real experiments meeting the floor + X1 resolved/retired | 2026-10-31 |
+| Adversarial bypass coverage incl. out-of-distribution attack | Committed adversarial suite covering all five fail-closed triggers (authorization, constitution version, policy staleness, receipt integrity, audit-evidence verifiability) — not just carrier/receipt vectors — incl. ≥1 externally-contributed/OOD attack the maintainer did not author; 0 successful bypasses | `docs/evidence/governance-regression/` records 6 self-authored cases, 5 trigger classes, 0 bypasses (2026-05-31). No external/OOD case | 0 bypasses across all five trigger classes incl. ≥1 external attack | 2026-10-31 |
+| Fail-closed is the DEFAULT | MACI hard-enforced without `enforce_maci=True`; bundled Claude Code hook route (no external `/x402/check` sidecar) without owning orchestration; Legitimacy Kernel graded Stable with passing tests | Shipped in 2.12.0: `GovernedAgent` defaults `enforce_maci=True`; bundled hook route; legitimacy kernel is a documented stable surface. Explicit opt-outs remain (`enforce_maci=False`, `strict=False`) | All three closed; remaining advisory opt-outs inventoried | 2026-10-31 |
+| Governance-regression safety (no silent weakening) | Adversarial suite runs in CI on every PR; constitutional hash + receipt-binding invariants asserted unchanged unless explicitly versioned; no release may re-open a previously-closed bypass vector | CI job `governance-regression` runs `make test-governance` (includes `scripts/run_governance_regression.py --check`) on PRs to `main`. Branch-protection “required” pinning not independently re-audited here | CI regression gate live and required; 0 reopened vectors | 2026-09-30 |
+| Zero unsupported claims on public surfaces (precondition) | Live "Featured in Awesome LLM Security" badge unless inclusion confirmed; "community favorites" framing; empty production table presented as social proof; self-assessed compliance percentages surfaced as adoption proof; unlabeled simulations | Badge/favorites framing removed; production users line is honest; research X1–X6 labeled simulations. Remaining work: keep pip-only first-run honest (`examples/` is not on PyPI) and keep compliance ratios labeled SELF-ASSESSED | 0 unverified claims; pip-only first-run works; compliance framed as self-assessment only | 2026-08-01 (overdue; honesty pass continues) |
+| Security-disclosure posture | Presence of SECURITY.md + working vulnerability-disclosure channel + stated triage/disclosure window | `SECURITY.md` live; `security@acgs.ai`; 2.12.x supported. Mailbox staffing / live triage not independently verified | SECURITY.md live; disclosure channel working; window committed | 2026-09-30 |
+| Bus factor exceeds 1 with responsive maintenance | External merged contributors; median time-to-first-response over a trailing 30-day window with a minimum-N denominator | Primary maintainer still dominates. Additional GitHub accounts exist (including bots). Not claimed as bus factor ≥2. TTFR unmeasured | Bus factor ≥2 (≥1 external merged PR) AND median TTFR ≤48h once N≥3 inbound items in window | 2026-12-31 |
+| Canonical release shipped, positioning committed | Released version (>v2.10.1) on PyPI capturing the unreleased hardening with a populated CHANGELOG; GOAL.md + `governed_execution_membrane.py` committed; clean install verified from a fresh venv | **Met:** PyPI `2.12.0`; CHANGELOG populated; trusted publishing. Positioning/honesty pass still in flight on the first-run path | Keep published line current; do not treat release as the remaining bottleneck | 2026-08-31 |
 
 ### Critical Path
 
-1. Run the **honesty pass** (strip/confirm badge, replace "favorites" framing,
-   reframe production table and compliance %, label all X1–X6 as simulations).
-   Highest-leverage, gates everything downstream and must precede any traffic.
-2. Renew the PyPI token (external, account-gated) and verify a clean release from
-   a fresh venv.
-3. Commit membrane positioning + cut v2.11.0 with a populated CHANGELOG capturing
-   the unreleased commits.
-4. Make fail-closed the default (MACI, bundled hook, Legitimacy Kernel Stable) and
-   add the CI governance-regression gate.
-5. Wire ≥3 real-LLM + real-AuditLog experiments meeting the meaningfulness floor;
-   build the five-trigger adversarial suite incl. one OOD attack; commit
-   reproducible artifacts.
-6. Capture the hero GIF and hoist runnable proof above theory (the conversion
-   gate); add SECURITY.md.
-7. Submit to curated lists, track de-bot-screened PyPI installs, stand up ≤48h
-   responsive maintenance and good-first-issues to convert the first external
-   contributor and the first independent integrator.
+1. Keep the **honesty pass** closed on every public surface: pip-only first-run
+   (no `examples/` after `pip install`), fail-closed default engine in the hero,
+   compliance ratios labeled SELF-ASSESSED, no invented users or certification.
+   This still gates outbound traffic.
+2. ~~Renew the PyPI token / cut v2.11.0.~~ **Done:** `2.12.0` is on PyPI via
+   trusted publishing.
+3. Convert the first installer with the 5-minute membrane page; do not send
+   traffic to a first command that requires a clone.
+4. Inventory remaining advisory opt-outs (`strict=False`, `enforce_maci=False`)
+   so “fail-closed is the default” stays literally true.
+5. Wire ≥3 real-LLM + real-AuditLog experiments meeting the meaningfulness floor,
+   or retire X1 in writing; add ≥1 external/OOD fail-closed case.
+6. Confirm the `governance-regression` CI job is a required check on `main`.
+7. Stand up ≤48h responsive maintenance and good-first-issues to convert the
+   first external contributor and the first independent integrator. Curated-list
+   submissions stay owner-gated and must follow the honesty pass.
 
 ### Buildable vs. external (for autonomous work)
 

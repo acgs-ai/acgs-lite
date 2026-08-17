@@ -1,14 +1,20 @@
 # Quickstart
 
-Get ACGS running in a few minutes with the same API surface exercised by
-[`examples/quickstart.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/quickstart.py).
+Get ACGS running in a few minutes. `pip install` does **not** ship `examples/`.
+Use the snippet below, then the
+[5-minute membrane](guides/five-minute-membrane.md) for receipts and executor
+refusal.
+
+Clone the repo only if you want
+[`examples/quickstart.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/quickstart.py)
+or the in-tree scripts.
 
 ## 1. Install
 
 Install the core package:
 
 ```bash
-pip install acgs-lite
+pip install acgs-lite==2.12.0
 ```
 
 Install an extra only when you need a specific integration:
@@ -82,7 +88,16 @@ except ConstitutionalViolationError as exc:
     print(f"Blocked: {exc}")
 ```
 
-## 5. Run the Examples
+## 5. Pip-only membrane (receipt + executor)
+
+The 5-line snippet in the README is the fail-closed **check**. The
+[5-minute membrane](guides/five-minute-membrane.md) is the fail-closed
+**executor**: ALLOW with a receipt, TRANSFORM (PII), DENY of a wire, and
+`No legitimacy receipt, no execution` when the receipt is missing.
+
+After a clone, the same script is `python examples/membrane_5min.py`.
+
+## 6. Run the repo examples (clone required)
 
 For a self-verifying install check that covers `GovernedCallable`, MACI role gates,
 and tamper-evident audit in one script:
@@ -92,7 +107,7 @@ python examples/agent_quickstart/run.py
 ```
 
 Expected: all assertions pass, exits 0. This is the recommended starting point for
-AI coding agents (Codex, Claude Code, etc.) verifying a fresh install.
+AI coding agents (Codex, Claude Code, etc.) verifying a **source** checkout.
 
 For a broader walkthrough covering default constitutions, custom rules, MACI
 enforcement, audit stats, and the decorator API:
@@ -101,7 +116,7 @@ enforcement, audit stats, and the decorator API:
 python examples/quickstart.py
 ```
 
-## 6. CLI Bootstrap
+## 7. CLI Bootstrap
 
 Scaffold a starter `rules.yaml` and CI governance job:
 
@@ -115,7 +130,7 @@ Check your environment and license state:
 acgs status
 ```
 
-## 7. MCP Server
+## 8. MCP Server
 
 If you installed the `mcp` extra, run the governance server over stdio:
 
@@ -128,5 +143,7 @@ python -m acgs_lite.integrations.mcp_server --constitution constitution.yaml
 - Read the [MCP Governance Guide](mcp-guide.md).
 - Review [MACI Architecture](maci.md).
 - Run an [EU AI Act assessment](compliance-2026.md).
+- Run the [5-minute membrane](guides/five-minute-membrane.md).
 - Explore more runnable examples in
-  [`examples/README.md`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/README.md).
+  [`examples/README.md`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/README.md)
+  (clone required).

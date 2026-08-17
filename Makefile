@@ -188,6 +188,7 @@ test-governance:
 
 test-examples:
 	@echo "Running examples as smoke tests..."
+	$(TEST_ENV) $(PYTHON) examples/membrane_5min.py
 	$(TEST_ENV) $(PYTHON) examples/basic_governance/main.py
 	$(TEST_ENV) $(PYTHON) examples/compliance_eu_ai_act/main.py
 	$(TEST_ENV) $(PYTHON) examples/maci_separation/main.py

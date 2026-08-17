@@ -82,6 +82,7 @@ nav:
   - Integrations: integrations.md
   - Integration Decision Guide: integration-decision-guide.md
   - Guides:
+      - 5-minute membrane: guides/five-minute-membrane.md
       - Govern a LangChain Agent: guides/langchain.md
       - Govern AMD GAIA tool calls: guides/gaia.md
       - What Gets Blocked (Walkthrough): blog/what-got-blocked.md
