@@ -6,9 +6,13 @@ Run this single script to confirm ACGS-Lite is correctly installed and
 all three core capabilities work end-to-end.
 
 ```bash
-pip install acgs-lite
+# Clone required — PyPI does not ship examples/
+pip install -e .
 python examples/agent_quickstart/run.py
 ```
+
+For a pip-only membrane (no clone), use
+[docs/guides/five-minute-membrane.md](../../docs/guides/five-minute-membrane.md).
 
 Exit code `0` = all assertions passed.
 Exit code `1` = one or more assertions failed — investigate the output.
@@ -71,18 +75,35 @@ Exit code `1` = one or more assertions failed — investigate the output.
   Exit code: 0
 ```
 
+## What this proves
+
+- A `GovernedCallable` allows a safe prompt and blocks PII / destructive
+  keywords before the wrapped function returns.
+- A YAML constitution loads and still enforces those rules.
+- MACI refuses a proposer validating its own output.
+- An in-memory `AuditLog` records decisions and `verify_chain()` passes.
+
+## What this does not claim
+
+- Not a production install check for a pip-only user. This script lives in
+  `examples/` and is not on PyPI.
+- In-memory audit only. Not a durable or independently hosted store.
+- Keyword/regex rules, not semantic policy.
+- Not certification, not independent production use.
+
 ## Agent prompt (copy-paste into Claude Code or Codex CLI)
 
 ```
-TASK: Verify ACGS-Lite is correctly installed.
+TASK: Verify ACGS-Lite from a source checkout.
 
-1. pip install acgs-lite
-2. cd <repo-root>/packages/acgs-lite
+1. Clone https://github.com/acgs-ai/acgs-lite
+2. pip install -e .
 3. python examples/agent_quickstart/run.py
 
 Expected: all ✅ lines, exit code 0.
 If any ❌ appears, report the failing assertion text.
 Do NOT set strict=False to fix failures — investigate root cause.
+For a pip-only proof without cloning, follow docs/guides/five-minute-membrane.md.
 ```
 
 ## No API keys required

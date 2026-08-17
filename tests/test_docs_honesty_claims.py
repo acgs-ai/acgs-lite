@@ -80,6 +80,24 @@ def test_readme_compliance_ratios_are_self_assessed() -> None:
     assert not offenders, "unlabeled README compliance ratios remain:\n" + "\n".join(offenders)
 
 
+def test_example_readmes_state_prove_and_non_claims() -> None:
+    required = ("## What this proves", "## What this does not claim")
+    paths = (
+        REPO_ROOT / "examples" / "basic_governance" / "README.md",
+        REPO_ROOT / "examples" / "audit_trail" / "README.md",
+        REPO_ROOT / "examples" / "agent_quickstart" / "README.md",
+    )
+    offenders = []
+    for path in paths:
+        text = _read(path)
+        missing = [heading for heading in required if heading not in text]
+        if missing:
+            offenders.append(f"{path.relative_to(REPO_ROOT)} missing {missing}")
+        if re.search(r"pip install acgs-lite(?:==[0-9.]+)?\s*\npython examples/", text):
+            offenders.append(f"{path.relative_to(REPO_ROOT)} pip+examples first-run")
+    assert not offenders, "example README honesty gaps:\n" + "\n".join(offenders)
+
+
 def test_five_minute_guide_states_fail_closed_refusals() -> None:
     guide = _read(REPO_ROOT / "docs" / "guides" / "five-minute-membrane.md")
     assert "No legitimacy receipt, no execution" in guide

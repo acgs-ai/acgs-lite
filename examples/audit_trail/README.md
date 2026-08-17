@@ -14,9 +14,28 @@ Chain integrity is verifiable at any time — no database required.
 
 ## Run
 
+`pip install` does **not** ship this directory. From a clone of this repo:
+
 ```bash
-python packages/acgs-lite/examples/audit_trail/main.py
+pip install -e .
+python examples/audit_trail/main.py
 ```
+
+## What this proves
+
+- `AuditLog.record()` appends SHA-256-chained entries in process.
+- `verify_chain()` returns `True` on an unmodified log and fails after
+  in-memory tampering in the demo.
+- Entries can be queried and exported to JSON.
+
+## What this does not claim
+
+- This is an in-process (and optional local-file) demo, not a hosted,
+  independently operated audit store.
+- A verified chain proves the log was not altered *in this process*. It does
+  not prove who issued a decision unless you also use signed receipts
+  (`crypto` extra).
+- Not certification, not regulator approval, not production durability.
 
 ## Key API
 

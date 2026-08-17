@@ -13,13 +13,15 @@ Govern any Python callable with a `Constitution` in a few lines. No API keys req
 
 ## Run
 
-```bash
-# From repo root
-python packages/acgs-lite/examples/basic_governance/main.py
+`pip install` does **not** ship this directory. From a clone of this repo:
 
-# Or from acgs-lite package root
+```bash
+pip install -e .
 python examples/basic_governance/main.py
 ```
+
+For a pip-only ALLOW / TRANSFORM / DENY + missing-receipt proof, use
+[docs/guides/five-minute-membrane.md](../../docs/guides/five-minute-membrane.md).
 
 ## Expected output
 
@@ -35,23 +37,36 @@ python examples/basic_governance/main.py
 🚫  PII gate: no-pii — Prevent PII leakage in requests
 ```
 
-This is the fastest no-key proof that `acgs-lite` can sit in the runtime path and deny unsafe inputs before execution.
+This is a local, no-key proof that a `GovernedCallable` can deny matching
+input before the wrapped function runs. It is not a production deployment.
+
+## What this proves
+
+- With a valid ALLOW receipt, a safe prompt reaches the wrapped callable.
+- Harmful-keyword and SSN-pattern inputs raise `ConstitutionalViolationError`
+  before `my_ai_function` returns.
+- The same rules load from YAML and still block.
+
+## What this does not claim
+
+- Not certified, not regulator-approved, not an independent production user.
+- In-process only. The “side effect” is a string return.
+- Rules are keyword/regex exact-match, not semantic understanding.
+- `GovernedCallable` still requires a `decision_receipt`. A missing receipt is
+  refused by the legitimacy kernel (`No legitimacy receipt, no execution`).
+  See the [5-minute membrane](../../docs/guides/five-minute-membrane.md).
 
 ## Key concepts
 
+The live script is `main.py`. It wraps the callable, then passes an ALLOW
+receipt so the constitution can accept or deny the *content*:
+
 ```python
-# 1. Define rules
-rule = Rule(id="no-pii", pattern=r"\b\d{3}-\d{2}-\d{4}\b", blocking=True)
+from acgs_lite import Constitution, ConstitutionalViolationError, GovernedCallable
 
-# 2. Create constitution
-constitution = Constitution(name="policy", rules=[rule])
-
-# 3. Wrap any callable — zero changes to the original
-governed = GovernedCallable(my_function, constitution=constitution)
-
-# 4. Call normally — violations raise ConstitutionalViolationError
-governed("safe input")        # ✅ passes through
-governed("123-45-6789")       # 🚫 raises ConstitutionalViolationError
+governed = GovernedCallable(constitution=constitution)(my_ai_function)
+governed("What is the capital of France?", decision_receipt=allow_receipt)
+# matching PII / harmful text raises ConstitutionalViolationError
 ```
 
 ## Next steps
