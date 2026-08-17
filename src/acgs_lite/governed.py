@@ -38,7 +38,6 @@ from acgs_lite.legitimacy.authorization import (
     AuthorizationProfile,
     ExecutionAuthority,
     ExecutionGrant,
-    GrantResolver,
     authorization_envelope_json,
     build_issue_receipt,
     extract_authorization_kwargs,
@@ -650,7 +649,6 @@ class GovernedCallable:
         strict: bool = True,
         authorization_profile: AuthorizationProfile | str | None = None,
         trusted_issuer_keys: Mapping[str, str] | None = None,
-        grant_resolver: GrantResolver | None = None,
     ) -> None:
         self.constitution = constitution or Constitution.default()
         self.agent_id = agent_id
@@ -663,7 +661,6 @@ class GovernedCallable:
         )
         self.authorization_profile = resolve_profile(authorization_profile)
         self.trusted_issuer_keys = dict(trusted_issuer_keys or {})
-        self.grant_resolver = grant_resolver
         self._authority = ExecutionAuthority()
 
     def issue_grant(
@@ -677,7 +674,9 @@ class GovernedCallable:
         if "receipt" in kwargs or "decision_receipt" in kwargs or "acgs_receipt" in kwargs:
             raise TypeError("issue_grant refuses caller-created receipts")
         func = inspect.unwrap(target)
-        extract_authorization_kwargs(kwargs)
+        tokens = extract_authorization_kwargs(kwargs)
+        if any(tokens.get(name) is not None for name in tokens):
+            raise TypeError("issue_grant refuses authorization transport kwargs")
         self._validate_payloads(func, args, kwargs, invoke_denied=True)
         invocation = bind_invocation(func, args, kwargs)
         policy = bind_policy(self.constitution)
@@ -817,6 +816,10 @@ class GovernedCallable:
             raise LegitimacyInvariantError("grant method identity mismatch")
         if envelope.get("policy_digest") != expected_envelope["policy_digest"]:
             raise LegitimacyInvariantError("policy binding mismatch")
+        if envelope.get("scope") != expected_envelope["scope"]:
+            raise LegitimacyInvariantError("invocation scope mismatch")
+        if envelope.get("subjects") != expected_envelope["subjects"]:
+            raise LegitimacyInvariantError("invocation subjects mismatch")
         return signed.receipt
 
     def __call__(self, func: Callable[..., T]) -> Callable[..., T]:

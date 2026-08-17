@@ -6,6 +6,7 @@ import base64
 import hashlib
 import inspect
 import json
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -166,7 +167,7 @@ def _canonical_json(value: Any, *, _seen: set[int] | None = None) -> Any:
     if isinstance(value, int) and not isinstance(value, bool):
         return {"__int__": str(value)}
     if isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
+        if math.isnan(value) or math.isinf(value):
             raise ArgumentNotDigestible("non-finite float cannot be digested")
         return {"__float__": value.hex()}
     if isinstance(value, str):
@@ -191,9 +192,10 @@ def _canonical_json(value: Any, *, _seen: set[int] | None = None) -> Any:
     if isinstance(value, Mapping):
         items = []
         for key, item in value.items():
-            items.append([str(key), _canonical_json(item, _seen=seen)])
+            encoded_key = _canonical_json(key, _seen=seen)
+            items.append([_dumps(encoded_key), encoded_key, _canonical_json(item, _seen=seen)])
         items.sort(key=lambda pair: pair[0])
-        return {"__map__": items}
+        return {"__map__": [[key, item] for _sort, key, item in items]}
     raise ArgumentNotDigestible(f"unsupported argument type: {type(value).__name__}")
 
 

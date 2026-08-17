@@ -229,9 +229,11 @@ def authorization_envelope_json(invocation: InvocationBinding, policy: PolicyBin
 
 
 def parse_authorization_envelope(authorization_json: str) -> dict[str, Any]:
+    if not isinstance(authorization_json, str):
+        raise LegitimacyInvariantError("authorization envelope must be a string")
     try:
         payload = json.loads(authorization_json)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, TypeError) as exc:
         raise LegitimacyInvariantError("authorization envelope is not valid JSON") from exc
     if not isinstance(payload, dict):
         raise LegitimacyInvariantError("authorization envelope must be an object")

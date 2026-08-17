@@ -240,6 +240,12 @@ class SignedReceipt:
         # from_dict is the untrusted-wire entry point; a malformed payload must fail
         # closed with a domain error, not leak a bare KeyError to the caller.
         try:
+            authorization_json = data.get("authorization_json")
+            if authorization_json is not None and not isinstance(authorization_json, str):
+                raise TypeError("authorization_json must be a string")
+            signature_scope = data.get("signature_scope") or SIGNATURE_SCOPE_RECEIPT
+            if not isinstance(signature_scope, str):
+                raise TypeError("signature_scope must be a string")
             return cls(
                 receipt=_receipt_from_dict(data["receipt"]),
                 algorithm=data["algorithm"],
@@ -247,8 +253,8 @@ class SignedReceipt:
                 public_key=data["public_key"],
                 signature=data["signature"],
                 signed_at=data["signed_at"],
-                signature_scope=str(data.get("signature_scope") or SIGNATURE_SCOPE_RECEIPT),
-                authorization_json=data.get("authorization_json"),
+                signature_scope=signature_scope,
+                authorization_json=authorization_json,
             )
         except (KeyError, TypeError) as exc:
             raise ValueError(f"malformed signed-receipt payload: {exc}") from exc

@@ -183,6 +183,20 @@ def test_issue_grant_does_not_invoke_target() -> None:
     assert calls == []
 
 
+def test_issue_grant_rejects_authorization_transport_kwargs() -> None:
+    guard = GovernedCallable(
+        Constitution.default(),
+        authorization_profile=AuthorizationProfile.PRODUCTION,
+    )
+
+    @guard
+    def transfer(account_id: str, amount: int) -> str:
+        return "sent"
+
+    with pytest.raises(TypeError, match="authorization transport"):
+        transfer.issue_grant("acct-1", 10, execution_grant=object())
+
+
 def test_issue_grant_rejects_caller_created_receipt() -> None:
     guard = GovernedCallable(
         Constitution.default(),

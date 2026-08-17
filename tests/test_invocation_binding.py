@@ -52,6 +52,15 @@ def test_positional_and_keyword_defaults_match() -> None:
     assert a == b == c
 
 
+def test_int_and_str_mapping_keys_have_distinct_digests() -> None:
+    def take(items: object) -> None:
+        return None
+
+    int_key = canonical_argument_digest(take, ({1: "x"},), {})
+    str_key = canonical_argument_digest(take, ({"1": "x"},), {})
+    assert int_key != str_key
+
+
 def test_tuple_and_list_have_distinct_digests() -> None:
     def take(items: object) -> None:
         return None

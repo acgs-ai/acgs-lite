@@ -72,6 +72,15 @@ def test_deterministic_seed_is_reproducible() -> None:
     assert a1.signature == a2.signature
 
 
+def test_from_dict_rejects_non_string_authorization_json() -> None:
+    signer = Ed25519ReceiptSigner.from_seed(_SEED_A)
+    signed = sign_receipt(_receipt(), signer)
+    payload = signed.to_dict()
+    payload["authorization_json"] = {"not": "a string"}
+    with pytest.raises(ValueError, match="malformed"):
+        SignedReceipt.from_dict(payload)
+
+
 def test_tampered_receipt_payload_fails_verification() -> None:
     signed = sign_receipt(_receipt(), Ed25519ReceiptSigner.from_seed(_SEED_A))
     # Forge the decision after signing -- escalate a controlled allow to a bare allow.
