@@ -809,24 +809,36 @@ def _bind_arguments(
     return concrete
 
 
-def _extract_z3_policies(constitution: Any) -> list[str]:
-    """Helper to extract Z3 SMT policy strings from active constitution rules."""
-    policies: list[str] = []
+def _iter_rule_policies(constitution: Any) -> list[tuple[str, str]]:
+    """Every ``(rule_id, policy_source)`` pair carried by active constitution rules.
+
+    Kept separate from :func:`_extract_z3_policies` so that callers which report
+    per-rule findings — ``acgs eval verify-constitution`` — can say *which* rule a
+    policy came from, while the runtime gate keeps its flat list. One extraction
+    rule, two shapes: a policy the runtime enforces is a policy the verifier sees.
+    """
+    pairs: list[tuple[str, str]] = []
     if not constitution or not hasattr(constitution, "rules"):
-        return policies
+        return pairs
     for rule in constitution.rules:
         if not getattr(rule, "enabled", True) or getattr(rule, "deprecated", False):
             continue
+        rule_id = str(getattr(rule, "id", "") or "<unidentified-rule>")
         # Extract from rule metadata
         metadata = getattr(rule, "metadata", {}) or {}
         for key in ("z3_expression", "smt_constraint"):
             if key in metadata:
                 val = metadata[key]
                 if isinstance(val, str) and val:
-                    policies.append(val)
+                    pairs.append((rule_id, val))
         # Extract from rule text if prefixed with z3: or smt:
         text = getattr(rule, "text", "") or ""
         text_stripped = text.strip()
         if text_stripped.startswith("z3:") or text_stripped.startswith("smt:"):
-            policies.append(text_stripped.split(":", 1)[1].strip())
-    return policies
+            pairs.append((rule_id, text_stripped.split(":", 1)[1].strip()))
+    return pairs
+
+
+def _extract_z3_policies(constitution: Any) -> list[str]:
+    """Helper to extract Z3 SMT policy strings from active constitution rules."""
+    return [policy for _rule_id, policy in _iter_rule_policies(constitution)]

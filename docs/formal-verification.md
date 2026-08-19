@@ -154,13 +154,66 @@ Three limits on what an exemption can do:
   of its built-in principle variables before solving, so it evaluates a ground formula rather
   than searching. It is a keyword classifier with a solver attached; treat its result as a
   risk signal, not a proof.
-- **`Z3VerificationGate`** (in `acgs_lite.formal.smt_gate`) asserts a disjunction of
-  unconstrained booleans, so `satisfiable=True` and `contradiction=False` for every rule
-  regardless of content — including a rule written to contradict itself. It is **not** wired
-  to enforcement: no call is permitted or refused on its result. But it does back
-  `acgs eval verify-constitution`, which prints those two fields per CRITICAL rule and exits
-  non-zero only on `contradiction` — so that command always reports clean and always exits 0.
-  **Do not read its name, or that command's exit code, as verification.**
+- **`Z3VerificationGate`** (in `acgs_lite.formal.smt_gate`) verifies only the *policies* a
+  constitution carries — the `z3:`/`smt:` prefix on `rule.text` and the
+  `z3_expression`/`smt_constraint` metadata keys. Rule prose and keywords are not
+  constraints and are not checked. It is **not** wired to enforcement: no call is permitted
+  or refused on its result. See below for what its verdicts mean.
+
+## Verifying a constitution ahead of time
+
+`acgs eval verify-constitution [--constitution FILE]` checks three properties of every
+policy in a constitution, and claims nothing beyond them:
+
+| Property | A failure means |
+|---|---|
+| Parses under the restricted policy language | The control is broken; at runtime the decorated callable fails to exist |
+| Individually satisfiable | The rule blocks every call it applies to — no input can satisfy it |
+| Jointly satisfiable within a variable-sharing cluster | Any callable binding those variables can never execute |
+
+Policies are clustered by shared free variable before the joint check, because the runtime
+binds policy variables per callable from that callable's type hints. Two rules that name no
+variable in common can never apply to the same call, so they are never reported as
+contradicting each other.
+
+Exit codes are a contract:
+
+| Code | Meaning |
+|---|---|
+| `0` | Verified: at least one policy was checked and every check answered |
+| `1` | Defect found: an unsatisfiable policy, an unparseable policy, or a contradictory cluster |
+| `2` | **Not verified**: no solver installed, a solver that returned `unknown` or raised, a constitution file that could not be read, or a constitution with no machine-checkable content |
+
+A `--constitution` path that cannot be read exits 2, not 1: nothing was verified, and a
+mistyped path must not report as a contradiction. A file that reads but does not load —
+broken YAML, or a constitution that fails its own model — exits 1, the same as a malformed
+policy.
+
+The built-in default constitution carries no `z3:`/`smt:` policies, so the no-argument
+invocation exits **2**, not 0. That is deliberate: a command that verified nothing must not
+be indistinguishable from a command that verified everything.
+
+A free variable takes the sort its surrounding syntax requires:
+
+| Syntax | Sort | Runtime equivalent |
+|---|---|---|
+| proposition — whole policy, operand of `and`/`or`/`not`, argument of `And`/`Or`/`Not`/`Implies` | `Bool` | `bool` annotation |
+| compared against a string literal (`role == "admin"`) | `String` | `str` annotation |
+| takes part in a `%` | `Int` | `int` annotation |
+| anything else numeric | `Real` | `float` annotation |
+
+`Real` is the numeric *default* because it is the weakest: the integers are a subset of the
+reals, so UNSAT over the reals implies UNSAT under any integer refinement, and a `FAIL` on a
+`Real` variable is never a sort artifact. The converse does not hold — an integer-only
+contradiction such as `0 < x < 1` is satisfiable over the reals and is not reported unless
+the policy text forces `Int`. The command under-reports; it does not over-report. A variable
+used in two irreconcilable ways (a proposition and a number, a string and a number) is a
+malformed policy, not a guess.
+
+A satisfiable policy that is also *valid* — true for every input, such as
+`Or(flag, Not(flag))` or `1 < 2` — exits 1. It is not a contradiction, but it enforces
+nothing, which is the same defect class this command was itself an instance of; a warning
+printed alongside an exit 0 would not be a machine-readable signal.
 
 ## The Lean 4 layer
 

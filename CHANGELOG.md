@@ -50,10 +50,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   regeneration path — so `pip install "acgs-lite[z3]"` does not work yet.
   Note for whoever lands it: declaring the extra is only half the change. CI
   installs bare `z3-solver` appended to the install line (`.github/workflows/ci.yml`
-  lines 24, 52, 106); those must become `.[dev,autonoma,anthropic,mcp,otel,z3]`,
+  lines 24, 52, 95); those must become `.[dev,autonoma,anthropic,mcp,otel,z3]`,
   or the verification lanes still test a dependency set the published package
   does not offer. Leave `python-fallback` z3-less — it is the lane that proves
   `UNAVAILABLE` blocks.
+- **BREAKING: `acgs eval verify-constitution` can now fail, and its exit codes
+  changed.** The command reported `satisfiable` / `contradiction` per CRITICAL
+  rule, but `satisfiable` asserted a disjunction of fresh unconstrained booleans
+  (independent of the rule) and `contradiction` required two rules sharing an `id`
+  with different severities, which `Constitution` rejects at construction. Both
+  columns were constants and the command always exited 0 — an assurance surface
+  structurally incapable of detecting failure. It now verifies the `z3:` / `smt:`
+  policies a constitution actually carries: each must parse, each must be
+  individually satisfiable, and each variable-sharing cluster must be jointly
+  satisfiable. Exit codes are a contract — `0` verified, `1` defect found, `2` not
+  verified. **The no-argument invocation now exits 2**, because the built-in
+  default constitution carries no policies and therefore verifies nothing; a
+  command that verified nothing must not be indistinguishable from one that
+  verified everything. New `--constitution FILE` verifies your own constitution; an
+  unreadable path exits 2 (nothing was verified) while a file that loads but does
+  not validate exits 1.
+  Policy variables take the sort their syntax requires — `Bool` in a proposition
+  position, `String` against a string literal, `Int` in a `%`, `Real` otherwise —
+  matching what the runtime derives from `bool`/`str`/`int`/`float` annotations, so
+  a policy the runtime can enforce is one this command can check. A policy that is
+  *valid* rather than merely satisfiable (`Or(flag, Not(flag))`, `1 < 2`) exits 1:
+  it constrains nothing, which is the defect class this command was an instance of.
+  `VerificationResult` replaces `satisfiable`/`contradiction` with `status` from
+  the same `VerificationStatus` vocabulary the runtime gate uses, and
+  `NullVerificationGate` now reports `UNAVAILABLE` instead of a clean pass.
+  (`Z3VerificationGate` is `experimental` in `docs/stability.md`.)
 
 ### Changed
 
