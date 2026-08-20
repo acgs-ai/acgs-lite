@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install -e ".[dev,autonoma,anthropic,mcp,otel]" httpx
+        run: pip install -e ".[dev,autonoma,anthropic,mcp,otel]" httpx z3-solver
       - name: Lint
         run: ruff check src/acgs_lite/
       - name: Validate capability manifest
@@ -49,7 +49,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install -e ".[dev,autonoma,anthropic,mcp,otel]" httpx
+        run: pip install -e ".[dev,autonoma,anthropic,mcp,otel]" httpx z3-solver
       - name: Validate capability manifest
         run: python -m acgs_lite.cli capabilities validate --max-age-days 45
       - name: Test with coverage
@@ -92,7 +92,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install -e ".[dev,autonoma,anthropic,mcp,otel]" httpx
+        run: pip install -e ".[dev,autonoma,anthropic,mcp,otel]" httpx z3-solver
       - name: Governance regression gate
         run: make test-governance
 
@@ -121,6 +121,10 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+      # Deliberately minimal: no Rust companion AND no z3-solver. This lane is
+      # the one that proves the formal-verification layer fails closed when its
+      # dependency is absent (VerificationStatus.UNAVAILABLE -> block). Do not
+      # add z3-solver here to "fix" a failure; fix the fail-closed path instead.
       - name: Install without Rust companion
         run: pip install -e ".[dev,mcp]" httpx
       - name: Confirm acgs-lite-rust is not present

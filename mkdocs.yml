@@ -106,6 +106,7 @@ nav:
       - Compliance: api/compliance.md
   - Changelog: changelog.md
   - Security: security.md
+  - Formal Verification: formal-verification.md
   - Additional Resources:
       - MCP Notes: mcp.md
       - Telegram Webhook: telegram-webhook.md

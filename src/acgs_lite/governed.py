@@ -631,6 +631,84 @@ class GovernedAgent:
         )
 
 
+def _enforce_z3_gate(
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    policies: list[Any],
+    *,
+    audit_log: AuditLog,
+    agent_id: str,
+) -> None:
+    """Run the Z3 boundary check and raise unless the call is cleared.
+
+    Shared by the sync and async wrappers. It lives here as one function rather
+    than twice inline because two copies of an enforcement rule is two places for
+    it to drift, and only one of them would be noticed.
+
+    Order matters and is deliberate:
+
+    1. verify — always, even for an exempt callable, so an exemption can never
+       hide a policy that *does* apply and *does* fail;
+    2. block/allow on :func:`blocks_execution`, the single enforcement rule;
+    3. only for ``INAPPLICABLE``, consider an exemption;
+    4. record the exemption to the audit log **before** returning, so the call
+       cannot proceed on an unrecorded exemption.
+
+    :raises ConstitutionalViolationError: on any status the gate does not clear.
+    """
+    from acgs_lite.formal.exemption import active_exemption
+    from acgs_lite.z3_verify import (
+        VerificationStatus,
+        blocks_execution,
+        verify_callable_arguments,
+    )
+
+    runtime_res = verify_callable_arguments(func, args, kwargs, policies)
+    if not blocks_execution(runtime_res):
+        return
+
+    if runtime_res.status is VerificationStatus.FAIL:
+        raise ConstitutionalViolationError(
+            f"Action violates mathematical constraints: {runtime_res.counterexample}",
+            rule_id="Z3-CONSTRAINT-VIOLATION",
+        )
+
+    exemption_error: str | None = None
+    if runtime_res.status is VerificationStatus.INAPPLICABLE:
+        # The ONLY status an exemption can clear. A proven violation is handled
+        # above; a malformed policy, a missing solver, a timeout, and a crashed
+        # solver all fall through to the raise below regardless of any exemption.
+        exemption, exemption_error = active_exemption(func)
+        if exemption is not None:
+            audit_log.record_atomic(
+                AuditEntry(
+                    id=str(uuid.uuid4()),
+                    type="verification_exemption",
+                    agent_id=agent_id,
+                    action=getattr(func, "__name__", "<callable>"),
+                    # Not a clean pass: execution proceeded without verification.
+                    # Recorded as invalid so "where did we run unverified" is a
+                    # query over the audit trail, not an investigation.
+                    valid=False,
+                    violations=["Z3-VERIFICATION-INAPPLICABLE"],
+                    metadata={
+                        "verification_status": runtime_res.status.value,
+                        **exemption.to_audit_metadata(),
+                    },
+                )
+            )
+            return
+
+    detail = (
+        f"Z3 verification could not clear this call [{runtime_res.status.value}]: "
+        f"{runtime_res.error}"
+    )
+    if exemption_error is not None:
+        detail = f"{detail} (no usable exemption: {exemption_error})"
+    raise ConstitutionalViolationError(detail, rule_id="Z3-CONSTRAINT-VIOLATION")
+
+
 class GovernedCallable:
     """Decorator to govern any function.
 
@@ -879,19 +957,42 @@ class GovernedCallable:
         agent_id = self.agent_id
 
         # SMT / Z3 integration
+        from acgs_lite.formal.policy_ast import PolicyParseError, parse_policy_source
         from acgs_lite.z3_verify import (
-            Z3_AVAILABLE,
+            VerificationStatus,
             _extract_z3_policies,
-            verify_callable_arguments,
             verify_callable_safety,
         )
 
-        policies = _extract_z3_policies(self.constitution) if Z3_AVAILABLE else []
+        audit_log = self.audit_log
 
-        if Z3_AVAILABLE and policies:
-            # Perform static boundary checks
+        # Extracted unconditionally, NOT gated on Z3_AVAILABLE. If the constitution
+        # carries policies, the fact that no solver is installed to check them must
+        # reach the enforcement gate as UNAVAILABLE -> block, rather than silently
+        # producing an empty policy list that disables the whole layer.
+        policies = _extract_z3_policies(self.constitution)
+
+        # A policy that cannot be parsed is a broken control. Reject it when the
+        # constitution is wired up rather than skipping it with a WARNING at each
+        # call, which is how enforcement used to disappear.
+        for policy in policies:
+            if isinstance(policy, str):
+                try:
+                    parse_policy_source(policy)
+                except PolicyParseError as exc:
+                    raise ConstitutionalViolationError(
+                        f"Constitution contains an invalid Z3 policy: {exc}",
+                        rule_id="Z3-POLICY-MALFORMED",
+                    ) from exc
+
+        if policies:
+            # Perform static boundary checks. Advisory only; the runtime gate below
+            # is the enforcing one.
             static_res = verify_callable_safety(func, policies)
-            if static_res.verified and not static_res.satisfiable:
+            # `status is FAIL`, not the old `verified and not satisfiable` -- that
+            # expression is the fail-open predicate this change removes, and a live
+            # copy of it is how it gets reintroduced later.
+            if static_res.status is VerificationStatus.FAIL:
                 _log.warning(
                     "Static verification warning for function '%s': "
                     "Possible constitutional violation detected in input space boundaries! "
@@ -910,13 +1011,19 @@ class GovernedCallable:
                     return recovered
 
                 try:
-                    if Z3_AVAILABLE and policies:
-                        runtime_res = verify_callable_arguments(func, args, kwargs, policies)
-                        if runtime_res.verified and not runtime_res.satisfiable:
-                            raise ConstitutionalViolationError(
-                                f"Action violates mathematical constraints: {runtime_res.counterexample}",
-                                rule_id="Z3-CONSTRAINT-VIOLATION",
-                            )
+                    # Fail-closed: only a completed check that found no violation
+                    # clears the call. Missing solver, malformed policy, timeout,
+                    # exception, and "no policy applies here" all block. See
+                    # _enforce_z3_gate for the exemption path.
+                    if policies:
+                        _enforce_z3_gate(
+                            func,
+                            args,
+                            kwargs,
+                            policies,
+                            audit_log=audit_log,
+                            agent_id=agent_id,
+                        )
 
                     for payload in iter_governance_payloads(*args, kwargs):
                         engine.validate(payload, agent_id=agent_id)
@@ -946,13 +1053,19 @@ class GovernedCallable:
                     return recovered
 
                 try:
-                    if Z3_AVAILABLE and policies:
-                        runtime_res = verify_callable_arguments(func, args, kwargs, policies)
-                        if runtime_res.verified and not runtime_res.satisfiable:
-                            raise ConstitutionalViolationError(
-                                f"Action violates mathematical constraints: {runtime_res.counterexample}",
-                                rule_id="Z3-CONSTRAINT-VIOLATION",
-                            )
+                    # Fail-closed: only a completed check that found no violation
+                    # clears the call. Missing solver, malformed policy, timeout,
+                    # exception, and "no policy applies here" all block. See
+                    # _enforce_z3_gate for the exemption path.
+                    if policies:
+                        _enforce_z3_gate(
+                            func,
+                            args,
+                            kwargs,
+                            policies,
+                            audit_log=audit_log,
+                            agent_id=agent_id,
+                        )
 
                     for payload in iter_governance_payloads(*args, kwargs):
                         engine.validate(payload, agent_id=agent_id)

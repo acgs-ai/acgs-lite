@@ -84,6 +84,11 @@ from acgs_lite.errors import (
 )
 from acgs_lite.events import EventBus, GovernanceEvent, get_event_bus
 from acgs_lite.fail_closed import fail_closed as fail_closed
+from acgs_lite.formal.exemption import (
+    ExemptionError,
+    VerificationExemption,
+    verification_exempt,
+)
 from acgs_lite.governed import GovernedAgent, GovernedCallable
 from acgs_lite.legitimacy.authorization import (
     AsyncGrantResolver,
@@ -99,6 +104,7 @@ from acgs_lite.production import (
     ProductionProfileValidation,
     validate_production_profile,
 )
+from acgs_lite.z3_verify import VerificationStatus, blocks_execution
 
 # ── Optional dependency tracking ────────────────────────────────────────────
 # Populated when optional extras are not installed. __getattr__ below uses
@@ -408,6 +414,11 @@ __all__ = [
     "Z3VerifyResult",
     "Z3_AVAILABLE",
     "Z3_RISK_THRESHOLD",
+    "VerificationStatus",
+    "blocks_execution",
+    "verification_exempt",
+    "VerificationExemption",
+    "ExemptionError",
     # Leanstral formal verification (Lean 4 proof certificates)
     "LeanstralVerifier",
     "LeanVerifyResult",
@@ -631,6 +642,11 @@ _STABILITY_EXPERIMENTAL: frozenset[str] = frozenset(
         "Z3VerifyResult",
         "Z3_AVAILABLE",
         "Z3_RISK_THRESHOLD",
+        "VerificationStatus",
+        "blocks_execution",
+        "verification_exempt",
+        "VerificationExemption",
+        "ExemptionError",
         # Leanstral / Lean 4 proof certificates
         "LeanstralVerifier",
         "LeanVerifyResult",

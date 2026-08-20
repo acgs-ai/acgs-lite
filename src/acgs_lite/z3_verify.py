@@ -25,9 +25,18 @@ import inspect
 import logging
 import time
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Union, get_args, get_origin, get_type_hints
+
+from acgs_lite.formal.policy_ast import (
+    PolicyNameError,
+    PolicyParseError,
+    build_policy_expression,
+    parse_policy_source,
+    policy_variable_names,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -51,16 +60,50 @@ except ImportError:
 # Default timeout for Z3 solver (milliseconds)
 _Z3_TIMEOUT_MS = 5_000
 
-# Locked-down globals for evaluating policy expressions. eval() auto-injects the
-# real builtins when given a globals dict without "__builtins__"; an empty mapping
-# here blocks that, so a policy string sourced from a constitution rule cannot reach
-# __import__/open/etc. Only the Z3 helpers + parsed variables (passed as locals) are
-# in scope. SMT comparison expressions need no builtins, so this is non-restrictive
-# for legitimate policies.
-_POLICY_EVAL_GLOBALS: dict[str, Any] = {"__builtins__": {}}
-
 # Risk threshold above which Z3 verification is recommended
 Z3_RISK_THRESHOLD = 0.8
+
+
+class VerificationStatus(str, Enum):
+    """Why a verification returned the answer it did.
+
+    ``satisfiable`` and ``verified`` alone cannot distinguish "the solver proved
+    this call safe" from "the solver never ran", which is how a broken control
+    used to read as a passing one. This records which case actually occurred.
+    """
+
+    PASS = "pass"
+    """Solver ran and found no policy violation."""
+    FAIL = "fail"
+    """Solver ran and found a violation. Counterexample is populated."""
+    INAPPLICABLE = "inapplicable"
+    """No policy names any parameter of this callable.
+
+    **Blocks.** Absence of an applicable policy is not evidence of safety, and it
+    is not distinguishable from the failure it would otherwise hide: policy
+    variables come from type hints, so an unannotated callable binds nothing and
+    every policy looks inapplicable to it. To run such a callable, declare an
+    explicit, expiring, audited exemption — see
+    :mod:`acgs_lite.formal.exemption`.
+    """
+    UNAVAILABLE = "unavailable"
+    """z3-solver is not installed, so no policy could be checked."""
+    INVALID_POLICY = "invalid_policy"
+    """A policy is malformed, or names only some of this callable's parameters."""
+    UNKNOWN = "unknown"
+    """Solver timed out or returned unknown."""
+    ERROR = "error"
+    """Verification raised. Treated exactly like UNKNOWN by the enforcement gate."""
+
+
+#: Statuses that permit execution. Everything else blocks — including every way
+#: verification can fail to produce an answer, and including INAPPLICABLE, where
+#: verification produced no answer *about this callable*. Written as an allowlist
+#: so a status added later fails closed until it is deliberately listed here.
+#:
+#: Exactly one member. If a second is ever added, the reviewer should be able to
+#: state what that status *proves*, not merely what it failed to disprove.
+_ALLOWS_EXECUTION: frozenset[VerificationStatus] = frozenset({VerificationStatus.PASS})
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +120,37 @@ class Z3VerifyResult:
     """Variable assignment that witnesses a violation, or None."""
     verification_time_ms: float
     error: str | None = None
+    status: VerificationStatus = VerificationStatus.UNKNOWN
+    """Why this answer was produced. See :func:`blocks_execution`."""
+
+
+def blocks_execution(result: Z3VerifyResult) -> bool:
+    """Whether *result* must stop the call. **This is the enforcement rule.**
+
+    Fail-closed: only a completed check that found no violation permits execution.
+    Every other outcome blocks — solver missing, policy malformed, timeout,
+    exception, and also the case where no policy applied to this callable.
+
+    The original rule was ``verified and not satisfiable``, i.e. block only on a
+    *proven* violation, which made ``verified=False`` mean "allow". Since every
+    error path set ``verified=False``, a single unparseable policy string silently
+    disabled enforcement while logging at WARNING.
+
+    ``INAPPLICABLE`` blocked later than the rest, and for a subtler reason. It
+    reads as "these policies are about other callables", which is usually true
+    and sounds harmless. But the same status is produced when a callable has no
+    type hints at all — no variables get built, so every policy is trivially
+    disjoint from them — which means dropping an annotation during an ordinary
+    refactor would quietly move a callable outside its own controls. A gate that
+    can be disabled by deleting a `: int` is not a gate.
+
+    Running an unverifiable callable is still possible, but it now has to be
+    said out loud: see :func:`acgs_lite.formal.exemption.verification_exempt`.
+    An exemption is checked *after* this function returns True and applies only
+    to ``INAPPLICABLE``; it can never clear a ``FAIL``, a malformed policy, or a
+    solver that did not answer.
+    """
+    return result.status not in _ALLOWS_EXECUTION
 
 
 # ---------------------------------------------------------------------------
@@ -218,14 +292,7 @@ class Z3ConstraintVerifier:
             context: Optional dict with keys like "environment", "authenticated".
         """
         if not Z3_AVAILABLE:
-            return Z3VerifyResult(
-                satisfiable=True,
-                verified=False,
-                solver_result="skipped",
-                counterexample=None,
-                verification_time_ms=0.0,
-                error="z3-solver not installed",
-            )
+            return _unavailable()
 
         start = time.perf_counter()
         try:
@@ -245,6 +312,7 @@ class Z3ConstraintVerifier:
                     solver_result="sat",
                     counterexample=counterexample,
                     verification_time_ms=elapsed_ms,
+                    status=VerificationStatus.FAIL,
                 )
             elif check_result == z3.unsat:
                 # No violation possible — constraints are unsatisfiable
@@ -254,28 +322,23 @@ class Z3ConstraintVerifier:
                     solver_result="unsat",
                     counterexample=None,
                     verification_time_ms=elapsed_ms,
+                    status=VerificationStatus.PASS,
                 )
             else:
                 # unknown — solver timed out or gave up
                 return Z3VerifyResult(
-                    satisfiable=True,
+                    satisfiable=False,
                     verified=False,
                     solver_result="unknown",
                     counterexample=None,
                     verification_time_ms=elapsed_ms,
                     error="Z3 solver returned unknown (possible timeout)",
+                    status=VerificationStatus.UNKNOWN,
                 )
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - start) * 1000
             _log.warning("Z3 verification error: %s", type(exc).__name__)
-            return Z3VerifyResult(
-                satisfiable=True,
-                verified=False,
-                solver_result="unknown",
-                counterexample=None,
-                verification_time_ms=elapsed_ms,
-                error=type(exc).__name__,
-            )
+            return _errored(exc, start)
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +537,182 @@ def parse_callable_to_z3(func: Callable[..., Any]) -> tuple[dict[str, Any], list
     return variables, constraints
 
 
+@dataclass(frozen=True, slots=True)
+class _PolicyResolution:
+    """Outcome of turning policy strings into z3 expressions for one callable."""
+
+    expressions: list[Any]
+    inapplicable: int
+    error: str | None = None
+
+
+def _policy_helpers() -> dict[str, Any]:
+    """The only callables a policy expression may invoke."""
+    return {"And": z3.And, "Or": z3.Or, "Not": z3.Not, "Implies": z3.Implies}
+
+
+def _resolve_policies(
+    policies: Sequence[str | Any],
+    variables: Mapping[str, Any],
+) -> _PolicyResolution:
+    """Parse and bind *policies* against the variables of one callable.
+
+    Replaces the previous ``eval(policy, {"__builtins__": {}}, ctx)``. See
+    :mod:`acgs_lite.formal.policy_ast` for why that construction could not be
+    made safe.
+
+    A policy naming none of *variables* is **inapplicable** to this callable, not
+    an error: constitution policies are global while callables are many, so
+    ``amount < 500`` has nothing to say about ``def rotate_key(name: str)``. A
+    policy naming *some* of them is an error — a half-bound policy cannot be
+    evaluated, and silently skipping it is how enforcement disappears.
+    """
+    helpers = _policy_helpers()
+    expressions: list[Any] = []
+    inapplicable = 0
+
+    for policy in policies:
+        if not isinstance(policy, str):
+            # A caller-supplied z3 expression object, not rule-sourced text.
+            expressions.append(policy)
+            continue
+        try:
+            tree = parse_policy_source(policy)
+        except PolicyParseError as exc:
+            return _PolicyResolution([], inapplicable, f"invalid policy {policy!r}: {exc}")
+
+        names = policy_variable_names(tree)
+        if names and names.isdisjoint(variables):
+            inapplicable += 1
+            continue
+        if names and not names <= set(variables):
+            missing = ", ".join(sorted(names - set(variables)))
+            return _PolicyResolution(
+                [], inapplicable, f"policy {policy!r} names unbound variable(s): {missing}"
+            )
+        try:
+            expressions.append(build_policy_expression(tree, variables, helpers))
+        except PolicyNameError as exc:
+            return _PolicyResolution([], inapplicable, f"policy {policy!r}: {exc}")
+
+    return _PolicyResolution(expressions, inapplicable)
+
+
+# --- Result constructors -----------------------------------------------------
+#
+# Every non-PASS outcome sets satisfiable=False as well as a blocking status, so
+# that third-party code reading `satisfiable` on its own also reads "not proven
+# safe". There is no exception. INAPPLICABLE used to be one, on the reasoning that
+# nothing constrains the callable so nothing can be violated — but once
+# INAPPLICABLE blocks, leaving satisfiable=True would hand any consumer reading
+# that field alone the same fail-open answer this change removed from the gate.
+
+
+def _unavailable() -> Z3VerifyResult:
+    return Z3VerifyResult(
+        satisfiable=False,
+        verified=False,
+        solver_result="skipped",
+        counterexample=None,
+        verification_time_ms=0.0,
+        error=(
+            "z3-solver not installed, so this call could not be verified; "
+            "run `pip install z3-solver` to enable verification"
+        ),
+        status=VerificationStatus.UNAVAILABLE,
+    )
+
+
+def _invalid_policy(message: str, start: float) -> Z3VerifyResult:
+    _log.error("Refusing to verify against a malformed policy: %s", message)
+    return Z3VerifyResult(
+        satisfiable=False,
+        verified=False,
+        solver_result="skipped",
+        counterexample=None,
+        verification_time_ms=(time.perf_counter() - start) * 1000,
+        error=message,
+        status=VerificationStatus.INVALID_POLICY,
+    )
+
+
+def _inapplicable(start: float) -> Z3VerifyResult:
+    return Z3VerifyResult(
+        satisfiable=False,
+        verified=False,
+        solver_result="skipped",
+        counterexample=None,
+        verification_time_ms=(time.perf_counter() - start) * 1000,
+        error=(
+            "No policy applies to this callable's parameters, so nothing was verified. "
+            "If that is correct, declare an exemption with @verification_exempt; "
+            "if it is not, the callable is probably missing type hints."
+        ),
+        status=VerificationStatus.INAPPLICABLE,
+    )
+
+
+def _errored(exc: Exception, start: float) -> Z3VerifyResult:
+    return Z3VerifyResult(
+        satisfiable=False,
+        verified=False,
+        solver_result="unknown",
+        counterexample=None,
+        verification_time_ms=(time.perf_counter() - start) * 1000,
+        error=type(exc).__name__,
+        status=VerificationStatus.ERROR,
+    )
+
+
+def _solve(
+    constraints: Sequence[Any],
+    expressions: Sequence[Any],
+    timeout_ms: int,
+    start: float,
+) -> Z3VerifyResult:
+    """Assert the constraints plus the negation of the policies, and check.
+
+    SAT means some assignment satisfies the constraints while violating a policy,
+    i.e. a violation exists. UNSAT means no such assignment exists.
+    """
+    solver = z3.Solver()
+    solver.set("timeout", timeout_ms)
+    for constraint in constraints:
+        solver.add(constraint)
+    solver.add(z3.Or(*[z3.Not(p) for p in expressions]))
+
+    check_result = solver.check()
+    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    if check_result == z3.sat:
+        return Z3VerifyResult(
+            satisfiable=False,
+            verified=True,
+            solver_result="sat",
+            counterexample=_extract_counterexample(solver.model()),
+            verification_time_ms=elapsed_ms,
+            status=VerificationStatus.FAIL,
+        )
+    if check_result == z3.unsat:
+        return Z3VerifyResult(
+            satisfiable=True,
+            verified=True,
+            solver_result="unsat",
+            counterexample=None,
+            verification_time_ms=elapsed_ms,
+            status=VerificationStatus.PASS,
+        )
+    return Z3VerifyResult(
+        satisfiable=False,
+        verified=False,
+        solver_result="unknown",
+        counterexample=None,
+        verification_time_ms=elapsed_ms,
+        error="Z3 solver returned unknown (possible timeout)",
+        status=VerificationStatus.UNKNOWN,
+    )
+
+
 def verify_callable_safety(
     func: Callable[..., Any],
     policies: list[str | Any],
@@ -488,109 +727,21 @@ def verify_callable_safety(
     "And(amount < 500, amount > 0)".
     """
     if not Z3_AVAILABLE:
-        return Z3VerifyResult(
-            satisfiable=True,
-            verified=False,
-            solver_result="skipped",
-            counterexample=None,
-            verification_time_ms=0.0,
-            error="z3-solver not installed",
-        )
+        return _unavailable()
 
     start = time.perf_counter()
     variables, constraints = parse_callable_to_z3(func)
-    if not variables:
-        return Z3VerifyResult(
-            satisfiable=True,
-            verified=False,
-            solver_result="skipped",
-            counterexample=None,
-            verification_time_ms=0.0,
-            error="No type-hinted variables found to verify",
-        )
+    resolution = _resolve_policies(policies, variables)
+    if resolution.error is not None:
+        return _invalid_policy(resolution.error, start)
+    if not resolution.expressions:
+        return _inapplicable(start)
 
     try:
-        # Build evaluation context
-        eval_ctx = {
-            **variables,
-            "And": z3.And,
-            "Or": z3.Or,
-            "Not": z3.Not,
-            "Implies": z3.Implies,
-        }
-
-        parsed_policies = []
-        for policy in policies:
-            if isinstance(policy, str):
-                try:
-                    expr = eval(policy, _POLICY_EVAL_GLOBALS, eval_ctx)  # noqa: S307 - sandboxed builtins
-                    parsed_policies.append(expr)
-                except Exception as e:
-                    _log.warning("Failed to parse policy string '%s': %s", policy, e)
-                    continue
-            else:
-                parsed_policies.append(policy)
-
-        if not parsed_policies:
-            return Z3VerifyResult(
-                satisfiable=True,
-                verified=False,
-                solver_result="skipped",
-                counterexample=None,
-                verification_time_ms=0.0,
-                error="No valid safety policies found",
-            )
-
-        solver = z3.Solver()
-        solver.set("timeout", timeout_ms)
-
-        for c in constraints:
-            solver.add(c)
-
-        # Violation exists if any policy is false: Or(Not(p1), Not(p2), ...)
-        solver.add(z3.Or(*[z3.Not(p) for p in parsed_policies]))
-
-        check_result = solver.check()
-        elapsed_ms = (time.perf_counter() - start) * 1000
-
-        if check_result == z3.sat:
-            counterexample = _extract_counterexample(solver.model())
-            return Z3VerifyResult(
-                satisfiable=False,
-                verified=True,
-                solver_result="sat",
-                counterexample=counterexample,
-                verification_time_ms=elapsed_ms,
-            )
-        elif check_result == z3.unsat:
-            return Z3VerifyResult(
-                satisfiable=True,
-                verified=True,
-                solver_result="unsat",
-                counterexample=None,
-                verification_time_ms=elapsed_ms,
-            )
-        else:
-            return Z3VerifyResult(
-                satisfiable=True,
-                verified=False,
-                solver_result="unknown",
-                counterexample=None,
-                verification_time_ms=elapsed_ms,
-                error="Z3 solver returned unknown (possible timeout)",
-            )
-
+        return _solve(constraints, resolution.expressions, timeout_ms, start)
     except Exception as exc:
-        elapsed_ms = (time.perf_counter() - start) * 1000
         _log.warning("Z3 safety verification error: %s", type(exc).__name__)
-        return Z3VerifyResult(
-            satisfiable=True,
-            verified=False,
-            solver_result="unknown",
-            counterexample=None,
-            verification_time_ms=elapsed_ms,
-            error=type(exc).__name__,
-        )
+        return _errored(exc, start)
 
 
 def verify_callable_arguments(
@@ -600,138 +751,62 @@ def verify_callable_arguments(
     policies: list[str | Any],
     timeout_ms: int = _Z3_TIMEOUT_MS,
 ) -> Z3VerifyResult:
-    """Verify concrete runtime arguments of a function call against safety policies using Z3."""
+    """Verify concrete runtime arguments of a function call against safety policies using Z3.
+
+    This is the function the governed execution path calls on every invocation.
+    Use :func:`blocks_execution` on the result rather than reading the fields —
+    the fail-closed rule lives there.
+    """
     if not Z3_AVAILABLE:
-        return Z3VerifyResult(
-            satisfiable=True,
-            verified=False,
-            solver_result="skipped",
-            counterexample=None,
-            verification_time_ms=0.0,
-            error="z3-solver not installed",
-        )
+        return _unavailable()
 
     start = time.perf_counter()
     variables, constraints = parse_callable_to_z3(func)
-    if not variables:
-        return Z3VerifyResult(
-            satisfiable=True,
-            verified=False,
-            solver_result="skipped",
-            counterexample=None,
-            verification_time_ms=0.0,
-            error="No type-hinted variables found to verify",
-        )
+    resolution = _resolve_policies(policies, variables)
+    if resolution.error is not None:
+        return _invalid_policy(resolution.error, start)
+    if not resolution.expressions:
+        return _inapplicable(start)
 
     try:
-        # Map arguments to variable names
-        sig = inspect.signature(func)
-        bound = sig.bind(*args, **kwargs)
-        bound.apply_defaults()
-
-        concrete_constraints = []
-        for name, val in bound.arguments.items():
-            if name in variables:
-                var = variables[name]
-                if PYDANTIC_AVAILABLE and isinstance(val, BaseModel):
-                    if hasattr(val, "model_fields"):
-                        for f_name in val.model_fields:
-                            if f_name in variables:
-                                f_val = getattr(val, f_name, None)
-                                if f_val is not None:
-                                    concrete_constraints.append(variables[f_name] == f_val)
-                    elif hasattr(val, "__fields__"):
-                        for f_name in val.__fields__:  # type: ignore[attr-defined]
-                            if f_name in variables:
-                                f_val = getattr(val, f_name, None)
-                                if f_val is not None:
-                                    concrete_constraints.append(variables[f_name] == f_val)
-                else:
-                    if val is not None:
-                        concrete_constraints.append(var == val)
-
-        eval_ctx = {
-            **variables,
-            "And": z3.And,
-            "Or": z3.Or,
-            "Not": z3.Not,
-            "Implies": z3.Implies,
-        }
-
-        parsed_policies = []
-        for policy in policies:
-            if isinstance(policy, str):
-                try:
-                    expr = eval(policy, _POLICY_EVAL_GLOBALS, eval_ctx)  # noqa: S307 - sandboxed builtins
-                    parsed_policies.append(expr)
-                except Exception as e:
-                    _log.warning("Failed to parse policy string '%s': %s", policy, e)
-                    continue
-            else:
-                parsed_policies.append(policy)
-
-        if not parsed_policies:
-            return Z3VerifyResult(
-                satisfiable=True,
-                verified=False,
-                solver_result="skipped",
-                counterexample=None,
-                verification_time_ms=0.0,
-                error="No valid safety policies found",
-            )
-
-        solver = z3.Solver()
-        solver.set("timeout", timeout_ms)
-
-        for c in constraints:
-            solver.add(c)
-        for c in concrete_constraints:
-            solver.add(c)
-
-        # Violation exists if any policy is false
-        solver.add(z3.Or(*[z3.Not(p) for p in parsed_policies]))
-
-        check_result = solver.check()
-        elapsed_ms = (time.perf_counter() - start) * 1000
-
-        if check_result == z3.sat:
-            counterexample = _extract_counterexample(solver.model())
-            return Z3VerifyResult(
-                satisfiable=False,
-                verified=True,
-                solver_result="sat",
-                counterexample=counterexample,
-                verification_time_ms=elapsed_ms,
-            )
-        elif check_result == z3.unsat:
-            return Z3VerifyResult(
-                satisfiable=True,
-                verified=True,
-                solver_result="unsat",
-                counterexample=None,
-                verification_time_ms=elapsed_ms,
-            )
-        else:
-            return Z3VerifyResult(
-                satisfiable=True,
-                verified=False,
-                solver_result="unknown",
-                counterexample=None,
-                verification_time_ms=elapsed_ms,
-                error="Z3 solver returned unknown (possible timeout)",
-            )
-
+        concrete = _bind_arguments(func, args, kwargs, variables)
+        return _solve([*constraints, *concrete], resolution.expressions, timeout_ms, start)
     except Exception as exc:
-        elapsed_ms = (time.perf_counter() - start) * 1000
         _log.warning("Z3 runtime argument verification error: %s", type(exc).__name__)
-        return Z3VerifyResult(
-            satisfiable=True,
-            verified=False,
-            solver_result="unknown",
-            counterexample=None,
-            verification_time_ms=elapsed_ms,
-            error=type(exc).__name__,
-        )
+        return _errored(exc, start)
+
+
+def _bind_arguments(
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    variables: Mapping[str, Any],
+) -> list[Any]:
+    """Pin each z3 variable to the concrete value this call passed for it.
+
+    An argument that is ``None`` contributes no constraint, leaving that variable
+    free. Under the fail-closed rule the solver may then find a violating
+    assignment and block the call — the conservative direction, and the reason a
+    policy should not name an ``Optional`` parameter.
+    """
+    sig = inspect.signature(func)
+    bound = sig.bind(*args, **kwargs)
+    bound.apply_defaults()
+
+    concrete: list[Any] = []
+    for name, val in bound.arguments.items():
+        if name not in variables:
+            continue
+        if PYDANTIC_AVAILABLE and isinstance(val, BaseModel):
+            field_names = getattr(val, "model_fields", None) or getattr(val, "__fields__", {})
+            for f_name in field_names:
+                if f_name in variables:
+                    f_val = getattr(val, f_name, None)
+                    if f_val is not None:
+                        concrete.append(variables[f_name] == f_val)
+        elif val is not None:
+            concrete.append(variables[name] == val)
+    return concrete
 
 
 def _extract_z3_policies(constitution: Any) -> list[str]:

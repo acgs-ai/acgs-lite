@@ -50,9 +50,14 @@ class TestVerifierZ3Unavailable:
 
         assert result.verified is False
         assert result.solver_result == "skipped"
-        assert result.satisfiable is True
+        # Fail-closed: with no solver nothing was proven safe, so `satisfiable`
+        # must not read as "no violation found". The enforcement gate blocks on
+        # status UNAVAILABLE; this asserts the field agrees rather than
+        # contradicting it.
+        assert result.satisfiable is False
+        assert result.status is z3_verify.VerificationStatus.UNAVAILABLE
         assert result.counterexample is None
-        assert result.error == "z3-solver not installed"
+        assert "z3-solver not installed" in (result.error or "")
 
     def test_available_property_false(self):
         with patch("acgs_lite.z3_verify.Z3_AVAILABLE", False):
@@ -196,8 +201,12 @@ class TestVerifierZ3Available:
         with patch("acgs_lite.z3_verify.z3") as mock_z3:
             mock_z3.Solver.side_effect = RuntimeError("solver crash")
             result = v.verify("delete production data")
+        from acgs_lite import z3_verify
+
         assert result.verified is False
-        assert result.satisfiable is True
+        # An exception is not evidence of safety. Was `satisfiable is True`.
+        assert result.satisfiable is False
+        assert result.status is z3_verify.VerificationStatus.ERROR
         assert result.error == "RuntimeError"
 
     # --- Timeout / unknown ------------------------------------------------

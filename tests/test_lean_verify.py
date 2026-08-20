@@ -458,7 +458,8 @@ class TestLeanstralVerifierMockedNoKernel:
         verifier._client = mock_client
         return verifier
 
-    def test_full_pipeline_proves(self) -> None:
+    def test_full_pipeline_refuses_to_prove_without_a_kernel(self) -> None:
+        """F5: a generated proof nobody checked must not be reported as proved."""
         client = _mock_chat_responses(
             _make_formalization_response(),
             _make_proof_response(),
@@ -471,17 +472,18 @@ class TestLeanstralVerifierMockedNoKernel:
             context={"agent_role": "judicial"},
         )
 
-        assert result.proved is True
-        assert result.verified is True
-        assert result.certificate is not None
-        assert result.certificate.kernel_verified is False  # No Lean installed
-        assert result.certificate.lean_proof is not None
-        assert result.certificate.proof_hash  # Non-empty hash
+        assert result.proved is False, "unchecked proof reported as established"
+        assert result.certificate is None, "certificate minted for an unverified proof"
+        # The candidate is still returned, just not as an accepted proof.
+        assert result.proposed_proof is not None
+        assert result.proposed_theorem is not None
+        assert "not kernel-verified" in " ".join(result.lean_errors)
         assert result.attempts == 1
         assert result.verification_time_ms > 0
         assert client.chat.complete.call_count == 2  # formalize + prove
 
-    def test_certificate_audit_dict(self) -> None:
+    def test_no_certificate_reaches_the_audit_trail_without_a_kernel(self) -> None:
+        """There must be nothing to serialize into an audit entry."""
         client = _mock_chat_responses(
             _make_formalization_response(),
             _make_proof_response(),
@@ -489,11 +491,8 @@ class TestLeanstralVerifierMockedNoKernel:
         verifier = self._make_verifier(client)
         result = verifier.verify("test", _make_rules(2))
 
-        assert result.certificate is not None
-        d = result.certificate.to_audit_dict()
-        assert d["type"] == "lean4_proof_certificate"
-        assert d["kernel_verified"] is False
-        assert len(d["rules_formalized"]) == 2
+        assert result.certificate is None
+        assert result.proved is False
 
     def test_formalization_failure(self) -> None:
         client = _mock_chat_responses(
@@ -548,11 +547,11 @@ class TestLeanstralVerifierMockedNoKernel:
         verifier = self._make_verifier(client)
         result = verifier.verify("test", _make_rules(2))
 
-        assert result.certificate is not None
+        assert result.proposed_theorem is not None
         # Theorem should conjoin both rules
-        assert "maci_1_satisfied" in result.certificate.lean_statement
-        assert "maci_2_satisfied" in result.certificate.lean_statement
-        assert "∧" in result.certificate.lean_statement
+        assert "maci_1_satisfied" in result.proposed_theorem
+        assert "maci_2_satisfied" in result.proposed_theorem
+        assert "∧" in result.proposed_theorem
 
     def test_theorem_uses_declared_predicate_names(self) -> None:
         client = _mock_chat_responses(
@@ -571,10 +570,10 @@ class TestLeanstralVerifierMockedNoKernel:
 
         result = verifier.verify("read", _make_rules(2))
 
-        assert result.certificate is not None
-        assert "validator_rule ctx" in result.certificate.lean_statement
-        assert "judiciary_gate ctx" in result.certificate.lean_statement
-        assert "maci_1_satisfied" not in result.certificate.lean_statement
+        assert result.proposed_theorem is not None
+        assert "validator_rule ctx" in result.proposed_theorem
+        assert "judiciary_gate ctx" in result.proposed_theorem
+        assert "maci_1_satisfied" not in result.proposed_theorem
 
     def test_theorem_includes_context_assumptions(self) -> None:
         client = _mock_chat_responses(
@@ -589,9 +588,9 @@ class TestLeanstralVerifierMockedNoKernel:
             context={"agent_role": "judicial", "target_role": "validator"},
         )
 
-        assert result.certificate is not None
-        assert 'h_agentRole : ctx.agentRole = "judicial"' in result.certificate.lean_statement
-        assert 'h_targetRole : ctx.targetRole = "validator"' in result.certificate.lean_statement
+        assert result.proposed_theorem is not None
+        assert 'h_agentRole : ctx.agentRole = "judicial"' in result.proposed_theorem
+        assert 'h_targetRole : ctx.targetRole = "validator"' in result.proposed_theorem
 
     def test_theorem_includes_action_assumption(self) -> None:
         client = _mock_chat_responses(
@@ -602,8 +601,8 @@ class TestLeanstralVerifierMockedNoKernel:
 
         result = verifier.verify("read audit log", _make_rules(2))
 
-        assert result.certificate is not None
-        assert 'h_action : ctx.action = "read audit log"' in result.certificate.lean_statement
+        assert result.proposed_theorem is not None
+        assert 'h_action : ctx.action = "read audit log"' in result.proposed_theorem
 
     def test_chat_falls_back_to_codestral_when_leanstral_unavailable(self) -> None:
         choice = MagicMock()
@@ -651,6 +650,7 @@ class TestLeanstralVerifierMockedWithKernel:
 
         assert result.proved is True
         assert result.certificate is not None
+        assert result.proposed_theorem is not None
         assert result.certificate.kernel_verified is True
         assert result.attempts == 1
 
@@ -676,6 +676,7 @@ class TestLeanstralVerifierMockedWithKernel:
         assert result.proved is True
         assert result.attempts == 2
         assert result.certificate is not None
+        assert result.proposed_theorem is not None
         assert result.certificate.kernel_verified is True
         assert len(result.lean_errors) > 0  # Has errors from first attempt
 

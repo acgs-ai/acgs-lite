@@ -59,8 +59,10 @@ Installation::
     #   export ACGS_LEAN_CMD="/path/to/lean-wrapper"        # wrapper script also supported
     #   export ACGS_LEAN_WORKDIR=/path/to/lean-project
 
-    # Without Lean installed, proofs are generated but NOT kernel-verified.
-    # The result will have kernel_verified=False.
+    # Without Lean installed a proof is still generated, but it is NOT accepted:
+    # proved=False, certificate=None, and the candidate text is returned as
+    # LeanVerifyResult.proposed_proof. The Lean kernel is the trust boundary, so an
+    # unchecked proof is a proposal, not a proof.
 
 Constitutional Hash: 608508a9bd224290
 """
@@ -163,13 +165,18 @@ class LeanVerifyResult:
     """Result of Leanstral formal verification."""
 
     proved: bool
-    """True if proof was generated (and kernel-verified if Lean is available)."""
+    """True only if the Lean kernel accepted the proof.
+
+    Previously this was also True when no kernel was installed, on the strength of
+    a model-generated proof nobody had checked. A generated proof is a *proposal*;
+    see :attr:`proposed_proof`.
+    """
 
     verified: bool
     """True if the verification pipeline ran. False if deps missing or errored."""
 
     certificate: ProofCertificate | None
-    """Proof certificate, or None if verification failed."""
+    """Proof certificate, or None. Only ever populated for a kernel-verified proof."""
 
     counterexample: str | None
     """Why the proof failed, or None if proved."""
@@ -188,6 +195,17 @@ class LeanVerifyResult:
 
     error: str | None = None
     """Error message if verification could not run at all."""
+
+    proposed_theorem: str | None = None
+    """The theorem statement that was built, whether or not it was ever proved.
+
+    Populated independently of :attr:`certificate` so that the generated artefact
+    stays inspectable without a caller having to read it off a certificate — the
+    thing that used to exist for unchecked proofs.
+    """
+
+    proposed_proof: str | None = None
+    """The model's candidate proof text. Unverified unless :attr:`proved` is True."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -564,8 +582,10 @@ class LeanstralVerifier:
     1. Leanstral (LLM) auto-formalizes rules and generates proof attempts
     2. Lean kernel (compiler) type-checks the proof (trust boundary)
 
-    If Lean is not installed, proofs are generated but NOT kernel-verified.
-    The result will clearly indicate `kernel_verified=False`.
+    If Lean is not installed, a proof is still generated but is NOT accepted:
+    ``proved`` is False, ``certificate`` is None, and the candidate is returned as
+    ``proposed_proof``. Nothing this class emits reports success for a proof the
+    kernel has not checked.
 
     Args:
         api_key: Mistral API key. Falls back to MISTRAL_API_KEY env var.
@@ -742,9 +762,24 @@ class LeanstralVerifier:
                     errors[:2],
                 )
             else:
-                # No kernel — accept the generated proof but mark as unverified
-                _log.info("Lean not installed — proof generated but not kernel-verified")
-                return True, proof_body, ["lean not installed"], attempt
+                # No kernel — the proof is model output nobody checked. _run_lean_check
+                # calls itself the trust boundary; returning True here walked around it
+                # and let verify() mint a ProofCertificate over unverified text. A
+                # generated proof is a *proposal*, and a proposal is not a proof.
+                _log.warning(
+                    "Lean not installed — refusing to report a proof as established. "
+                    "Install Lean or set %s to enable kernel verification.",
+                    _LEAN_CMD_ENV_VAR,
+                )
+                return (
+                    False,
+                    proof_body,
+                    [
+                        "lean not installed — proof generated but not kernel-verified, "
+                        "so it is not accepted"
+                    ],
+                    attempt,
+                )
 
         return False, proof_body, all_errors, self._max_attempts
 
@@ -816,12 +851,32 @@ class LeanstralVerifier:
             elapsed = (time.perf_counter() - start) * 1000
 
             if proved and proof_body:
+                # `proved` is now only True when _run_lean_check accepted the source,
+                # so reaching here means the kernel ran. Recomputed rather than
+                # assumed, so that a future change to the proof loop cannot quietly
+                # produce a certificate for text no kernel read.
+                kernel_verified = (
+                    _lean_runtime_available() and "lean not installed" not in " ".join(errors)
+                )
+                if not kernel_verified:
+                    return LeanVerifyResult(
+                        proved=False,
+                        verified=False,
+                        certificate=None,
+                        counterexample="Proof was not kernel-verified; refusing to certify",
+                        lean_errors=errors,
+                        attempts=attempts,
+                        model_used=self._model,
+                        verification_time_ms=elapsed,
+                        error="lean kernel did not verify this proof",
+                        proposed_theorem=theorem,
+                        proposed_proof=proof_body,
+                    )
                 full_source = lean_source + "\n" + theorem + " := " + proof_body
                 certificate = ProofCertificate(
                     lean_statement=theorem,
                     lean_proof=proof_body,
-                    kernel_verified=_lean_runtime_available()
-                    and "lean not installed" not in " ".join(errors),
+                    kernel_verified=kernel_verified,
                     rules_formalized=predicates,
                     proof_hash=hashlib.sha256(full_source.encode()).hexdigest(),
                     model_used=self._model,
@@ -836,6 +891,8 @@ class LeanstralVerifier:
                     attempts=attempts,
                     model_used=self._model,
                     verification_time_ms=elapsed,
+                    proposed_theorem=theorem,
+                    proposed_proof=proof_body,
                 )
             else:
                 return LeanVerifyResult(
@@ -847,6 +904,8 @@ class LeanstralVerifier:
                     attempts=attempts,
                     model_used=self._model,
                     verification_time_ms=elapsed,
+                    proposed_theorem=theorem,
+                    proposed_proof=proof_body,
                 )
 
         except (ImportError, ValueError) as exc:

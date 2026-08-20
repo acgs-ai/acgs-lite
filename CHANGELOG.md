@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Z3 policy strings are no longer evaluated as Python.** Policy text carried in
+  constitution rules (`z3:` / `smt:` prefixes, `z3_expression` / `smt_constraint`
+  metadata) was passed to `eval` with `{"__builtins__": {}}`. That construction
+  blocks *name* lookup but not *attribute* lookup, and the eval locals held live
+  z3 helpers, so `And.__globals__["__builtins__"]` reached a populated builtins
+  mapping and a constitution rule could execute arbitrary code in the governed
+  process. Policies are now parsed by an AST allowlist
+  (`acgs_lite.formal.policy_ast`); attribute access, subscripting, lambdas,
+  comprehensions, f-strings, dunder names, and calls to anything but
+  `And`/`Or`/`Not`/`Implies` are rejected by construction. A malformed policy
+  raises at decoration time instead of being skipped with a warning.
+- **BREAKING: Z3 verification is fail-closed. `PASS` is the only status that
+  permits execution.** The gate was `verified and not satisfiable` — block only
+  on a *proven* violation — while every failure path set `verified=False`. A
+  missing solver, a malformed policy, a timeout, or an exception therefore all
+  read as "allow", and a one-character typo in a constitution silently turned a
+  BLOCK into an ALLOW. `UNAVAILABLE`, `INVALID_POLICY`, `UNKNOWN`, and `ERROR`
+  now block.
+- **BREAKING: `INAPPLICABLE` blocks.** A policy naming none of a callable's
+  parameters no longer permits the call. Policy variables are built from type
+  hints, so a callable with no annotations binds nothing and is indistinguishable
+  from one the policy genuinely does not concern — which made deleting an
+  annotation a silent way out of a control. To run a callable that verification
+  cannot clear, declare an exemption with
+  `acgs_lite.verification_exempt(reason=..., approved_by=..., expires_at=...)`.
+  Exemptions are per-callable, require attribution, expire within 365 days, are
+  written to the audit chain on every use, and clear `INAPPLICABLE` only — never
+  a proven violation, a malformed policy, a missing solver, or a solver error.
+- **BREAKING: a Lean proof is not reported as proved unless the Lean kernel
+  accepted it.** With no toolchain installed, `LeanstralVerifier` returned
+  `proved=True` for LLM-generated proof text no kernel had read, and minted a
+  `ProofCertificate` into the audit trail. It now returns `proved=False`,
+  `certificate=None`, and exposes the candidate as `proposed_theorem` /
+  `proposed_proof`.
+- Formal verification remains optional, but its absence is now reported as
+  `UNAVAILABLE` and blocks rather than silently disabling the layer. Install the
+  solver with `pip install z3-solver`. A declared `z3` extra is still pending —
+  `pyproject.toml` is hash-sealed and the edit needs the sealed-file
+  regeneration path — so `pip install "acgs-lite[z3]"` does not work yet.
+  Note for whoever lands it: declaring the extra is only half the change. CI
+  installs bare `z3-solver` appended to the install line (`.github/workflows/ci.yml`
+  lines 24, 52, 106); those must become `.[dev,autonoma,anthropic,mcp,otel,z3]`,
+  or the verification lanes still test a dependency set the published package
+  does not offer. Leave `python-fallback` z3-less — it is the lane that proves
+  `UNAVAILABLE` blocks.
+
 ### Changed
 
 - First-run path is now pip-only: README hero is a fail-closed 5-line snippet, and
