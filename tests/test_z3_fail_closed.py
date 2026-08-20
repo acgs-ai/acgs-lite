@@ -87,7 +87,7 @@ class TestBlocksExecutionIsAnAllowlist:
 
     def test_every_status_is_classified(self) -> None:
         """A status added later must be covered here, not silently permitted."""
-        for status in VerificationStatus:
+        for status in list(VerificationStatus):
             assert isinstance(blocks_execution(_result(status)), bool)
 
     def test_default_status_blocks(self) -> None:

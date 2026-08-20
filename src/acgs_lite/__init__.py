@@ -84,6 +84,11 @@ from acgs_lite.errors import (
 )
 from acgs_lite.events import EventBus, GovernanceEvent, get_event_bus
 from acgs_lite.fail_closed import fail_closed as fail_closed
+from acgs_lite.formal.exemption import (
+    ExemptionError,
+    VerificationExemption,
+    verification_exempt,
+)
 from acgs_lite.governed import GovernedAgent, GovernedCallable
 from acgs_lite.legitimacy.authorization import (
     AsyncGrantResolver,
@@ -99,6 +104,7 @@ from acgs_lite.production import (
     ProductionProfileValidation,
     validate_production_profile,
 )
+from acgs_lite.z3_verify import VerificationStatus, blocks_execution
 
 # ── Optional dependency tracking ────────────────────────────────────────────
 # Populated when optional extras are not installed. __getattr__ below uses
@@ -173,19 +179,6 @@ _LAZY_EXPORTS: dict[str, tuple[str, str, str]] = {
         "pip install z3-solver",
     ),
     "Z3VerifyResult": ("acgs_lite.z3_verify", "Z3VerifyResult", "pip install z3-solver"),
-    "VerificationStatus": ("acgs_lite.z3_verify", "VerificationStatus", "pip install z3-solver"),
-    "blocks_execution": ("acgs_lite.z3_verify", "blocks_execution", "pip install z3-solver"),
-    "verification_exempt": (
-        "acgs_lite.formal.exemption",
-        "verification_exempt",
-        "pip install acgs-lite",
-    ),
-    "VerificationExemption": (
-        "acgs_lite.formal.exemption",
-        "VerificationExemption",
-        "pip install acgs-lite",
-    ),
-    "ExemptionError": ("acgs_lite.formal.exemption", "ExemptionError", "pip install acgs-lite"),
 }
 
 try:
