@@ -313,7 +313,7 @@ this section says what changed, so the two are not confused.
 | F0 `eval` sandbox | **Fixed** | `formal/policy_ast.py` — AST allowlist replaces `eval` |
 | F4 fail-open gate | **Fixed** | `VerificationStatus` + `blocks_execution()`; policies extracted unconditionally; `PASS` is the only allowing status |
 | F4c `INAPPLICABLE` allowed | **Fixed** | blocks; `formal/exemption.py` is the explicit, expiring, audited escape |
-| F4b undeclared dep | **Prepared, not applied** | `pyproject.toml` is hash-sealed; the `z3` extra needs a human-applied edit |
+| F4b undeclared dep | **Fixed** | `pyproject.toml` extra `z3 = ["z3-solver>=4.12"]`; CI solver lanes install `.[...,z3]`; `python-fallback` stays z3-less |
 | F5 unchecked Lean proof | **Fixed** | no kernel → `proved=False`, `certificate=None`, candidate in `proposed_proof` |
 | F3 `Real` vs `float`, `Interval` | **Documented, not changed** | `docs/formal-verification.md` § Limits |
 | F1 tautological gate | **Fixed** | `formal/smt_gate.py` verifies policies, not keywords; `verify-constitution` exits 0/1/2 |
@@ -534,9 +534,11 @@ consequences, both fixed here:
   only to cases that need real solving. In the z3-less configuration the module goes from
   1 collection-skip to **14 passing tests**, including the missing-solver block and both
   decoration-time rejections.
-- `test`, `coverage`, and `governance-regression` now install `z3-solver`, so the solver
-  paths are exercised. `python-fallback` deliberately does **not**, which makes it the lane
-  that proves `UNAVAILABLE → block`; a comment there says so, because the obvious way to
+- `test`, `coverage`, and `governance-regression` now install the `z3` extra
+  (`.[dev,autonoma,anthropic,mcp,otel,z3]`), so the solver paths are exercised
+  against the same dependency set the published package offers. `python-fallback`
+  deliberately does **not**, which makes it the lane that proves
+  `UNAVAILABLE → block`; a comment there says so, because the obvious way to
   "fix" a failure in that lane is to install z3 and thereby delete the test.
 
 Both configurations are green on this branch — see the commit message for the literal counts.

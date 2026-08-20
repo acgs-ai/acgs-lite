@@ -44,15 +44,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `certificate=None`, and exposes the candidate as `proposed_theorem` /
   `proposed_proof`.
 - Formal verification remains optional, but its absence is now reported as
-  `UNAVAILABLE` and blocks rather than silently disabling the layer. Install the
-  solver with `pip install z3-solver`. A declared `z3` extra is still pending —
-  `pyproject.toml` is hash-sealed and the edit needs the sealed-file
-  regeneration path — so `pip install "acgs-lite[z3]"` does not work yet.
-  Note for whoever lands it: declaring the extra is only half the change. CI
-  installs bare `z3-solver` appended to the install line (`.github/workflows/ci.yml`
-  lines 24, 52, 95); those must become `.[dev,autonoma,anthropic,mcp,otel,z3]`,
-  or the verification lanes still test a dependency set the published package
-  does not offer. Leave `python-fallback` z3-less — it is the lane that proves
+  `UNAVAILABLE` and blocks rather than silently disabling the layer. Install
+  the solver with `pip install "acgs-lite[z3]"` (or `pip install z3-solver`).
+  The `z3` extra is a declared optional dependency (`z3-solver>=4.12`) and is
+  part of the aggregate `all` extra. CI verification lanes (`test`, `coverage`,
+  `governance-regression`) install `.[dev,autonoma,anthropic,mcp,otel,z3]` so
+  they exercise the same dependency set the published package offers. The
+  `python-fallback` job stays z3-less — it is the lane that proves
   `UNAVAILABLE` blocks.
 - **BREAKING: `acgs eval verify-constitution` can now fail, and its exit codes
   changed.** The command reported `satisfiable` / `contradiction` per CRITICAL

@@ -10,7 +10,7 @@ it is.
 
 | Layer | Dependency | Installed by default? |
 |---|---|---|
-| Z3 SMT (`acgs_lite.z3_verify`) | `z3-solver` | **No** — `pip install z3-solver` |
+| Z3 SMT (`acgs_lite.z3_verify`) | `z3-solver` | **No** — `pip install "acgs-lite[z3]"` |
 | Lean 4 (`acgs_lite.lean_verify`) | `mistralai` **and** a Lean toolchain | **No** — `pip install "acgs-lite[mistral]"` plus `elan install` |
 
 `z3` and `lean4` appear in the package keywords. They describe optional capabilities, not
@@ -70,9 +70,8 @@ what it *proves*.
 Three consequences worth stating plainly:
 
 - **A constitution with a `z3:` policy and no solver installed will block every governed
-  call it applies to.** That is intended. Install `z3-solver`, or remove the policy — do
-  not expect the layer to quietly skip. (A declared `z3` extra is pending: `pyproject.toml`
-  is hash-sealed, so `pip install "acgs-lite[z3]"` does not work yet.)
+  call it applies to.** That is intended. Install `"acgs-lite[z3]"`, or remove the policy —
+  do not expect the layer to quietly skip.
 - **A malformed policy raises at decoration time**, when `@GovernedCallable` is applied. For
   a module-scope decorator that means at import. A policy that cannot be parsed is a broken
   control, and the failure it replaces was exactly that such a policy used to be skipped
@@ -80,8 +79,8 @@ Three consequences worth stating plainly:
 - **With no solver installed, an exemption does not help.** `UNAVAILABLE` is decided
   before applicability is, so a constitution carrying a `z3:` policy blocks every governed
   call under it — exempt or not. Exemptions cover "verification ran and had nothing to say
-  about this callable", not "verification could not run". Install `z3-solver` or drop the
-  policy; do not reach for an exemption to paper over a missing dependency.
+  about this callable", not "verification could not run". Install `"acgs-lite[z3]"` or drop
+  the policy; do not reach for an exemption to paper over a missing dependency.
 - **`INAPPLICABLE` blocks, and it is the status you will meet first.** A constitution's
   policies are global while callables are many, so most callables under a `z3:` rule are
   named by none of it. Blocking them is deliberate: policy variables are built from type
