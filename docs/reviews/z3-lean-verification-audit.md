@@ -313,10 +313,10 @@ this section says what changed, so the two are not confused.
 | F0 `eval` sandbox | **Fixed** | `formal/policy_ast.py` — AST allowlist replaces `eval` |
 | F4 fail-open gate | **Fixed** | `VerificationStatus` + `blocks_execution()`; policies extracted unconditionally; `PASS` is the only allowing status |
 | F4c `INAPPLICABLE` allowed | **Fixed** | blocks; `formal/exemption.py` is the explicit, expiring, audited escape |
-| F4b undeclared dep | **Prepared, not applied** | `pyproject.toml` is hash-sealed; the `z3` extra needs a human-applied edit |
+| F4b undeclared dep | **Fixed** | `pyproject.toml` extra `z3 = ["z3-solver>=4.12"]`; CI solver lanes install `.[...,z3]`; `python-fallback` stays z3-less |
 | F5 unchecked Lean proof | **Fixed** | no kernel → `proved=False`, `certificate=None`, candidate in `proposed_proof` |
 | F3 `Real` vs `float`, `Interval` | **Documented, not changed** | `docs/formal-verification.md` § Limits |
-| F1 tautological gate | **Documented, not changed — reachability now confirmed worse** | see below |
+| F1 tautological gate | **Fixed** | `formal/smt_gate.py` verifies policies, not keywords; `verify-constitution` exits 0/1/2 |
 | F2 ground formula | **Documented, not changed** | not a soundness bug |
 
 Every verifier error state now blocks. Demonstrated against the real predicate:
@@ -437,11 +437,91 @@ cannot permit an unsafe action — but it is an *assurance* surface that reports
 unconditionally, which is the same class of defect as F4 in a place a human reads rather than
 a place the runtime reads.
 
-Left unchanged deliberately: making it mean something requires deciding what a rule's
-semantics are in SMT, which is a design task rather than a hardening fix, and changing the
-command's exit code would break any pipeline currently consuming it. It is called out here
-and in `docs/formal-verification.md` so the name is not read as a guarantee. **It should not
-ship as-is in a release that advertises formal verification.**
+### F1 resolution
+
+Fixed in a follow-up commit on top of the hardening series, because "it should not ship
+as-is" was the correct verdict and deferring it left an assurance surface that reports
+success unconditionally.
+
+The design question — "what are a rule's semantics in SMT?" — has a narrow answer that does
+not require inventing any. A rule's *prose* has no SMT semantics and is not checked. A rule's
+**policy** does: the `z3:`/`smt:` prefix on `rule.text` and the `z3_expression` /
+`smt_constraint` metadata keys are the exact strings the runtime gate in `z3_verify` enforces,
+so they are the strings worth checking ahead of time. `Z3VerificationGate.verify_constitution()`
+checks three properties of them and claims nothing else:
+
+1. each policy parses under the `formal/policy_ast` allowlist;
+2. each policy is individually satisfiable — an UNSAT policy blocks every call it applies to;
+3. each **variable-sharing cluster** is jointly satisfiable.
+
+Clustering matters. The runtime binds policy variables per callable from that callable's type
+hints, so two rules naming no common variable can never apply to the same call. Joint-checking
+every policy in one namespace would report a contradiction between `z3: amount > 100` on one
+rule and `z3: amount < 10` on another that apply to different functions. Policies are grouped
+into connected components over the variable-sharing graph, and the UNSAT verdict is worded as
+what it actually proves: *any callable binding these variables can never execute*.
+
+Free variables are `Bool` in proposition position and `Real` otherwise. `Real` is deliberate —
+the integers are a subset of the reals, so UNSAT over the reals implies UNSAT under any
+integer refinement, and no `FAIL` this command reports can be a sort artifact. The command
+therefore under-reports (an integer-only contradiction like `0 < x < 1` is SAT over the reals
+and is not flagged) rather than over-reporting.
+
+Measured after the fix, same command, same tree:
+
+```
+$ python -m acgs_lite.cli eval verify-constitution
+NOT VERIFIED [inapplicable]: constitution carries no z3:/smt: policies; there is no machine-checkable content and nothing was verified
+$ echo $?
+2
+
+$ python -m acgs_lite.cli eval verify-constitution --constitution conflict.yaml
+rule_id          status           detail
+T-001            pass             satisfiable
+T-002            pass             satisfiable
+
+variables                        status           detail
+amount                           fail             policies of T-001, T-002 cannot hold together: any callable binding amount can never execute
+
+DEFECT FOUND [fail]: 2 policies checked
+$ echo $?
+1
+
+$ python -m acgs_lite.cli eval verify-constitution --constitution unsat.yaml
+T-001            fail             policy is unsatisfiable: no input satisfies it, so this rule blocks every call it applies to
+$ echo $?
+1
+
+$ python -m acgs_lite.cli eval verify-constitution --constitution disjoint.yaml   # amount vs quantity
+VERIFIED [pass]: 2 policies checked
+$ echo $?
+0
+
+$ PYTHONPATH=<no-z3-shim> python -m acgs_lite.cli eval verify-constitution --constitution conflict.yaml
+T-001            unavailable      z3-solver is not installed
+T-002            unavailable      z3-solver is not installed
+
+NOT VERIFIED [unavailable]: z3-solver is not installed; install the 'z3' extra to verify
+$ echo $?
+2
+```
+
+Exit codes are now a contract: `0` verified, `1` defect found, `2` not verified. **The
+no-argument invocation changed from 0 to 2** — the built-in default constitution carries no
+policies, so it verifies nothing, and "verified nothing" must not be indistinguishable from
+"verified everything". No CI workflow, `Makefile` target, or script in this repository invokes
+the command, so nothing goes red; the change is user-visible and is recorded in the CHANGELOG.
+
+Two smaller consequences. `NullVerificationGate` now reports `UNAVAILABLE` rather than
+`satisfiable=True, contradiction=False`: a gate that performs no verification was a drop-in
+fail-open twin of the defect being fixed. And a policy that is *valid* — true for every input,
+such as `Or(flag, Not(flag))` — is reported as a tautology warning, so the command detects the
+defect class it was itself an instance of.
+
+`VerificationResult` lost `satisfiable`/`contradiction` and gained `status` from the same
+`VerificationStatus` vocabulary the runtime gate uses. `docs/stability.md` lists
+`Z3VerificationGate` as **experimental**, and the only consumers were `commands/eval_cmd.py`
+and `tests/test_smt_gate.py`.
 
 ### The fix had to be visible to CI, not only to a developer with z3 installed
 
@@ -454,9 +534,11 @@ consequences, both fixed here:
   only to cases that need real solving. In the z3-less configuration the module goes from
   1 collection-skip to **14 passing tests**, including the missing-solver block and both
   decoration-time rejections.
-- `test`, `coverage`, and `governance-regression` now install `z3-solver`, so the solver
-  paths are exercised. `python-fallback` deliberately does **not**, which makes it the lane
-  that proves `UNAVAILABLE → block`; a comment there says so, because the obvious way to
+- `test`, `coverage`, and `governance-regression` now install the `z3` extra
+  (`.[dev,autonoma,anthropic,mcp,otel,z3]`), so the solver paths are exercised
+  against the same dependency set the published package offers. `python-fallback`
+  deliberately does **not**, which makes it the lane that proves
+  `UNAVAILABLE → block`; a comment there says so, because the obvious way to
   "fix" a failure in that lane is to install z3 and thereby delete the test.
 
 Both configurations are green on this branch — see the commit message for the literal counts.

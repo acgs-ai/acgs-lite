@@ -8,10 +8,10 @@ import json
 import os
 from pathlib import Path
 
-from acgs_lite.constitution import Constitution, Severity
+from acgs_lite.constitution import Constitution
 from acgs_lite.constitution.drift import GovernanceDriftDetector
 from acgs_lite.evals import compare_eval_reports, run_eval
-from acgs_lite.formal.smt_gate import Z3VerificationGate
+from acgs_lite.formal.smt_gate import ConstitutionVerificationReport, Z3VerificationGate
 
 
 def _load_jsonl(path: str) -> list[dict]:
@@ -33,8 +33,33 @@ def _emit_jsonl(path: str, decisions: list[dict]) -> None:
             handle.write(json.dumps(decision, sort_keys=True) + "\n")
 
 
-def _format_warnings(warnings: tuple[str, ...]) -> str:
-    return "; ".join(warnings) if warnings else "-"
+def _print_verification_report(report: ConstitutionVerificationReport) -> None:
+    """Print a verification report so that "verified nothing" cannot read as "verified".
+
+    Exit codes: 0 verified, 1 defect found, 2 not verified. The trailing line always
+    states which of the three happened, in words.
+    """
+    if report.results:
+        print(f"{'rule_id':<16} {'status':<16} detail")
+        for result in report.results:
+            print(f"{result.rule_id:<16} {result.status.value:<16} {result.detail}")
+            for warning in result.warnings:
+                print(f"{'':<16} {'':<16} warning: {warning}")
+
+    if report.clusters:
+        print()
+        print(f"{'variables':<32} {'status':<16} detail")
+        for cluster in report.clusters:
+            print(f"{','.join(cluster.variables):<32} {cluster.status.value:<16} {cluster.detail}")
+
+    verdict = {
+        0: "VERIFIED",
+        1: "DEFECT FOUND",
+        2: "NOT VERIFIED",
+    }[report.exit_code]
+    detail = report.detail or f"{len(report.results)} policies checked"
+    print()
+    print(f"{verdict} [{report.status.value}]: {detail}")
 
 
 def _env_requires_provenance() -> bool:
@@ -72,9 +97,13 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="Write the current decision trace out as a new JSONL baseline",
     )
 
-    eval_sub.add_parser(
+    verify_parser = eval_sub.add_parser(
         "verify-constitution",
-        help="Run optional SMT verification over critical default constitution rules",
+        help="SMT-verify the z3:/smt: policies a constitution carries",
+    )
+    verify_parser.add_argument(
+        "--constitution",
+        help="Constitution YAML to verify (default: the built-in default constitution)",
     )
 
     provenance_parser = eval_sub.add_parser(
@@ -124,24 +153,25 @@ def handler(args: argparse.Namespace) -> int:
         return 1 if new_high_signals else 0
 
     if args.eval_action == "verify-constitution":
-        gate = Z3VerificationGate()
-        constitution = Constitution.default()
-        results = [
-            gate.check(rule, constitution)
-            for rule in constitution.rules
-            if rule.severity == Severity.CRITICAL
-        ]
-
-        print(f"{'rule_id':<16} {'satisfiable':<12} {'contradiction':<14} warnings")
-        for result in results:
-            print(
-                f"{result.rule_id:<16} "
-                f"{str(result.satisfiable):<12} "
-                f"{str(result.contradiction):<14} "
-                f"{_format_warnings(result.warnings)}"
-            )
-
-        return 1 if any(result.contradiction for result in results) else 0
+        source = getattr(args, "constitution", None)
+        if source:
+            try:
+                constitution = Constitution.from_yaml(source)
+            except OSError as exc:
+                # Could not read the file at all. Nothing was verified, so this is a 2 —
+                # a mistyped path must not surface as "your constitution is contradictory".
+                print(f"NOT VERIFIED [unavailable]: {exc}")
+                return 2
+            except Exception as exc:  # noqa: BLE001 - a constitution that will not load is a defect
+                # It read but did not parse or did not validate. A constitution that fails
+                # its own model is broken in the same way a malformed policy is: exit 1.
+                print(f"DEFECT FOUND [invalid_policy]: {type(exc).__name__}: {exc}")
+                return 1
+        else:
+            constitution = Constitution.default()
+        verification = Z3VerificationGate().verify_constitution(constitution)
+        _print_verification_report(verification)
+        return verification.exit_code
 
     if args.eval_action == "provenance-check":
         entries = _load_jsonl(args.audit_log)
