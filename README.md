@@ -604,6 +604,12 @@ No independently confirmed production users yet.
 
 ## 🌐 Integrations
 
+By default, when output validation is enabled, `GovernedAgent` injects a provider-specific
+structured-output request only for model/provider pairs with current documented support in the bundled capability
+manifest. Unsupported or unverified pairs receive no injected request shape; for example, GPT-4
+is pinned as unsupported. Validate evidence freshness with
+`acgs capabilities validate --max-age-days 45`.
+
 ### OpenAI
 
 ```python
