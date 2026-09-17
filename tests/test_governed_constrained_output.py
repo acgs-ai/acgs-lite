@@ -166,7 +166,7 @@ def test_governed_agent_resolves_profile_from_default_registry() -> None:
     assert response_format["type"] == "json_schema"
 
 
-def test_governed_agent_resolves_legacy_openai_model_from_default_registry() -> None:
+def test_governed_agent_skips_unsupported_legacy_openai_model_from_default_registry() -> None:
     agent = RecordingAgent()
     agent.model = "gpt-4"
     agent.provider_type = "openai"
@@ -181,9 +181,42 @@ def test_governed_agent_resolves_legacy_openai_model_from_default_registry() -> 
 
     governed.run("safe input", governance_action="execute")
 
-    response_format = cast(dict[str, Any], agent.calls[0]["kwargs"]["response_format"])
-    assert isinstance(response_format, dict)
-    assert response_format["type"] == "json_schema"
+    execution_kwargs = cast(dict[str, Any], agent.calls[0]["kwargs"])
+    assert "response_format" not in execution_kwargs
+
+
+@pytest.mark.parametrize(
+    ("provider_type", "model", "request_field", "allow_preview"),
+    [
+        ("azure", "gpt-5.5", "response_format", False),
+        ("google", "gemini-3.1-flash-lite-preview", "config", True),
+    ],
+)
+def test_governed_agent_skips_models_without_verified_manifest_profiles(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_type: str,
+    model: str,
+    request_field: str,
+    allow_preview: bool,
+) -> None:
+    if allow_preview:
+        monkeypatch.setenv("ACGS_ALLOW_PREVIEW_MODEL_CAPABILITIES", "1")
+    agent = RecordingAgent()
+    agent.model = model
+    agent.provider_type = provider_type
+
+    governed = GovernedAgent(
+        agent,
+        constitution=_constitution(),
+        strict=False,
+        validate_output=True,
+        maci_role=MACIRole.EXECUTOR,
+    )
+
+    governed.run("safe input", governance_action="execute")
+
+    execution_kwargs = cast(dict[str, Any], agent.calls[0]["kwargs"])
+    assert request_field not in execution_kwargs
 
 
 def test_governed_agent_resolves_prefixed_model_ids() -> None:
