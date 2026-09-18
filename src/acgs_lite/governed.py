@@ -20,6 +20,7 @@ import logging
 import os
 import uuid
 import warnings
+import weakref
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol, TypeVar, cast, runtime_checkable
 
@@ -53,6 +54,7 @@ from acgs_lite.legitimacy.invariants import (
 from acgs_lite.legitimacy.invocation import (
     InvocationBinding,
     PolicyBinding,
+    _bound_arguments,
     bind_invocation,
     bind_policy,
     reject_method_spoof_kwargs,
@@ -762,7 +764,9 @@ class GovernedCallable:
         self.trusted_issuer_keys = dict(trusted_issuer_keys or {})
         self._authority = ExecutionAuthority()
         self._ledger = InProcessGrantLedger()
-        self._grant_targets: dict[str, Callable[..., Any]] = {}
+        self._wrapped_targets: weakref.WeakKeyDictionary[Callable[..., Any], Callable[..., Any]] = (
+            weakref.WeakKeyDictionary()
+        )
         self.require_durable_audit = require_durable_audit
         self.trusted_execution_context = trusted_execution_context
         self.require_trusted_context = require_trusted_context
@@ -799,17 +803,27 @@ class GovernedCallable:
         Never invokes ``target``. Refuses a caller-created receipt so a forged
         ALLOW cannot be wrapped into a capability.
         """
+        return self._issue_grant(self._wrapped_targets.get(target, target), *args, **kwargs)
+
+    def _issue_grant(
+        self, func: Callable[..., Any], /, *args: Any, **kwargs: Any
+    ) -> ExecutionGrant:
+        """Bind the exact executed callable; never unwrap user wrappers."""
         if "receipt" in kwargs or "decision_receipt" in kwargs or "acgs_receipt" in kwargs:
             raise TypeError("issue_grant refuses caller-created receipts")
         if self.require_durable_audit:
             self.audit_log.validate_durable_state()
-        func = inspect.unwrap(target)
-        self._reject_production_receiver(func)
         tokens = extract_authorization_kwargs(kwargs)
         if any(tokens.get(name) is not None for name in tokens):
             raise TypeError("issue_grant refuses authorization transport kwargs")
+        self._reject_production_receiver(func, args, kwargs)
         self._validate_payloads(func, args, kwargs, invoke_denied=True)
-        invocation = bind_invocation(func, args, kwargs)
+        invocation = bind_invocation(
+            func,
+            args,
+            kwargs,
+            include_receiver=self.authorization_profile is AuthorizationProfile.PRODUCTION,
+        )
         context_digest = self._trusted_context_digest(invocation)
         policy = bind_policy(self.constitution)
         receipt = build_issue_receipt(func=func, invocation=invocation, policy=policy)
@@ -819,8 +833,8 @@ class GovernedCallable:
             policy=policy,
             single_use=True,
             context_digest=context_digest,
+            callable_target=func,
         )
-        self._grant_targets[grant.grant_id] = func
         return grant
 
     def _trusted_context_digest(self, invocation: InvocationBinding) -> str | None:
@@ -832,15 +846,31 @@ class GovernedCallable:
         context.authorize(invocation)
         return context.digest
 
-    def _reject_production_receiver(self, func: Callable[..., Any]) -> None:
+    def _reject_production_receiver(
+        self, func: Callable[..., Any], args: tuple[Any, ...], kwargs: Mapping[str, Any]
+    ) -> None:
         """Refuse receiver methods until their exact instance can be grant-bound."""
         if self.authorization_profile is not AuthorizationProfile.PRODUCTION:
             return
-        try:
-            parameters = tuple(inspect.signature(func).parameters.values())
-        except (TypeError, ValueError) as exc:
-            raise LegitimacyInvariantError("callable has no inspectable signature") from exc
-        if parameters and parameters[0].name in {"self", "cls"}:
+        receiver_method = inspect.ismethod(func) and func.__self__ is not None
+        bound = _bound_arguments(func, args, kwargs, include_receiver=True)
+        if bound:
+            first = args[0] if args else next(iter(bound.values()))
+            owner = first if inspect.isclass(first) else type(first)
+            # Inspect actual MRO dictionaries without invoking descriptors. Names
+            # need not match __name__: a class may alias an existing function.
+            for base in owner.__mro__:
+                for descriptor in vars(base).values():
+                    if isinstance(descriptor, staticmethod):
+                        continue
+                    if isinstance(descriptor, classmethod):
+                        descriptor = descriptor.__func__
+                    if inspect.isfunction(descriptor):
+                        receiver_method = (
+                            receiver_method
+                            or self._wrapped_targets.get(descriptor, descriptor) is func
+                        )
+        if receiver_method:
             raise LegitimacyInvariantError(
                 "production grants do not support receiver methods without exact instance binding"
             )
@@ -871,9 +901,9 @@ class GovernedCallable:
         tokens = extract_authorization_kwargs(kwargs)
         production = self.authorization_profile is AuthorizationProfile.PRODUCTION
         if production:
-            self._reject_production_receiver(func)
+            self._reject_production_receiver(func, args, kwargs)
             reject_method_spoof_kwargs(func, kwargs)
-        invocation = bind_invocation(func, args, kwargs)
+        invocation = bind_invocation(func, args, kwargs, include_receiver=production)
         context_digest = self._trusted_context_digest(invocation) if production else None
         policy = bind_policy(self.constitution)
         grant = tokens.get("execution_grant") or tokens.get("acgs_grant")
@@ -900,7 +930,7 @@ class GovernedCallable:
                     policy=policy,
                     context_digest=context_digest,
                 )
-                if self._grant_targets.get(grant.grant_id) is not func:
+                if grant.callable_target is not func:
                     raise LegitimacyInvariantError("grant callable identity mismatch")
                 if not grant.single_use:
                     raise LegitimacyInvariantError(
@@ -1037,6 +1067,7 @@ class GovernedCallable:
         *,
         result: Any = None,
         error_code: str | None = None,
+        output_sha256: str | None = None,
     ) -> None:
         if outcome is None:
             return
@@ -1045,12 +1076,15 @@ class GovernedCallable:
             status=status,
             result=result,
             error_code=error_code,
-            output_sha256=digest_output(result) if status is AttemptStatus.COMPLETED else None,
+            output_sha256=output_sha256 if status is AttemptStatus.COMPLETED else None,
         )
 
     def _finalize_completed(self, outcome: ConsumeDecision | None, result: Any) -> None:
         """Commit success, exposing unknown outcome if terminal evidence cannot be stored."""
         try:
+            output_digest = digest_output(result)
+            if outcome is not None and output_digest is None:
+                raise LegitimacyInvariantError("side-effect result cannot be digested")
             if self.require_durable_audit and outcome is not None:
                 self.audit_log.record_durable(
                     AuditEntry(
@@ -1062,11 +1096,13 @@ class GovernedCallable:
                         metadata={
                             "attempt_id": outcome.record.attempt_id,
                             "grant_id": outcome.record.grant_id,
-                            "output_sha256": digest_output(result),
+                            "output_sha256": output_digest,
                         },
                     )
                 )
-            self._finalize_attempt(outcome, AttemptStatus.COMPLETED, result=result)
+            self._finalize_attempt(
+                outcome, AttemptStatus.COMPLETED, result=result, output_sha256=output_digest
+            )
         except Exception as exc:
             try:
                 if outcome is not None:
@@ -1075,6 +1111,8 @@ class GovernedCallable:
                         error_code="terminal_commit_failed",
                     )
             except Exception:
+                # Preserve the original terminal failure and still raise unknown;
+                # failure to update local evidence cannot establish completion.
                 pass
             raise LegitimacyInvariantError(
                 "side effect may have completed but terminal result is unknown"
@@ -1211,10 +1249,11 @@ class GovernedCallable:
                 return result
 
             async_wrapper.issue_grant = (  # type: ignore[attr-defined]
-                lambda *grant_args, **grant_kwargs: self.issue_grant(
+                lambda *grant_args, **grant_kwargs: self._issue_grant(
                     func, *grant_args, **grant_kwargs
                 )
             )
+            self._wrapped_targets[async_wrapper] = func
             return cast(Callable[..., T], async_wrapper)
         else:
 
@@ -1257,8 +1296,9 @@ class GovernedCallable:
                 return result
 
             sync_wrapper.issue_grant = (  # type: ignore[attr-defined]
-                lambda *grant_args, **grant_kwargs: self.issue_grant(
+                lambda *grant_args, **grant_kwargs: self._issue_grant(
                     func, *grant_args, **grant_kwargs
                 )
             )
+            self._wrapped_targets[sync_wrapper] = func
             return cast(Callable[..., T], sync_wrapper)

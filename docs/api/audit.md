@@ -66,6 +66,14 @@ is accepted.
 
 ### Durability boundary
 
+For audit signatures, verify `entry.signature_digest.encode()` with the stored
+`pqc_signature`. A restored legacy row exposes its original 16-hex digest through
+`signature_digest`; new-format signatures use the full 64-hex SHA-256 digest.
+`entry_hash` remains the full digest for current chain computation. The signature
+format follows the validated backend/export format and survives export/load or
+continued writes to an old chain. Loading does not rewrite or re-sign historical
+rows, and does not increase the security strength of their original signatures.
+
 `record()` and `record_atomic()` are compatibility APIs. They append in memory,
 and an attached backend write is best effort; their names do not establish that
 bytes reached durable storage.

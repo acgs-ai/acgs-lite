@@ -274,6 +274,7 @@ class AuditEntry:
     latency_ms: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    _signature_hash_format: str = field(default="sha256-v1", init=False, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -303,6 +304,12 @@ class AuditEntry:
         entry_dict.pop("pqc_signature", None)
         canonical = json.dumps(entry_dict, sort_keys=True)
         return hashlib.sha256(canonical.encode()).hexdigest()
+
+    @property
+    def signature_digest(self) -> str:
+        """Signed bytes' digest, preserving restored legacy 16-hex strength."""
+        digest = self.entry_hash
+        return digest[:16] if self._signature_hash_format == "legacy-sha256-16" else digest
 
 
 class AuditLog:
@@ -424,7 +431,8 @@ class AuditLog:
                 provenance.to_dict() if hasattr(provenance, "to_dict") else provenance
             )
         if self._pqc_signer is not None:
-            entry.pqc_signature = self._pqc_signer.sign(entry.entry_hash.encode())
+            entry._signature_hash_format = self._hash_format
+            entry.pqc_signature = self._pqc_signer.sign(entry.signature_digest.encode())
 
     def _append_locked(self, entry: AuditEntry) -> str:
         """Compute chain hash, append entry + hash, trim if needed. Caller holds ``_lock``."""
@@ -722,6 +730,7 @@ class AuditLog:
                 timestamp=entry_dict.get("timestamp", ""),
             )
             log._entries.append(entry)
+            entry._signature_hash_format = log._hash_format
             log._chain_hashes.append(chain_hash)
         if not log.verify_chain():
             raise ValueError("audit backend chain verification failed")
@@ -752,7 +761,9 @@ class AuditLog:
         log._hash_format = version
         log._retained_predecessor_hash = payload.get("retained_predecessor_hash", "genesis")
         for entry_dict in entries:
-            log._entries.append(AuditEntry(**entry_dict))
+            entry = AuditEntry(**entry_dict)
+            entry._signature_hash_format = version
+            log._entries.append(entry)
         log._chain_hashes = list(hashes)
         if not log.verify_chain():
             raise ValueError("audit export chain verification failed")

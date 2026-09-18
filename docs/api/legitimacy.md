@@ -127,9 +127,15 @@ that exact `GovernedCallable` instance. The grant binds the current policy
 digest, canonical arguments, method identifier, and exact callable object. It
 is single-use through the instance's in-process ledger. An attempt identifier
 cannot be reused for a different grant, and a terminal or cancelled attempt is
-never executed again. Completed result recovery verifies the recorded output
-digest; mutation or an undigestible result changes the attempt to `PARTIAL`
-instead of returning unverifiable success.
+never executed again. An undigestible result immediately leaves the attempt
+`PARTIAL` and raises an unknown-result error, before recording completion.
+Completed result recovery verifies the recorded output digest; later mutation
+also changes the attempt to `PARTIAL` instead of returning unverifiable success.
+The grant retains its exact callable, whose process-local identity is covered
+by the MAC. Arbitrary `functools.wraps` layers are not removed for authorization.
+Discarded unused grants are not retained by the issuer. Consumed attempt records
+and recovery results remain in the instance ledger to prevent replay; this is
+not an automatically bounded or durable history store.
 
 `TrustedExecutionContext(actor_id, scope, allowed_subjects)` optionally binds a
 grant to a host-supplied actor and tenant snapshot. The host is responsible for
@@ -146,7 +152,9 @@ Production receiver methods are currently refused because this implementation
 cannot bind a grant to an exact `self` or `cls` instance. Free functions and
 static methods remain supported. Required arguments must be present when a
 grant is issued, while declared defaults are applied consistently during grant
-issuance and execution-boundary validation.
+issuance and execution-boundary validation. Ordinary parameters named `self`
+or `cls`, including keyword-only parameters, are bound like every other value
+in production. Actual bound or descriptor receiver methods are refused.
 
 This ledger has process-instance scope. It does not provide restart recovery,
 distributed exclusion, or general exactly-once delivery to external APIs.

@@ -8,7 +8,7 @@ import json
 import secrets
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
@@ -97,6 +97,8 @@ class ExecutionGrant:
     single_use: bool
     binding_mac: str
     context_digest: str | None = None
+    # Keeping the target alive prevents reuse of its MAC-bound process-local id.
+    callable_target: Callable[..., Any] | None = field(default=None, repr=False, compare=False)
 
     def to_evidence_dict(self) -> dict[str, Any]:
         """Serializable evidence. The MAC is omitted so this cannot be replayed as a grant."""
@@ -132,6 +134,7 @@ class ExecutionAuthority:
         expires_at: str | None = None,
         single_use: bool = True,
         context_digest: str | None = None,
+        callable_target: Callable[..., Any] | None = None,
     ) -> ExecutionGrant:
         issued_at = datetime.now(timezone.utc).isoformat()
         grant_id = uuid.uuid4().hex
@@ -147,6 +150,7 @@ class ExecutionAuthority:
             issued_at=issued_at,
             expires_at=expires_at,
             single_use=single_use,
+            callable_target=callable_target,
         )
         return ExecutionGrant(
             grant_id=grant_id,
@@ -162,6 +166,7 @@ class ExecutionAuthority:
             expires_at=expires_at,
             single_use=single_use,
             binding_mac=mac,
+            callable_target=callable_target,
         )
 
     def verify(
@@ -186,6 +191,7 @@ class ExecutionAuthority:
             issued_at=grant.issued_at,
             expires_at=grant.expires_at,
             single_use=grant.single_use,
+            callable_target=grant.callable_target,
         )
         if not hmac.compare_digest(expected, grant.binding_mac):
             raise LegitimacyInvariantError("grant authenticity check failed")
@@ -223,6 +229,7 @@ class ExecutionAuthority:
         issued_at: str,
         expires_at: str | None,
         single_use: bool,
+        callable_target: Callable[..., Any] | None = None,
     ) -> str:
         payload = {
             "grant_id": grant_id,
@@ -237,6 +244,8 @@ class ExecutionAuthority:
             "expires_at": expires_at,
             "single_use": single_use,
         }
+        if callable_target is not None:
+            payload["callable_identity"] = str(id(callable_target))
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
         digest = hmac.new(
             self._secret,

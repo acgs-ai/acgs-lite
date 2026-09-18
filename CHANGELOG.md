@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.0.0] - 2026-09-18
 
+- Preserve legacy audit signature digests through `signature_digest`; bind
+  production grants to the actual wrapped callable and every ordinary argument,
+  including `self`/`cls` names. Opaque results immediately expose an unknown
+  terminal outcome. Unused grants no longer accumulate in an issuer target map.
+
 ### Migration from 2.12
 
 - This major release changes formal-verification failure behavior. Install the

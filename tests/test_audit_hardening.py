@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import stat
@@ -55,6 +56,62 @@ def test_legacy_16_hex_backend_rows_verify_without_rewriting() -> None:
     assert restored.hash_format == "legacy-sha256-16"
     assert restored.verify_chain()
     assert backend.read_all()[0][1] == legacy_hash
+
+
+@pytest.mark.parametrize("marked", [False, True])
+def test_legacy_signature_digest_survives_load_export_and_append(
+    tmp_path: Path, marked: bool
+) -> None:
+    class Signer:
+        def sign(self, message: bytes) -> str:
+            return hmac.new(b"synthetic-test-key", message, hashlib.sha256).hexdigest()
+
+    signer = Signer()
+    entry = _entry(1)
+    old_digest = entry.entry_hash[:16]
+    entry.pqc_signature = signer.sign(old_digest.encode())
+    chain = hashlib.sha256(f"genesis|{old_digest}".encode()).hexdigest()[:16]
+    row = {**entry.to_dict(), "_chain_hash": chain}
+    if marked:
+        row["_format_version"] = "legacy-sha256-16"
+    path = tmp_path / "legacy.jsonl"
+    path.write_text(json.dumps(row) + "\n")
+    original_bytes = path.read_bytes()
+    backend = JSONLAuditBackend(path)
+    restored = AuditLog.from_backend(backend)
+    loaded = restored.entries[0]
+    assert loaded.signature_digest == old_digest
+    assert signer.sign(loaded.signature_digest.encode()) == loaded.pqc_signature
+    assert len(loaded.entry_hash) == 64
+    assert path.read_bytes() == original_bytes
+    exported = tmp_path / "export.json"
+    restored.export_json(exported)
+    assert AuditLog.from_json(exported).entries[0].signature_digest == old_digest
+    restored._pqc_signer = signer
+    restored.record_durable(_entry(2))
+    reloaded = AuditLog.from_backend(backend)
+    assert reloaded.verify_chain()
+    assert all(
+        signer.sign(e.signature_digest.encode()) == e.pqc_signature for e in reloaded.entries
+    )
+    assert all(len(e.signature_digest) == 16 for e in reloaded.entries)
+    assert path.read_bytes().startswith(original_bytes)
+    loaded.action = "changed"
+    assert signer.sign(loaded.signature_digest.encode()) != loaded.pqc_signature
+
+
+def test_new_audit_signature_uses_full_digest() -> None:
+    class Signer:
+        def sign(self, message: bytes) -> str:
+            return message.hex()
+
+    backend = InMemoryAuditBackend()
+    log = AuditLog(backend=backend, pqc_signer=Signer())
+    log.record(_entry(1))
+    entry = AuditLog.from_backend(backend).entries[0]
+    assert entry.signature_digest == entry.entry_hash
+    assert len(entry.signature_digest) == 64
+    assert entry.pqc_signature == entry.signature_digest.encode().hex()
 
 
 class _FaultBackend(JSONLAuditBackend):

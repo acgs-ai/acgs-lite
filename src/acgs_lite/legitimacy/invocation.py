@@ -76,9 +76,10 @@ def bind_invocation(
     kwargs: Mapping[str, Any],
     *,
     method_override: str | None = None,
+    include_receiver: bool = False,
 ) -> InvocationBinding:
     """Bind trusted method identity, argument digest, and signature-derived scope/subjects."""
-    bound = _bound_arguments(func, args, kwargs)
+    bound = _bound_arguments(func, args, kwargs, include_receiver=include_receiver)
     scope = bound.get("scope")
     if scope is None:
         scope = bound.get("governance_scope")
@@ -87,7 +88,9 @@ def bind_invocation(
         subjects = bound.get("governance_subjects", ())
     return InvocationBinding(
         method_id=trusted_method_id(func, override=method_override),
-        argument_digest=canonical_argument_digest(func, args, kwargs),
+        argument_digest=canonical_argument_digest(
+            func, args, kwargs, include_receiver=include_receiver
+        ),
         scope=None if scope is None else str(scope),
         subjects=_coerce_subjects(subjects),
     )
@@ -113,9 +116,11 @@ def canonical_argument_digest(
     func: Callable[..., Any],
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any],
+    *,
+    include_receiver: bool = False,
 ) -> str:
     """Return the domain-separated SHA-256 digest of bound, control-stripped arguments."""
-    bound = _bound_arguments(func, args, kwargs)
+    bound = _bound_arguments(func, args, kwargs, include_receiver=include_receiver)
     payload = {
         "parameters": [[name, _canonical_json(value)] for name, value in bound.items()],
     }
@@ -138,6 +143,8 @@ def _bound_arguments(
     func: Callable[..., Any],
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any],
+    *,
+    include_receiver: bool = False,
 ) -> dict[str, Any]:
     try:
         signature = inspect.signature(func)
@@ -150,8 +157,11 @@ def _bound_arguments(
     except TypeError as exc:
         raise ArgumentNotDigestible(f"arguments do not match callable signature: {exc}") from exc
     arguments = dict(bound.arguments)
-    arguments.pop("self", None)
-    arguments.pop("cls", None)
+    if not include_receiver:
+        # Historical compatibility bindings omitted these names. Production
+        # binds every ordinary argument regardless of its spelling.
+        arguments.pop("self", None)
+        arguments.pop("cls", None)
     return arguments
 
 

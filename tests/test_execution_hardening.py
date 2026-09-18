@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+import gc
 import os
 import stat
+import weakref
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
@@ -25,8 +29,13 @@ from acgs_lite.legitimacy import (
     LegitimacyInvariantError,
     TrustedExecutionContext,
 )
-from acgs_lite.legitimacy.invocation import InvocationBinding, PolicyBinding
-from acgs_lite.legitimacy.ledger import InProcessGrantLedger
+from acgs_lite.legitimacy.invocation import (
+    InvocationBinding,
+    PolicyBinding,
+    bind_invocation,
+    bind_policy,
+)
+from acgs_lite.legitimacy.ledger import AttemptStatus, InProcessGrantLedger
 from acgs_lite.z3_verify import VerificationStatus, Z3VerifyResult
 
 
@@ -215,6 +224,140 @@ def test_same_module_qualname_does_not_alias_distinct_callables() -> None:
     assert calls == []
 
 
+def test_wrapped_target_executes_once_without_authorizing_underlying_callable() -> None:
+    calls: list[str] = []
+    guard = _guard()
+
+    def original(value: int) -> int:
+        calls.append("original")
+        return value
+
+    @functools.wraps(original)
+    def wrapped(value: int) -> int:
+        calls.append("wrapper")
+        return original(value)
+
+    protected = guard(wrapped)
+    underlying = guard(original)
+    grant = guard.issue_grant(protected, 1)
+    with pytest.raises(LegitimacyInvariantError, match="callable identity"):
+        underlying(1, execution_grant=grant)
+    assert calls == []
+    assert protected(1, execution_grant=grant, execution_attempt_id="wrapped") == 1
+    assert protected(1, execution_grant=grant, execution_attempt_id="wrapped") == 1
+    assert calls == ["wrapper", "original"]
+
+
+@pytest.mark.parametrize("name", ["self", "cls"])
+@pytest.mark.parametrize("keyword_only", [False, True])
+def test_production_binds_ordinary_receiver_named_parameters(name: str, keyword_only: bool) -> None:
+    calls: list[int] = []
+    namespace: dict[str, Any] = {"calls": calls}
+    signature = f"value, *, {name}" if keyword_only else name
+    exec(f"def operation({signature}):\n    calls.append({name})\n    return {name}\n", namespace)
+    protected = _guard()(namespace["operation"])
+    args = (0,) if keyword_only else ()
+    grant = protected.issue_grant(*args, **{name: 2})
+    with pytest.raises(LegitimacyInvariantError, match="invocation binding mismatch"):
+        protected(*args, **{name: 99}, execution_grant=grant)
+    assert calls == []
+    assert protected(*args, **{name: 2}, execution_grant=grant) == 2
+    assert calls == [2]
+
+
+def test_grant_target_is_authenticated_and_not_retained_by_issuer() -> None:
+    guard = _guard()
+
+    def original(value: int) -> int:
+        return value
+
+    def alternate(value: int) -> int:
+        return value
+
+    alternate.__qualname__ = original.__qualname__
+    protected = guard(original)
+    grant = protected.issue_grant(1)
+    forged = replace(grant, callable_target=alternate)
+    with pytest.raises(LegitimacyInvariantError, match="authenticity"):
+        guard(alternate)(1, execution_grant=forged)
+    target_ref = weakref.ref(original)
+    del original, protected, forged
+    gc.collect()
+    assert target_ref() is not None  # An authentic grant keeps its exact target alive.
+    del grant
+    gc.collect()
+    assert target_ref() is None  # The issuer does not retain abandoned grants.
+
+
+def test_authentic_grant_without_exact_target_is_not_production_authority() -> None:
+    guard = _guard()
+    calls: list[int] = []
+
+    def operation(value: int) -> int:
+        calls.append(value)
+        return value
+
+    protected = guard(operation)
+    normal = protected.issue_grant(1)
+    unbound = guard._authority.issue(
+        receipt=normal.receipt,
+        invocation=bind_invocation(operation, (1,), {}, include_receiver=True),
+        policy=bind_policy(guard.constitution),
+    )
+    with pytest.raises(LegitimacyInvariantError, match="callable identity"):
+        protected(1, execution_grant=unbound)
+    assert calls == []
+
+
+def test_nested_own_wrapper_issuer_binds_the_immediate_execution_target() -> None:
+    guard = _guard()
+    calls: list[int] = []
+
+    def operation(value: int) -> int:
+        calls.append(value)
+        return value
+
+    inner = guard(operation)
+    outer = guard(inner)
+    grant = outer.issue_grant(1)
+    assert grant.callable_target is inner
+    with pytest.raises(LegitimacyInvariantError, match="callable identity"):
+        inner(1, execution_grant=grant)
+    assert calls == []
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_opaque_result_never_records_completion(tmp_path: Path, asynchronous: bool) -> None:
+    audit = AuditLog(backend=JSONLAuditBackend(tmp_path / "opaque.jsonl"))
+    guard = _guard(audit_log=audit, require_durable_audit=True)
+    calls: list[str] = []
+
+    def operation() -> object:
+        calls.append("called")
+        return object()
+
+    async def async_operation() -> object:
+        return operation()
+
+    protected = guard(async_operation if asynchronous else operation)
+    grant = protected.issue_grant()
+    kwargs = {"execution_grant": grant, "execution_attempt_id": "opaque"}
+    with pytest.raises(LegitimacyInvariantError, match="unknown"):
+        if asynchronous:
+            asyncio.run(protected(**kwargs))
+        else:
+            protected(**kwargs)
+    assert calls == ["called"]
+    assert guard._ledger._attempts["opaque"].status is AttemptStatus.PARTIAL
+    assert not any(entry.type == "execution_completed" for entry in audit.entries)
+    with pytest.raises(LegitimacyInvariantError, match="partial"):
+        if asynchronous:
+            asyncio.run(protected(**kwargs))
+        else:
+            protected(**kwargs)
+    assert calls == ["called"]
+
+
 def test_production_grant_refuses_unbound_receiver_methods() -> None:
     guard = _guard()
 
@@ -223,8 +366,115 @@ def test_production_grant_refuses_unbound_receiver_methods() -> None:
         def charge(self, amount: int) -> str:
             return str(amount)
 
-    with pytest.raises(LegitimacyInvariantError, match="receiver methods"):
+    # The attached issuer has no receiver; complete argument binding rejects it.
+    with pytest.raises(LegitimacyInvariantError, match="arguments do not match"):
         Account().charge.issue_grant(10)
+
+
+@pytest.mark.parametrize("keyword_receiver", [False, True])
+def test_production_rejects_actual_inherited_receiver_even_if_digestible(
+    keyword_receiver: bool,
+) -> None:
+    guard = _guard()
+    calls: list[int] = []
+
+    class Account(dict):
+        @guard
+        def charge(receiver, amount: int) -> str:
+            calls.append(amount)
+            return "charged"
+
+    class Child(Account):
+        pass
+
+    account = Child()
+    args = () if keyword_receiver else (account, 10)
+    kwargs = {"receiver": account, "amount": 10} if keyword_receiver else {}
+    with pytest.raises(LegitimacyInvariantError, match="receiver methods"):
+        Account.charge.issue_grant(*args, **kwargs)
+    assert calls == []
+
+
+def test_production_rejects_bound_receiver_but_accepts_staticmethod() -> None:
+    guard = _guard()
+
+    class Account:
+        def charge(receiver, amount: int) -> int:
+            return amount
+
+        @staticmethod
+        @guard
+        def read(self: int) -> int:
+            return self
+
+    with pytest.raises(LegitimacyInvariantError, match="receiver methods"):
+        guard.issue_grant(Account().charge, 10)
+    grant = Account.read.issue_grant(10)
+    assert Account.read(10, execution_grant=grant) == 10
+
+
+def test_production_rejects_classmethod_receiver() -> None:
+    guard = _guard()
+
+    class Account:
+        @classmethod
+        @guard
+        def read(owner, amount: int) -> int:
+            return amount
+
+    with pytest.raises(LegitimacyInvariantError, match="receiver methods"):
+        Account.read.issue_grant(Account, 10)
+
+
+def test_free_function_name_can_match_builtin_descriptor() -> None:
+    @_guard()
+    def __str__(value: int) -> str:
+        return str(value)
+
+    grant = __str__.issue_grant(1)
+    assert __str__(1, execution_grant=grant) == "1"
+
+
+def test_variadic_receiver_cannot_cross_instances() -> None:
+    guard = _guard()
+    calls: list[object] = []
+
+    class Account(dict):
+        @guard
+        def charge(*args) -> str:
+            calls.append(args[0])
+            return "charged"
+
+    first, second = Account(), Account()
+    with pytest.raises(LegitimacyInvariantError, match="receiver methods"):
+        grant = Account.charge.issue_grant(first, 1)
+        second.charge(1, execution_grant=grant)
+    assert calls == []
+
+    @guard
+    def collect(*args: int) -> tuple[int, ...]:
+        return args
+
+    grant = collect.issue_grant(1, 2)
+    assert collect(1, 2, execution_grant=grant) == (1, 2)
+
+
+def test_aliased_method_cannot_cross_instances() -> None:
+    guard = _guard()
+    calls: list[object] = []
+
+    def implementation(receiver: object, amount: int) -> str:
+        calls.append(receiver)
+        return str(amount)
+
+    class Account(dict):
+        charge = guard(implementation)
+
+    first, second = Account(), Account()
+    with pytest.raises(LegitimacyInvariantError, match="receiver methods"):
+        grant = Account.charge.issue_grant(first, 1)
+        second.charge(1, execution_grant=grant)
+    assert calls == []
 
 
 def test_missing_required_argument_is_rejected_during_grant_issuance() -> None:
@@ -545,10 +795,10 @@ def test_custom_result_with_constant_repr_is_not_recovered_as_verified() -> None
         return MutableOpaque()
 
     grant = collect.issue_grant(1)
-    first = collect(1, execution_grant=grant, execution_attempt_id="opaque-result")
-    first.state = "mutated"
-
     with pytest.raises(LegitimacyInvariantError, match="result is unknown"):
+        collect(1, execution_grant=grant, execution_attempt_id="opaque-result")
+    assert guard._ledger._attempts["opaque-result"].status is AttemptStatus.PARTIAL
+    with pytest.raises(LegitimacyInvariantError, match="already partial"):
         collect(1, execution_grant=grant, execution_attempt_id="opaque-result")
     assert calls == [1]
 
