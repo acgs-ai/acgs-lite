@@ -169,7 +169,7 @@ jobs:
           python scripts/release_candidate.py verify \
             --manifest "$RUNNER_TEMP/candidate/candidate.json" \
             --artifact-dir "$RUNNER_TEMP/candidate"
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: acgs-lite-release-candidate-${{ github.run_id }}
           path: ${{ runner.temp }}/candidate/
