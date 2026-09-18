@@ -62,26 +62,11 @@ jobs:
             --cov=src/acgs_lite \
             --cov-report=term-missing \
             --cov-report=xml \
-            --cov-fail-under=70 \
+            --cov-report=json:coverage.json \
+            --cov-fail-under=80 \
             -m "not slow and not benchmark and not e2e"
-      - name: Critical-path coverage gate (engine, audit, maci, server, lifecycle)
-        env:
-          OPENAI_API_KEY: test-key-for-unit-tests
-          ANTHROPIC_API_KEY: test-key-for-unit-tests
-        run: |
-          python -m pytest tests/ \
-            --import-mode=importlib \
-            --cov=src/acgs_lite/engine \
-            --cov=src/acgs_lite/audit.py \
-            --cov=src/acgs_lite/maci.py \
-            --cov=src/acgs_lite/server.py \
-            --cov=src/acgs_lite/constitution/lifecycle_service.py \
-            --cov=src/acgs_lite/constitution/lifecycle_router.py \
-            --cov=src/acgs_lite/constitution/sqlite_bundle_store.py \
-            --cov=src/acgs_lite/trajectory.py \
-            --cov-report=term-missing \
-            --cov-fail-under=70 \
-            -m "not slow and not benchmark and not e2e"
+      - name: Critical and authorization coverage gates
+        run: python scripts/check_critical_coverage.py coverage.json
 
   governance-regression:
     name: Governance regression gate
@@ -158,20 +143,6 @@ jobs:
         run: python -m mkdocs build --strict
       - name: Check documentation links
         run: python3 scripts/check_links.py
-
-  package:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
-      - name: Install build tools
-        run: pip install build twine "packaging>=24.1"
-      - name: Build wheel and sdist
-        run: python -m build --wheel --sdist
-      - name: Validate package
-        run: twine check dist/*
 
   agent-workspace:
     name: Agent-ready workspace

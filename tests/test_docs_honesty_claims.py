@@ -56,8 +56,8 @@ def test_readme_does_not_tell_pip_users_to_run_repo_examples() -> None:
     for label, text in (("README.md", readme), ("examples/README.md", examples_readme)):
         if re.search(r"pip install acgs-lite(?:==[0-9.]+)?\s*\npython examples/", text):
             offenders.append(label)
-    assert not offenders, (
-        "pip-only users cannot run repo example paths; offenders: " + ", ".join(offenders)
+    assert not offenders, "pip-only users cannot run repo example paths; offenders: " + ", ".join(
+        offenders
     )
 
 

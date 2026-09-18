@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "acgs-lite"
-version = "2.12.0"
+version = "3.0.0"
 description = "Runtime governance for AI agents — deterministic enforcement before execution, MACI role separation, tamper-evident audit trails, and operator intervention workflows."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -106,6 +106,7 @@ include = ["acgs*", "acgs_lite*"]
 acgs_lite = ["provider_capabilities_manifest.json"]
 "acgs_lite.agents" = ["agent_capabilities_manifest.json"]
 "acgs_lite.arckit" = ["templates/*.md"]
+"acgs_lite.workflows" = ["*.yaml"]
 
 [tool.ruff]
 line-length = 100

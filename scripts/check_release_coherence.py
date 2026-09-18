@@ -120,15 +120,11 @@ def main(argv: list[str] | None = None) -> int:
     released = _dated_changelog_versions()
     tags = _existing_tags()
 
-    untagged_released = sorted(
-        version for version in released if not _tag_exists(version, tags)
-    )
+    untagged_released = sorted(version for version in released if not _tag_exists(version, tags))
 
     current_dated = current in released
     current_tagged = _tag_exists(current, tags)
-    current_violation = (
-        not args.no_require_current_tag and current_dated and not current_tagged
-    )
+    current_violation = not args.no_require_current_tag and current_dated and not current_tagged
 
     # Default scope: only the current version is enforced. --strict-history widens
     # enforcement to the full dated-but-untagged set.

@@ -144,7 +144,9 @@ class TestFailClosed:
         assert exc.value.receipt is not None
 
     def test_empty_task_fails_closed_with_receipt(self) -> None:
-        sel = GovernedAgentSelector(registry=_registry(_profile("gov")), engine=_permissive_engine())
+        sel = GovernedAgentSelector(
+            registry=_registry(_profile("gov")), engine=_permissive_engine()
+        )
         for blank in ("", "   ", "\n\t"):
             with pytest.raises(SelectionDeniedError) as exc:
                 sel.select(blank)
@@ -234,7 +236,9 @@ class TestCandidatesArgument:
     def test_explicit_candidates_domain_filter(self) -> None:
         sel = GovernedAgentSelector(registry=_registry(), engine=_permissive_engine())
         with pytest.raises(NoEligibleAgentError):
-            sel.select(_TASK, candidates=[_profile("fe", domains=("frontend",))], domain="governance")
+            sel.select(
+                _TASK, candidates=[_profile("fe", domains=("frontend",))], domain="governance"
+            )
 
     def test_explicit_candidates_respect_maci(self) -> None:
         maci = MACIEnforcer()
@@ -244,7 +248,9 @@ class TestCandidatesArgument:
         )
         with pytest.raises(NoEligibleAgentError):
             sel.select(
-                _TASK, candidates=[_profile("prop")], requester_id="boss",
+                _TASK,
+                candidates=[_profile("prop")],
+                requester_id="boss",
                 required_role=MACIRole.VALIDATOR,
             )
 
@@ -277,7 +283,9 @@ class TestSignedReceipt:
         assert result.signed_receipt is not None
         # The receipt must encode the actual governed outcome, not just be signable.
         assert result.signed_receipt.receipt.goal == _TASK
-        assert result.signed_receipt.receipt.proposed_method == f"delegate:{result.selected_agent_id}"
+        assert (
+            result.signed_receipt.receipt.proposed_method == f"delegate:{result.selected_agent_id}"
+        )
         verification = replay_and_verify(
             result.signed_receipt,
             lambda _inputs: "ALLOW",

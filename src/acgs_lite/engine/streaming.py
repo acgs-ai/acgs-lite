@@ -131,8 +131,7 @@ class StreamingValidator:
             _warnings.warn(
                 "StreamingValidator: blocking_severities is unset — no severity "
                 "level will halt the stream. Pass blocking_severities={'critical'} "
-                "(or higher) to enable halt-on-violation. This will become the "
-                "default in acgs-lite 3.0.",
+                "(or higher) to enable halt-on-violation.",
                 UserWarning,
                 stacklevel=2,
             )

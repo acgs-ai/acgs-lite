@@ -130,9 +130,7 @@ class TestPyprojectParsing:
         assert ("httpx", "network-egress") in result.matched
         assert garbage in result.unknown
 
-    def test_unparsable_optional_dependency_spec_reported_as_unknown(
-        self, tmp_path: Path
-    ) -> None:
+    def test_unparsable_optional_dependency_spec_reported_as_unknown(self, tmp_path: Path) -> None:
         garbage = "@ https://example.com/pkg-1.0-py3-none-any.whl"
         (tmp_path / "pyproject.toml").write_text(
             f"""

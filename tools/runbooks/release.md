@@ -1,58 +1,62 @@
 # Runbook: Release
 
-Goal: produce a clean, validated release artifact and verify it installs from a fresh
-environment. Agent: `release` (see `agents/release.agent.yaml`).
+Goal: publish the exact artifacts built and tested from an approved source.
+Agent: `release` (see `agents/release.agent.yaml`). Publication requires explicit
+owner authorization; local verification is not release authorization.
 
-> Uploading to PyPI is **owner-gated**, but it is no longer a manual `twine` step.
-> Publishing is performed by `.github/workflows/publish.yml` when a GitHub Release is
-> published, authenticated with PyPI trusted publishing (OIDC) — no `TWINE_PASSWORD`
-> token is involved. The owner-gated action is *creating the release*.
+## Prepare and review
 
-## Steps
+1. Run `make verify` and `ruff format --check src/acgs_lite tests scripts`.
+2. Update both `pyproject.toml` (`project.version`) and
+   `src/acgs_lite/_meta.py` (`VERSION`). Follow SemVer; stable breaking changes
+   require a major version and migration guidance.
+3. Date the changelog entry and update its compare links. Before creating the
+   tag, run `python scripts/check_release_coherence.py --no-require-current-tag`.
+4. Run `make publish-dry-run` and verify the wheel in a fresh environment.
+   Record source identity, artifact hashes, test results and independent review.
+5. Submit the candidate through the repository review process, wait for CI,
+   then merge the reviewed changes into `main`. Any changes invalidate affected
+   checks and require fresh evidence.
 
-```bash
-# 1. Make sure everything is green and consistent.
-make verify
+## Qualify the release artifacts
 
-# 2. Bump the version in BOTH places — the publish workflow fails if the tag
-#    and pyproject disagree.
-$EDITOR pyproject.toml            # project.version
-$EDITOR src/acgs_lite/_meta.py    # VERSION
+After separate authorization for tagging, qualification and publication:
 
-# 3. Update the changelog: date the new version's heading and add its
-#    compare link at the bottom of the file.
-$EDITOR CHANGELOG.md
+1. Create a new `vX.Y.Z` tag for the approved commit in `main` history. Never move
+   or reuse an existing release tag or PyPI version. Confirm both version files
+   match the tag and run `python scripts/check_release_coherence.py`.
+2. Dispatch `.github/workflows/release-candidate.yml` on that exact tag with
+   `source_ref=refs/tags/vX.Y.Z`. The workflow must already exist on `main`.
+3. Wait for the complete workflow to succeed. It tests the optional bridge with
+   explicit `crypto` dependencies, builds wheel and sdist once, tests the exact
+   installed wheel including real Lean checks, and runs source coverage gates.
+4. Inspect the `acgs-lite-release-candidate-<run-id>` artifact. It contains
+   `candidate.json`, the distributions and their qualification evidence. Verify
+   the source SHA, version, distribution hashes, nonempty test groups and review
+   correspondence. A failed or stale run is not publishable evidence.
 
-# 4. Build + validate the package (no upload).
-make publish-dry-run        # = make build && twine check dist/*
+## Publish the qualified artifacts
 
-# 5. Confirm the release state is coherent once the tag exists.
-python scripts/check_release_coherence.py
-```
+Dispatch `.github/workflows/publish.yml` with the successful `candidate_run_id`
+and matching `tag`. Qualification must be less than 24 hours old. The workflow
+checks repository, workflow, run attempt, source, tag ancestry, evidence and
+artifact hashes before uploading through PyPI trusted publishing (OIDC).
+It does not rebuild distributions. Publishing a GitHub Release is not this
+workflow's trigger.
 
-## Verify a clean install (fresh venv)
+After success, read PyPI's version metadata and compare both uploaded SHA-256
+digests with `candidate.json`. Install the published wheel in a fresh environment
+and run the package examples. Record the actual upload and verification result;
+do not equate it with independent production qualification.
 
-```bash
-python3 -m venv /tmp/acgs-fresh && /tmp/acgs-fresh/bin/pip install dist/*.whl
-/tmp/acgs-fresh/bin/python -c "import acgs_lite; print(acgs_lite.__version__)"
-/tmp/acgs-fresh/bin/python examples/release_proof.py --output /tmp/acgs-release-proof.json
-cat /tmp/acgs-release-proof.json
-```
+## Failure handling
 
-The release proof script is the canonical proof artifact for the current package line: it runs without API keys and emits a deterministic JSON summary that another developer can inspect locally.
-
-## Publish (owner only)
-
-Merge the release commit to `main`, then publish a GitHub Release whose tag is
-`vX.Y.Z` — matching `pyproject.toml` exactly. That tag creation is what publishes
-the package; `Publish to PyPI` builds the sdist and wheel, runs `twine check`, and
-uploads through trusted publishing.
-
-## Failure modes
-
-| Symptom | Fix |
-| --- | --- |
-| `twine check` fails | fix packaging metadata in `pyproject.toml` |
-| fresh install import error | a runtime dep is under an optional extra — move it to `dependencies` |
-| publish workflow fails on the version check | the release tag does not match `pyproject.toml`; delete the release + tag, correct the version, re-release |
-| publish workflow does not run | the release was saved as a draft — it triggers on `published`, not `created` |
+- If local tests, formatting or metadata fail, fix them before pushing.
+- If the version already exists, prepare a new version and requalify it; never
+  overwrite or delete the old release to reuse its name.
+- If source, tag, run or artifact identity differs, stop publication and build
+  fresh evidence for the intended source.
+- If trusted publishing or environment approval is unavailable, report the
+  blocker. Do not replace the workflow with a local token upload to bypass gates.
+- If upload status is uncertain, inspect PyPI before retrying; do not report
+  success or create another artifact based only on a timeout.

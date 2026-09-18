@@ -24,6 +24,9 @@ LLM reasoning → constitutional check → decision receipt → governed executi
 ### Current status & non-claims
 
 - **Public package:** v2.12.0 on PyPI. Apache-2.0. Beta.
+- **Unreleased source hardening:** the production execution-grant, trusted-context,
+  durable-audit, and recovery contracts described below are present in this source
+  candidate. They are not present in the published v2.12.0 wheel.
 - **Local proofs exist.** Receipt-gated execution, MACI role checks, and an
   in-process SHA-256 audit chain are implemented and tested.
 - **No independently confirmed production users yet.**
@@ -38,12 +41,18 @@ LLM reasoning → constitutional check → decision receipt → governed executi
 Works after `pip install acgs-lite==2.12.0`. Default engine is fail-closed: the
 last line **raises**.
 
+<!-- doc-test: published-engine-check -->
 ```python
 from acgs_lite import Constitution, ConstitutionalViolationError, GovernanceEngine
 engine = GovernanceEngine(Constitution.from_yaml_str(
     "rules:\n  - {id: no-wire, text: Block unauthorized wires, severity: critical, keywords: [wire transfer]}"))
 print(engine.validate("send invoice email", agent_id="demo").valid)  # True
-engine.validate("wire transfer $1000", agent_id="demo")              # raises
+try:
+    engine.validate("wire transfer $1000", agent_id="demo")
+except ConstitutionalViolationError:
+    pass
+else:
+    raise AssertionError("unsafe action was not blocked")
 ```
 
 Expected:
@@ -57,6 +66,79 @@ That is the check. The [5-minute membrane](docs/guides/five-minute-membrane.md)
 is the executor gate: ALLOW with a receipt, TRANSFORM (PII redaction), DENY of a
 wire, and refusal of a missing receipt
 (`No legitimacy receipt, no execution`).
+
+### Unreleased local production profile
+
+The following source-candidate API binds a host-supplied actor/tenant context,
+the exact call and policy, single consumption in one wrapper instance, and a
+confirmed JSONL authorization record before the callable starts. The host must
+authenticate the actor and tenant before constructing the context and must not
+expose `issue_grant()` to untrusted callers. This does not isolate malicious
+same-process code or provide restart recovery, distributed exclusion, or a
+general exactly-once guarantee for external APIs.
+
+<!-- doc-test: local-production-profile -->
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from acgs_lite import Constitution
+from acgs_lite.audit import AuditLog, JSONLAuditBackend
+from acgs_lite.governed import GovernedCallable
+from acgs_lite.legitimacy import (
+    AuthorizationProfile,
+    LegitimacyInvariantError,
+    TrustedExecutionContext,
+)
+
+calls = []
+with TemporaryDirectory() as directory:
+    audit = AuditLog(backend=JSONLAuditBackend(Path(directory) / "audit.jsonl"))
+    guard = GovernedCallable(
+        Constitution.default(),
+        authorization_profile=AuthorizationProfile.PRODUCTION,
+        audit_log=audit,
+        require_durable_audit=True,
+        trusted_execution_context=TrustedExecutionContext(
+            actor_id="host-authenticated-operator",
+            scope="tenant-a",
+            allowed_subjects=frozenset({"account-1"}),
+        ),
+        require_trusted_context=True,
+    )
+
+    @guard
+    def inspect_account(value, *, scope, subjects):
+        calls.append(value)
+        return value
+
+    grant = inspect_account.issue_grant(
+        "safe", scope="tenant-a", subjects=("account-1",)
+    )
+    assert inspect_account(
+        "safe",
+        scope="tenant-a",
+        subjects=("account-1",),
+        execution_grant=grant,
+        execution_attempt_id="attempt-1",
+    ) == "safe"
+    # Explicit recovery of the same completed attempt returns its verified result.
+    assert inspect_account(
+        "safe",
+        scope="tenant-a",
+        subjects=("account-1",),
+        execution_grant=grant,
+        execution_attempt_id="attempt-1",
+    ) == "safe"
+    try:
+        inspect_account("denied", scope="tenant-a", subjects=("account-1",))
+    except LegitimacyInvariantError:
+        pass
+    else:
+        raise AssertionError("missing authorization executed")
+
+assert calls == ["safe"]
+```
 
 <details>
 <summary>What it is / what it is not</summary>
@@ -110,8 +192,11 @@ DENY_GOAL
 HARD_DENY
 ```
 
-Only `ALLOW` and `ALLOW_WITH_CONTROLS` can reach execution. Unknown, denied,
-review, transform, replan, and hard-deny states are not executable by default.
+Only `ALLOW` and `ALLOW_WITH_CONTROLS` are allow-class decisions. Unknown,
+denied, review, transform, replan, and hard-deny states are not executable by
+default. The historical compatibility receipt path does not provide general
+trusted verification for arbitrary named controls; use the production grant
+profile, which refuses unverifiable control carriers, for a side-effect boundary.
 
 Start with [GOAL.md](./GOAL.md) for the product boundary and
 [ROADMAP.md](./ROADMAP.md) for milestones. The Runtime Legitimacy Kernel is
@@ -175,6 +260,9 @@ in-memory audit log is a hosted store.
 
 ```python
 from acgs_lite import Constitution, GovernedAgent, MACIRole
+
+def my_llm_agent(prompt: str) -> str:
+    return f"Processed: {prompt}"
 
 constitution = Constitution.from_yaml("constitution.yaml")
 agent = GovernedAgent(
@@ -311,14 +399,13 @@ rules:
 
 3. Wrap the agent/LLM call with GovernedAgent:
 
-from acgs_lite import Constitution, GovernanceEngine, AuditLog
+from acgs_lite import Constitution, AuditLog
 from acgs_lite.governed import GovernedCallable
 
 constitution = Constitution.from_yaml("constitution.yaml")
 audit_log    = AuditLog()
-engine       = GovernanceEngine(constitution, audit_log=audit_log)
 
-@GovernedCallable(engine=engine, agent_id="my-agent")
+@GovernedCallable(constitution, audit_log=audit_log, agent_id="my-agent")
 def run_agent(prompt: str) -> str:
     return your_llm_call(prompt)   # replace with your LLM call
 
@@ -366,18 +453,26 @@ if not result.valid:
         print(f"[{v.severity}] {v.rule_id}: {v.description}")
 ```
 
-### GovernedAgent — Drop-in Wrapper
+### GovernedAgent — Input/Output Wrapper
 
+<!-- doc-test: governed-agent-wrapper -->
 ```python
 from acgs_lite import Constitution, GovernedAgent
 
-@GovernedAgent.decorate(constitution=constitution, agent_id="summarizer")
+constitution = Constitution.default()
+
 def summarize(text: str) -> str:
-    return my_llm.complete(f"Summarize: {text}")
+    return f"Summary: {text}"
+
+agent = GovernedAgent(summarize, constitution=constitution, enforce_maci=False)
 
 # Raises ConstitutionalViolationError if text contains violations
-result = summarize("Q4 revenue was $4.2M")
+result = agent.run("Q4 revenue was $4.2M")
 ```
+
+This wrapper checks outer input and output. It does not intercept tools called
+inside `summarize`; put an execution authorization gate at each real side-effect
+boundary.
 
 ### MACI — Separation of Powers
 
@@ -420,7 +515,9 @@ assert log.verify_chain(), "Audit log tampered!"
 
 ### Signed, Replay-Verifiable Receipts
 
-A tamper-evident audit log proves a record was not *altered*. A signed,
+A self-contained hash chain detects alterations within the supplied retained
+segment. Without a trusted external anchor it cannot detect deletion of the
+whole segment or replacement with a freshly rewritten history. A signed,
 replay-verifiable receipt additionally proves *who* decided and that the verdict
 *re-derives* — without trusting the operator. `acgs-lite` provides both.
 
@@ -472,9 +569,8 @@ executor. This bridge is **Experimental**: it is a new adapter seam, not a
 replacement for the legitimacy receipt pipeline above, and it has not been
 run in production.
 
-Install (Python >= 3.11 only; `gove-zone` is not yet published to PyPI, so
-the extra resolves to nothing until then — treat it as workspace/monorepo-only
-in the interim):
+Install (Python >= 3.11 only). The optional experimental bridge is qualified
+against the published pre-release `gove-zone==1.0.0rc2`:
 
 ```bash
 pip install "acgs-lite[gove]"
@@ -517,21 +613,24 @@ Honest limitations:
   `ToolCall` (`name` + canonical JSON of `args` + `goal`), not on the
   structured arguments directly — constitutions authored for prose actions
   should target tool names and argument keys to match reliably.
-- `gove-zone` itself is pre-1.0 (`0.1.0a1`); its API may change before a
+- `gove-zone` itself is pre-1.0 (`1.0.0rc2`); its API may change before a
   stable release.
 
 ---
 
 ## 🔒 Safety Defaults
 
-`acgs-lite` is **fail-closed by default**. This is a design principle, not a configuration option.
+The default strict `GovernanceEngine` blocks matching rules. Execution guarantees
+depend on the selected entry point and profile; compatibility receipts and
+best-effort audit writes provide weaker guarantees than the source candidate's
+configured production grant path.
 
 | Guarantee | Behavior |
 |-----------|----------|
 | **Engine exception** | Validation raises `ConstitutionalViolationError`; the action is blocked, not silently passed |
 | **Missing constitution** | Engine refuses to initialize; no degraded-mode passthrough |
 | **Rule match** | Action is blocked unless the rule explicitly sets `workflow_action: warn` |
-| **Audit write failure** | Logged at warning level; does not unblock the action |
+| **Required production audit** | `require_durable_audit=True` refuses execution unless the qualified backend confirms the authorization write |
 | **MACI misconfiguration** | Governed execution denies before side effects unless a role and per-call `governance_action` are present |
 | **MCP server strict-mode** | MCP tools call `validate(strict=False)` per request and do not mutate `engine.strict`; exceptions cannot leave strict mode permanently disabled |
 
@@ -574,7 +673,7 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 | Z3 constraint verifier | 🧪 **Experimental** | Useful for high-risk scenarios; requires separate Z3 install |
 | Lean 4 / Leanstral proof certificates | 🧪 **Experimental** | Requires `mistralai` extra and external Lean kernel |
 | Newer framework adapters (Agno, A2A, LiteLLM, Mistral) | 🧪 **Experimental** | Community-contributed; test coverage varies |
-| `acgs_lite.gove` — gove-zone kernel bridge | 🧪 **Experimental** | Optional `gove` extra (Python >= 3.11); `gove-zone` not yet on PyPI; distinct receipt format from `legitimacy`, not translated |
+| `acgs_lite.gove` — gove-zone kernel bridge | 🧪 **Experimental** | Optional `gove` extra (Python >= 3.11), qualified with published pre-release `gove-zone==1.0.0rc2`; distinct receipt format from `legitimacy`, not translated |
 
 ---
 
@@ -614,9 +713,8 @@ is pinned as unsupported. Validate evidence freshness with
 
 ```python
 from acgs_lite.integrations.openai import GovernedOpenAI
-from openai import OpenAI
 
-client = GovernedOpenAI(OpenAI(), constitution=constitution)
+client = GovernedOpenAI(constitution=constitution)
 response = client.chat.completions.create(
     model="gpt-4o",
     messages=[{"role": "user", "content": "Analyze the contract"}],
@@ -627,9 +725,8 @@ response = client.chat.completions.create(
 
 ```python
 from acgs_lite.integrations.anthropic import GovernedAnthropic
-import anthropic
 
-client = GovernedAnthropic(anthropic.Anthropic(), constitution=constitution)
+client = GovernedAnthropic(constitution=constitution)
 message = client.messages.create(
     model="claude-opus-4-5",
     max_tokens=1024,
@@ -695,15 +792,21 @@ For the highest-risk scenarios, ACGS supports mathematical proof of safety prope
 
 ### Z3 SMT Solver
 
+<!-- doc-test: z3-verifier -->
 ```python
-from acgs_lite.integrations.z3_verifier import Z3ConstraintVerifier
+from acgs_lite.z3_verify import VerificationStatus, Z3ConstraintVerifier
 
 verifier = Z3ConstraintVerifier()
 result = verifier.verify(
-    action="transfer $50,000 to external account",
-    constraints=["amount <= 10000", "recipient in approved_list"],
+    action="read an approved account",
+    context={"environment": "staging", "authenticated": True},
 )
-print(result.satisfiable, result.counterexample)
+print(result.verified, result.satisfiable, result.counterexample)
+if result.status is VerificationStatus.UNAVAILABLE:
+    assert result.verified is False
+    print("NOT VERIFIED: install acgs-lite[z3]; execution remains blocked")
+else:
+    assert result.status is VerificationStatus.PASS
 ```
 
 ### Lean 4 Proof Certificates (Leanstral)
@@ -712,12 +815,14 @@ print(result.satisfiable, result.counterexample)
 from acgs_lite import LeanstralVerifier
 
 verifier = LeanstralVerifier()  # requires mistralai extra
-certificate = await verifier.verify(
-    property="∀ action : Action, action.amount ≤ 10000",
+result = verifier.verify(
+    action="transfer $5,000",
+    rules=[{"id": "limit", "text": "Transfers must not exceed $10,000"}],
     context={"action": "transfer $5,000"},
 )
-print(certificate.kernel_verified)  # True only if Lean kernel accepted proof
-print(certificate.to_audit_dict())  # attach to AuditEntry
+print(result.verified)  # False unless the external Lean kernel accepted the proof
+if result.certificate is not None:
+    print(result.certificate.to_audit_dict())
 ```
 
 ---

@@ -1,6 +1,9 @@
 # GovernedAgent
 
-`GovernedAgent` wraps any callable agent with constitutional governance. Every input and output passes through the validation pipeline before execution.
+`GovernedAgent` wraps any callable agent with constitutional input and output
+checks. It does not automatically intercept tools or side effects performed
+inside the wrapped callable. Put `GovernedCallable` or an equivalent verified
+authorization check at each real side-effect boundary.
 
 ## Class Reference
 
@@ -20,6 +23,9 @@
 from acgs_lite import Constitution, GovernedAgent, MACIRole
 
 constitution = Constitution.from_template("general")
+def my_llm_agent(prompt: str) -> str:
+    return f"Processed: {prompt}"
+
 agent = GovernedAgent(
     my_llm_agent,
     constitution=constitution,
@@ -37,6 +43,9 @@ per-call `governance_action` is denied before the wrapped agent executes.
 ```python
 from acgs_lite import MACIRole
 
+def my_agent(prompt: str) -> str:
+    return f"Draft: {prompt}"
+
 agent = GovernedAgent(
     my_agent,
     constitution=constitution,
@@ -51,3 +60,12 @@ result = agent.run("draft this policy change", governance_action="propose")
 ```python
 result = await agent.arun("process this request", governance_action="propose")
 ```
+
+### Retries and side effects
+
+Output validation retries call the wrapped agent again. Set
+`side_effectful=True` for a wrapper whose invocation may perform a side effect;
+construction then rejects a nonzero `max_retries`. This avoids treating an
+output-format retry as authorization to repeat an external operation. A system
+that needs retries must instead use an independently verified idempotency and
+recovery contract at the actual tool boundary.

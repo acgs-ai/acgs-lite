@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from enum import Enum, IntEnum
 
 import pytest
 
@@ -92,6 +93,33 @@ def test_bind_invocation_includes_method_and_digest() -> None:
     assert binding.argument_digest == canonical_argument_digest(_add, (25,), {"currency": "EUR"})
     assert binding.scope is None
     assert binding.subjects == ()
+
+
+def test_enum_digest_includes_fully_qualified_type_identity() -> None:
+    trusted_mode = Enum("Mode", {"READ": "read"}, module="trusted_a")
+    untrusted_mode = Enum("Mode", {"READ": "read"}, module="untrusted_b")
+
+    assert canonical_argument_digest(_add, (trusted_mode.READ,), {}) != canonical_argument_digest(
+        _add, (untrusted_mode.READ,), {}
+    )
+
+
+def test_enum_mixin_values_do_not_alias_their_primitives() -> None:
+    class TextMode(str, Enum):
+        READ = "read"
+
+    class NumericMode(IntEnum):
+        READ = 1
+
+    def take(value: object) -> None:
+        return None
+
+    assert canonical_argument_digest(take, (TextMode.READ,), {}) != canonical_argument_digest(
+        take, ("read",), {}
+    )
+    assert canonical_argument_digest(take, (NumericMode.READ,), {}) != canonical_argument_digest(
+        take, (1,), {}
+    )
 
 
 def test_policy_digest_changes_when_constitution_content_changes() -> None:

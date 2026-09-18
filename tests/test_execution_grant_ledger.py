@@ -89,9 +89,7 @@ def test_in_flight_same_attempt_does_not_reexecute() -> None:
     result: list[object] = []
 
     def first() -> None:
-        result.append(
-            transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
-        )
+        result.append(transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1"))
 
     thread = threading.Thread(target=first)
     thread.start()
@@ -100,11 +98,12 @@ def test_in_flight_same_attempt_does_not_reexecute() -> None:
         transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
     release.set()
     thread.join(timeout=2)
+    assert not thread.is_alive()
     assert result == ["sent"]
     assert calls == ["acct-1:10"]
 
 
-def test_failed_attempt_retry_does_not_reexecute() -> None:
+def test_raised_attempt_is_partial_and_retry_does_not_reexecute() -> None:
     calls: list[str] = []
     guard = GovernedCallable(
         Constitution.default(),
@@ -119,7 +118,9 @@ def test_failed_attempt_retry_does_not_reexecute() -> None:
     grant = transfer.issue_grant("acct-1", 10)
     with pytest.raises(RuntimeError, match="downstream failed"):
         transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
-    with pytest.raises(LegitimacyInvariantError, match="already failed"):
+    # Once user code starts, a raised exception cannot prove that no external
+    # side effect occurred. Recovery therefore exposes PARTIAL, never retries.
+    with pytest.raises(LegitimacyInvariantError, match="already partial"):
         transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
     assert calls == ["acct-1:10"]
 

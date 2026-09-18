@@ -11,6 +11,7 @@ from acgs_lite.legitimacy.authorization import (
     ExecutionAuthority,
     ExecutionGrant,
     GrantResolver,
+    TrustedExecutionContext,
 )
 from acgs_lite.legitimacy.decide import (
     CANONICAL_DECISION_STATES,
@@ -88,6 +89,7 @@ __all__ = [
     "ReplayInputs",
     "ReplayVerification",
     "SignedReceipt",
+    "TrustedExecutionContext",
     "bind_invocation",
     "bind_policy",
     "call_matches",

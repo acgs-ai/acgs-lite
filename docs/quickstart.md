@@ -88,12 +88,18 @@ except ConstitutionalViolationError as exc:
     print(f"Blocked: {exc}")
 ```
 
-## 5. Pip-only membrane (receipt + executor)
+## 5. Compatibility receipt membrane
 
-The 5-line snippet in the README is the fail-closed **check**. The
-[5-minute membrane](guides/five-minute-membrane.md) is the fail-closed
-**executor**: ALLOW with a receipt, TRANSFORM (PII), DENY of a wire, and
-`No legitimacy receipt, no execution` when the receipt is missing.
+The 5-line snippet in the README is a strict rule **check**. The
+[5-minute membrane](guides/five-minute-membrane.md) demonstrates the historical
+compatibility receipt executor: ALLOW with a self-hashed receipt, TRANSFORM
+(PII), DENY of a wire, and missing-receipt refusal. A self-hash is integrity
+evidence, not an issuer trust anchor or a single-use replay defense.
+
+For the unreleased source candidate's same-instance grant, trusted host context,
+and required durable-audit example, use the
+[production execution-boundary profile](api/legitimacy.md#execution-boundary-binding).
+The host remains responsible for authenticating the actor and tenant.
 
 After a clone, the same script is `python examples/membrane_5min.py`.
 

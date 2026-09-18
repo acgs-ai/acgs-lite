@@ -350,7 +350,9 @@ class TestExemptionAtTheGate:
             withdraw(300.0, decision_receipt=_receipt("withdraw"))
 
     @requires_z3
-    def test_exemption_cannot_clear_an_unknown_verdict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_exemption_cannot_clear_an_unknown_verdict(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The fifth blocking status. A solver that will not answer is not a pass."""
 
         @GovernedCallable(_constitution())

@@ -220,11 +220,10 @@ publish-dry-run: build
 	$(TWINE) check dist/*
 	@echo "Dry-run OK. Run 'make publish' to upload."
 
-publish: build
-	$(TWINE) upload dist/* \
-	    --username __token__ \
-	    --non-interactive
-	@echo "Published. https://pypi.org/project/acgs-lite/"
+publish:
+	@echo "Direct publishing is disabled. Use the manual release-candidate workflow,"
+	@echo "obtain independent review and release authorization, then dispatch publish.yml."
+	@exit 1
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 examples:

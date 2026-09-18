@@ -262,6 +262,7 @@ class TestParseJsonResponse:
 
 class TestRunLeanCheck:
     @patch("acgs_lite.lean_verify.LEAN_AVAILABLE", False)
+    @patch("acgs_lite.lean_verify.shutil.which", lambda command: None)
     def test_lean_not_installed(self) -> None:
         ok, errors = _run_lean_check("theorem t : True := by trivial")
         assert ok is False
@@ -399,7 +400,7 @@ class TestRunLeanCheck:
             "    print('error: smoke theorem missing')\n"
             "    raise SystemExit(1)\n"
             "pathlib.Path('smoke_marker.txt').write_text(proof_path.name)\n"
-            "print('lean smoke ok')\n"
+            "print(\"'acgsLeanSmoke' does not depend on any axioms\")\n"
         )
         fake_lean.chmod(0o755)
 
@@ -450,6 +451,7 @@ class TestLeanstralVerifierUnavailable:
 
 @patch("acgs_lite.lean_verify.MISTRAL_AVAILABLE", True)
 @patch("acgs_lite.lean_verify.LEAN_AVAILABLE", False)
+@patch("acgs_lite.lean_verify.shutil.which", lambda command: None)
 class TestLeanstralVerifierMockedNoKernel:
     """Tests with Leanstral mocked and no Lean kernel."""
 
@@ -639,7 +641,9 @@ class TestLeanstralVerifierMockedWithKernel:
 
     @patch("acgs_lite.lean_verify.subprocess.run")
     def test_kernel_verified_proof(self, mock_run: MagicMock) -> None:
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = MagicMock(
+            returncode=0, stderr="", stdout="'action_compliant' does not depend on any axioms\n"
+        )
         client = _mock_chat_responses(
             _make_formalization_response(),
             _make_proof_response(),
@@ -661,7 +665,9 @@ class TestLeanstralVerifierMockedWithKernel:
             # First attempt: kernel rejects
             MagicMock(returncode=1, stderr="error: type mismatch"),
             # Second attempt: kernel accepts
-            MagicMock(returncode=0, stderr=""),
+            MagicMock(
+                returncode=0, stderr="", stdout="'action_compliant' does not depend on any axioms\n"
+            ),
         ]
         client = _mock_chat_responses(
             _make_formalization_response(),

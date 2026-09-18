@@ -1,0 +1,177 @@
+name: Qualify release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Exact refs/heads/main or refs/tags/vX.Y.Z source to qualify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  gove-compatibility:
+    name: Optional gove installation compatibility (${{ matrix.python-version }})
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install declared optional combination
+        run: python -m pip install ".[gove,crypto]" "gove-zone==1.0.0rc2" pytest pytest-asyncio
+      - name: Verify bridge import and conformance contracts
+        run: |
+          python -I -c "import acgs_lite, gove_zone; print(acgs_lite.__version__, gove_zone.__file__)"
+          python -I -m pytest tests/gove --import-mode=importlib -q --junitxml="$RUNNER_TEMP/gove.xml"
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          import os
+          root = ET.parse(os.path.join(os.environ["RUNNER_TEMP"], "gove.xml")).getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+          tests = sum(int(s.attrib.get("tests", 0)) for s in suites)
+          skipped = sum(int(s.attrib.get("skipped", 0)) for s in suites)
+          failures = sum(int(s.attrib.get("failures", 0)) + int(s.attrib.get("errors", 0)) for s in suites)
+          assert tests > 0 and skipped == 0 and failures == 0, (tests, skipped, failures)
+          PY
+
+  qualify:
+    needs: gove-compatibility
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Reject untrusted source references
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          case "$SOURCE_REF" in
+            refs/heads/main|refs/tags/v*) ;;
+            *) echo "Only main or version tags are eligible."; exit 1 ;;
+          esac
+          test "$SOURCE_REF" = "$GITHUB_REF"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Freeze source identity
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          test "$(git status --porcelain --untracked-files=no)" = ""
+          git rev-parse HEAD > "$RUNNER_TEMP/source-sha"
+          git rev-parse "${SOURCE_REF}^{commit}" > "$RUNNER_TEMP/ref-sha"
+          cmp "$RUNNER_TEMP/source-sha" "$RUNNER_TEMP/ref-sha"
+      - name: Install qualification tools
+        run: python -m pip install build twine
+      - name: Build wheel and sdist once
+        run: python -m build --wheel --sdist
+      - name: Check built distributions
+        run: python -m twine check dist/*
+      - name: Install pinned Lean qualification toolchain
+        run: |
+          curl --fail --location --connect-timeout 20 --max-time 300 \
+            --output "$RUNNER_TEMP/lean.tar.zst" \
+            https://github.com/leanprover/lean4/releases/download/v4.34.0/lean-4.34.0-linux.tar.zst
+          echo "caaa98356098c85dc0fcbbd28e1ec66f39eb6551829972b752ff20e1286b646b  $RUNNER_TEMP/lean.tar.zst" | sha256sum --check
+          tar --zstd -xf "$RUNNER_TEMP/lean.tar.zst" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/lean-4.34.0-linux/bin" >> "$GITHUB_PATH"
+      - name: Install exact wheel in clean environment
+        run: |
+          set -- dist/*.whl
+          test "$#" -eq 1
+          cp "$1" "$RUNNER_TEMP/qualified.whl"
+          python -m venv "$RUNNER_TEMP/wheel-env"
+          "$RUNNER_TEMP/wheel-env/bin/python" -m pip install \
+            "${1}[z3,gove,crypto]" "gove-zone==1.0.0rc2" pytest pytest-asyncio
+      - name: Qualify installed wheel offline examples
+        run: |
+          "$RUNNER_TEMP/wheel-env/bin/python" scripts/qualify_wheel.py \
+            --python "$RUNNER_TEMP/wheel-env/bin/python" \
+            --source-root . \
+            --wheel "$RUNNER_TEMP/qualified.whl" \
+            --output "$RUNNER_TEMP/wheel-qualification.json" --require-lean
+      - name: Run source qualification suite
+        run: |
+          python -m pip install -e ".[dev,autonoma,anthropic,mcp,otel,z3]" httpx
+          python -m pytest tests/ --import-mode=importlib \
+            -m "not slow and not benchmark and not e2e" \
+            --cov=src/acgs_lite --cov-report=json:"$RUNNER_TEMP/coverage.json" \
+            --cov-fail-under=80 --junitxml="$RUNNER_TEMP/tests.xml"
+          python scripts/check_critical_coverage.py "$RUNNER_TEMP/coverage.json"
+      - name: Record qualification provenance
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          python - <<'PY'
+          import json, os, xml.etree.ElementTree as ET
+          from datetime import datetime, timezone
+          from pathlib import Path
+          wheel = json.loads((Path(os.environ["RUNNER_TEMP"]) / "wheel-qualification.json").read_text())
+          root = ET.parse(Path(os.environ["RUNNER_TEMP"]) / "tests.xml").getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+          tests = sum(int(s.attrib.get("tests", 0)) for s in suites)
+          failures = sum(int(s.attrib.get("failures", 0)) for s in suites)
+          errors = sum(int(s.attrib.get("errors", 0)) for s in suites)
+          skipped = sum(int(s.attrib.get("skipped", 0)) for s in suites)
+          if tests <= 0 or failures or errors:
+              raise SystemExit(f"invalid source suite result: tests={tests} failures={failures} errors={errors}")
+          payload = {
+              "schema": "acgs-lite-qualification-v1",
+              "status": wheel["status"],
+              "wheel_status": wheel["status"],
+              "coverage_status": "PASS_WITHIN_STATED_SCOPE",
+              "source_suite_status": "PASS_WITHIN_STATED_SCOPE",
+              "version": __import__("tomllib").load(open("pyproject.toml", "rb"))["project"]["version"],
+              "source_sha": (Path(os.environ["RUNNER_TEMP"]) / "source-sha").read_text().strip(),
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "workflow_path": ".github/workflows/release-candidate.yml",
+              "event_name": os.environ["GITHUB_EVENT_NAME"],
+              "head_repository": os.environ["GITHUB_REPOSITORY"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "conclusion": "success",
+              "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+              "groups": wheel["groups"] + [{"name": "source-suite", "collected": tests, "executed": tests - skipped, "passed": tests - skipped - failures - errors, "failed": failures + errors, "skipped": skipped}],
+          }
+          Path(os.environ["RUNNER_TEMP"], "qualification.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+          PY
+      - name: Bind source, qualification, wheel, and sdist
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          python scripts/release_candidate.py create \
+            --source-root . \
+            --output "$RUNNER_TEMP/candidate.json" \
+            --artifact dist/*.whl --artifact dist/*.tar.gz \
+            --evidence "$RUNNER_TEMP/wheel-qualification.json" \
+            --evidence "$RUNNER_TEMP/coverage.json" \
+            --evidence "$RUNNER_TEMP/tests.xml" \
+            --evidence "$RUNNER_TEMP/qualification.json" \
+            --qualification "$RUNNER_TEMP/qualification.json" \
+            --provenance git --source-ref "$SOURCE_REF" \
+            --source-sha "$(cat "$RUNNER_TEMP/source-sha")"
+      - name: Assemble and verify exact candidate artifacts
+        run: |
+          mkdir "$RUNNER_TEMP/candidate"
+          cp dist/*.whl dist/*.tar.gz "$RUNNER_TEMP/candidate/"
+          cp "$RUNNER_TEMP/candidate.json" "$RUNNER_TEMP/qualification.json" \
+            "$RUNNER_TEMP/wheel-qualification.json" "$RUNNER_TEMP/coverage.json" \
+            "$RUNNER_TEMP/tests.xml" "$RUNNER_TEMP/candidate/"
+          python scripts/release_candidate.py verify \
+            --manifest "$RUNNER_TEMP/candidate/candidate.json" \
+            --artifact-dir "$RUNNER_TEMP/candidate"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: acgs-lite-release-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/candidate/
+          if-no-files-found: error
+          retention-days: 14
