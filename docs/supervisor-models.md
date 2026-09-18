@@ -76,7 +76,11 @@ result = verifier.verify(
     action="read an approved account",
     context={"environment": "staging", "authenticated": True},
 )
-assert result.status is VerificationStatus.PASS
+if result.status is VerificationStatus.UNAVAILABLE:
+    assert result.verified is False
+    print("NOT VERIFIED: install acgs-lite[z3]; execution remains blocked")
+else:
+    assert result.status is VerificationStatus.PASS
 ```
 
 ---

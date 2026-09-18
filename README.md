@@ -802,7 +802,11 @@ result = verifier.verify(
     context={"environment": "staging", "authenticated": True},
 )
 print(result.verified, result.satisfiable, result.counterexample)
-assert result.status is VerificationStatus.PASS
+if result.status is VerificationStatus.UNAVAILABLE:
+    assert result.verified is False
+    print("NOT VERIFIED: install acgs-lite[z3]; execution remains blocked")
+else:
+    assert result.status is VerificationStatus.PASS
 ```
 
 ### Lean 4 Proof Certificates (Leanstral)

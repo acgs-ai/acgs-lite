@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -47,6 +49,32 @@ def test_supervisor_z3_example_executes_offline(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("path", "block"),
+    [("README.md", "z3-verifier"), ("docs/supervisor-models.md", "supervisor-z3")],
+)
+def test_z3_examples_refuse_verification_without_solver(
+    tmp_path: Path, path: str, block: str
+) -> None:
+    code = _marked_python_blocks(ROOT / path)[block]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.modules['z3'] = None\n"
+            + code
+            + "\nassert result.status is VerificationStatus.UNAVAILABLE\n"
+            + "assert result.verified is False\n",
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "NOT VERIFIED" in result.stdout
 
 
 def test_confirmed_readme_signature_errors_are_absent() -> None:
