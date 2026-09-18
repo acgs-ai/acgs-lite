@@ -14,7 +14,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from acgs_lite.legitimacy.invariants import LegitimacyInvariantError
+from acgs_lite.legitimacy.invariants import LegitimacyInvariantError, strict_bound_context
 
 INVOCATION_DIGEST_DOMAIN = b"acgs-invocation-v1\x00"
 POLICY_DIGEST_DOMAIN = b"acgs-policy-v1\x00"
@@ -77,6 +77,7 @@ def bind_invocation(
     *,
     method_override: str | None = None,
     include_receiver: bool = False,
+    strict_context: bool = False,
 ) -> InvocationBinding:
     """Bind trusted method identity, argument digest, and signature-derived scope/subjects."""
     bound = _bound_arguments(func, args, kwargs, include_receiver=include_receiver)
@@ -86,6 +87,8 @@ def bind_invocation(
     subjects = bound.get("subjects", ())
     if not subjects:
         subjects = bound.get("governance_subjects", ())
+    if strict_context:
+        scope, subjects = strict_bound_context(bound, func=func)
     return InvocationBinding(
         method_id=trusted_method_id(func, override=method_override),
         argument_digest=canonical_argument_digest(

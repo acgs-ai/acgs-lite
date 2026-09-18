@@ -68,6 +68,7 @@ def normalize_actual_call(
     args: tuple[Any, ...] = (),
     func: Callable[..., Any] | None = None,
     trust_kwargs: bool = True,
+    strict_context: bool = False,
 ) -> ActualCall:
     """Normalize call metadata before invariant comparison.
 
@@ -76,6 +77,9 @@ def normalize_actual_call(
     ``governance_method``, ``method``, and ``action`` cannot override it.
     """
     bound_arguments = _bind_call_arguments(func, args, kwargs)
+    if strict_context:
+        scope, subjects = strict_bound_context(bound_arguments, func=func)
+        return ActualCall(method=fallback_method, scope=scope, subjects=subjects)
     if trust_kwargs:
         method = str(
             kwargs.get("governance_method")
@@ -215,6 +219,32 @@ def _first_bound_value(bound_arguments: Mapping[str, Any], names: frozenset[str]
         if name in bound_arguments:
             return bound_arguments[name]
     return None
+
+
+def strict_bound_context(
+    bound_arguments: Mapping[str, Any], *, func: Callable[..., Any] | None = None
+) -> tuple[str | None, tuple[str, ...]]:
+    """Resolve every production identity alias; never let one hide another."""
+    values = list(bound_arguments.items())
+    if func is not None:
+        for name, parameter in inspect.signature(func).parameters.items():
+            if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+                values = [(key, value) for key, value in values if key != name]
+                values.extend(bound_arguments.get(name, {}).items())
+    scopes = {
+        str(value) for name, value in values if name in _SCOPE_ARGUMENT_NAMES and value is not None
+    }
+    if len(scopes) > 1:
+        raise LegitimacyInvariantError("conflicting scope aliases")
+    subjects = tuple(
+        dict.fromkeys(
+            subject
+            for name, value in values
+            if name in _SUBJECT_ARGUMENT_NAMES or name == "governance_subjects"
+            for subject in _coerce_subjects(value)
+        )
+    )
+    return next(iter(scopes), None), subjects
 
 
 def _subjects_from_bound_arguments(bound_arguments: Mapping[str, Any]) -> Any:

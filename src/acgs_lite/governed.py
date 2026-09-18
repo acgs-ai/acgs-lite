@@ -18,6 +18,7 @@ import functools
 import inspect
 import logging
 import os
+import threading
 import uuid
 import warnings
 import weakref
@@ -764,6 +765,9 @@ class GovernedCallable:
         self.trusted_issuer_keys = dict(trusted_issuer_keys or {})
         self._authority = ExecutionAuthority()
         self._ledger = InProcessGrantLedger()
+        # Serialize terminal ledger/audit confirmation with replay visibility.
+        self._completion_lock = threading.Lock()
+        self._execution_disabled = False
         self._wrapped_targets: weakref.WeakKeyDictionary[Callable[..., Any], Callable[..., Any]] = (
             weakref.WeakKeyDictionary()
         )
@@ -808,6 +812,8 @@ class GovernedCallable:
     def _issue_grant(
         self, func: Callable[..., Any], /, *args: Any, **kwargs: Any
     ) -> ExecutionGrant:
+        if self._execution_disabled:
+            raise LegitimacyInvariantError("execution disabled after uncertain terminal failure")
         """Bind the exact executed callable; never unwrap user wrappers."""
         if "receipt" in kwargs or "decision_receipt" in kwargs or "acgs_receipt" in kwargs:
             raise TypeError("issue_grant refuses caller-created receipts")
@@ -823,6 +829,7 @@ class GovernedCallable:
             args,
             kwargs,
             include_receiver=self.authorization_profile is AuthorizationProfile.PRODUCTION,
+            strict_context=self.authorization_profile is AuthorizationProfile.PRODUCTION,
         )
         context_digest = self._trusted_context_digest(invocation)
         policy = bind_policy(self.constitution)
@@ -903,7 +910,9 @@ class GovernedCallable:
         if production:
             self._reject_production_receiver(func, args, kwargs)
             reject_method_spoof_kwargs(func, kwargs)
-        invocation = bind_invocation(func, args, kwargs, include_receiver=production)
+        invocation = bind_invocation(
+            func, args, kwargs, include_receiver=production, strict_context=production
+        )
         context_digest = self._trusted_context_digest(invocation) if production else None
         policy = bind_policy(self.constitution)
         grant = tokens.get("execution_grant") or tokens.get("acgs_grant")
@@ -955,14 +964,19 @@ class GovernedCallable:
                     raise LegitimacyInvariantError(
                         "execution_attempt_id must be a non-empty string"
                     )
-                outcome = self._ledger.consume(
-                    grant_id=grant.grant_id,
-                    attempt_id=attempt_id,
-                    receipt_hash=grant.receipt.receipt_hash,
-                    invocation=invocation,
-                    policy=policy,
-                    context_digest=context_digest,
-                )
+                with self._completion_lock:
+                    if self._execution_disabled:
+                        raise LegitimacyInvariantError(
+                            "execution disabled after uncertain terminal failure"
+                        )
+                    outcome = self._ledger.consume(
+                        grant_id=grant.grant_id,
+                        attempt_id=attempt_id,
+                        receipt_hash=grant.receipt.receipt_hash,
+                        invocation=invocation,
+                        policy=policy,
+                        context_digest=context_digest,
+                    )
                 if self.require_durable_audit and outcome.mode == "proceed":
                     try:
                         self.audit_log.record_durable(
@@ -1032,6 +1046,7 @@ class GovernedCallable:
             kwargs=kwargs,
             func=func,
             trust_kwargs=trust_kwargs,
+            strict_context=self.authorization_profile is AuthorizationProfile.PRODUCTION,
         )
         validate_receipt_for_execution(
             receipt,
@@ -1081,10 +1096,18 @@ class GovernedCallable:
 
     def _finalize_completed(self, outcome: ConsumeDecision | None, result: Any) -> None:
         """Commit success, exposing unknown outcome if terminal evidence cannot be stored."""
+        with self._completion_lock:
+            self._commit_completed(outcome, result)
+
+    def _commit_completed(self, outcome: ConsumeDecision | None, result: Any) -> None:
+        """Keep replay excluded until both terminal confirmations have succeeded."""
         try:
             output_digest = digest_output(result)
             if outcome is not None and output_digest is None:
                 raise LegitimacyInvariantError("side-effect result cannot be digested")
+            self._finalize_attempt(
+                outcome, AttemptStatus.COMPLETED, result=result, output_sha256=output_digest
+            )
             if self.require_durable_audit and outcome is not None:
                 self.audit_log.record_durable(
                     AuditEntry(
@@ -1100,9 +1123,6 @@ class GovernedCallable:
                         },
                     )
                 )
-            self._finalize_attempt(
-                outcome, AttemptStatus.COMPLETED, result=result, output_sha256=output_digest
-            )
         except Exception as exc:
             try:
                 if outcome is not None:
@@ -1113,7 +1133,7 @@ class GovernedCallable:
             except Exception:
                 # Preserve the original terminal failure and still raise unknown;
                 # failure to update local evidence cannot establish completion.
-                pass
+                self._execution_disabled = True
             raise LegitimacyInvariantError(
                 "side effect may have completed but terminal result is unknown"
             ) from exc

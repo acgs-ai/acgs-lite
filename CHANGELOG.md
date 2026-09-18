@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.0.0] - 2026-09-18
 
+- Coordinate terminal ledger and durable audit confirmation before result recovery;
+  disable the wrapper if uncertain terminal state cannot be recorded.
+- Bind all production scope and subject aliases consistently, rejecting conflicting
+  tenants and preventing explicit subjects from hiding another resource argument.
+
 - Preserve legacy audit signature digests through `signature_digest`; bind
   production grants to the actual wrapped callable and every ordinary argument,
   including `self`/`cls` names. Opaque results immediately expose an unknown

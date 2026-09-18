@@ -7,6 +7,7 @@ import functools
 import gc
 import os
 import stat
+import threading
 import weakref
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -55,6 +56,255 @@ def _trusted_context(
         scope=scope,
         allowed_subjects=subjects,
     )
+
+
+def test_trusted_context_signature_aliases_allow_once_and_bind_all_subjects() -> None:
+    calls: list[str] = []
+    guard = _guard(trusted_execution_context=_trusted_context())
+
+    @guard
+    def action(account_id: str, *, tenant_id: str = "tenant-a") -> str:
+        calls.append(account_id)
+        return account_id
+
+    grant = action.issue_grant("account-1")
+    assert action("account-1", execution_grant=grant, execution_attempt_id="aliases") == "account-1"
+    assert action("account-1", execution_grant=grant, execution_attempt_id="aliases") == "account-1"
+    with pytest.raises(LegitimacyInvariantError):
+        action("account-2", execution_grant=grant)
+    with pytest.raises(LegitimacyInvariantError):
+        action("account-1", tenant_id="tenant-b", execution_grant=grant)
+    assert calls == ["account-1"]
+
+
+def test_trusted_context_cannot_hide_subject_alias_behind_explicit_subjects() -> None:
+    calls: list[str] = []
+    guard = _guard(trusted_execution_context=_trusted_context())
+
+    @guard
+    def action(scope: str, subjects: tuple[str, ...], account_id: str) -> str:
+        calls.append(account_id)
+        return account_id
+
+    with pytest.raises(LegitimacyInvariantError, match="subjects"):
+        action.issue_grant("tenant-a", ("account-1",), "untrusted-account")
+    grant = action.issue_grant("tenant-a", ("account-1",), "account-1")
+    assert action("tenant-a", ("account-1",), "account-1", execution_grant=grant) == "account-1"
+    assert calls == ["account-1"]
+
+
+def test_production_rejects_conflicting_scope_aliases() -> None:
+    guard = _guard(trusted_execution_context=_trusted_context())
+
+    @guard
+    def action(scope: str, tenant_id: str, subjects: tuple[str, ...]) -> str:
+        return "safe"
+
+    with pytest.raises(LegitimacyInvariantError, match="scope"):
+        action.issue_grant("tenant-a", "tenant-b", ("account-1",))
+
+    grant = action.issue_grant("tenant-a", "tenant-a", ("account-1",))
+    assert action("tenant-a", "tenant-a", ("account-1",), execution_grant=grant) == "safe"
+
+
+@pytest.mark.parametrize(
+    "scope_name",
+    ["tenant", "workspace_id", "organization_id", "org_id", "project_id", "governance_scope"],
+)
+@pytest.mark.parametrize(
+    "subject_name",
+    [
+        "subject",
+        "subject_id",
+        "resource",
+        "resource_id",
+        "object_id",
+        "customer_id",
+        "user_id",
+        "governance_subjects",
+    ],
+)
+def test_production_identity_aliases_in_bound_kwargs(scope_name: str, subject_name: str) -> None:
+    guard = _guard(trusted_execution_context=_trusted_context())
+
+    @guard
+    def action(**identity: Any) -> str:
+        return "safe"
+
+    arguments = {scope_name: "tenant-a", subject_name: "account-1", "account_id": "account-1"}
+    grant = action.issue_grant(**arguments)
+    assert action(**arguments, execution_grant=grant) == "safe"
+    with pytest.raises(LegitimacyInvariantError, match="subjects"):
+        action.issue_grant(**{**arguments, "account_id": "untrusted-account"})
+
+
+def test_production_positional_only_scope_cannot_be_shadowed_by_kwargs() -> None:
+    guard = _guard(trusted_execution_context=_trusted_context())
+
+    @guard
+    def action(scope: str, /, **identity: Any) -> str:
+        return "safe"
+
+    with pytest.raises(LegitimacyInvariantError, match="scope"):
+        action.issue_grant("tenant-b", scope="tenant-a", account_id="account-1")
+
+
+def test_variadic_keyword_container_name_is_not_identity_metadata() -> None:
+    guard = _guard(trusted_execution_context=_trusted_context())
+
+    def by_scope(**scope: Any) -> str:
+        return str(scope["account_id"])
+
+    def by_subjects(**subjects: Any) -> str:
+        return str(subjects["account_id"])
+
+    for function in [by_scope, by_subjects]:
+        action = guard(function)
+        grant = action.issue_grant(tenant_id="tenant-a", account_id="account-1")
+        assert (
+            action(tenant_id="tenant-a", account_id="account-1", execution_grant=grant)
+            == "account-1"
+        )
+
+
+def test_compatibility_binding_keeps_historical_explicit_metadata() -> None:
+    def action(scope: str, subjects: tuple[str, ...], account_id: str) -> str:
+        return account_id
+
+    bound = bind_invocation(action, ("tenant-a", ("account-1",), "account-2"), {})
+    assert bound.scope == "tenant-a"
+    assert bound.subjects == ("account-1",)
+
+
+def test_terminal_audit_and_unknown_mark_failure_disable_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[int] = []
+    audit = AuditLog(backend=_FailSecondFlushBackend(tmp_path / "unconfirmed.jsonl"))
+    guard = _guard(audit_log=audit, require_durable_audit=True)
+
+    @guard
+    def charge(amount: int) -> str:
+        calls.append(amount)
+        return "charged"
+
+    grant = charge.issue_grant(10)
+
+    def fail_unknown(**kwargs: Any) -> Any:
+        raise OSError("cannot mark unknown")
+
+    monkeypatch.setattr(guard._ledger, "mark_unknown", fail_unknown)
+    with pytest.raises(LegitimacyInvariantError, match="result is unknown"):
+        charge(10, execution_grant=grant, execution_attempt_id="unconfirmed")
+    with pytest.raises(LegitimacyInvariantError, match="disabled"):
+        charge(10, execution_grant=grant, execution_attempt_id="unconfirmed")
+    with pytest.raises(LegitimacyInvariantError, match="disabled"):
+        charge.issue_grant(20)
+    assert calls == [10]
+
+
+@pytest.mark.parametrize("after_commit", [False, True])
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_durable_completion_absent_on_terminal_ledger_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_commit: bool, asynchronous: bool
+) -> None:
+    calls: list[int] = []
+    path = tmp_path / "terminal.jsonl"
+    audit = AuditLog(backend=JSONLAuditBackend(path))
+    guard = _guard(audit_log=audit, require_durable_audit=True)
+
+    def charge(amount: int) -> str:
+        calls.append(amount)
+        return "charged"
+
+    async def async_charge(amount: int) -> str:
+        return charge(amount)
+
+    target = guard(async_charge if asynchronous else charge)
+    grant = target.issue_grant(10)
+    original = guard._ledger.finalize
+
+    def fail_terminal(**kwargs: Any) -> Any:
+        if kwargs["status"] is AttemptStatus.COMPLETED:
+            if after_commit:
+                original(**kwargs)
+            raise OSError("terminal ledger unavailable")
+        return original(**kwargs)
+
+    monkeypatch.setattr(guard._ledger, "finalize", fail_terminal)
+    for message in ["result is unknown", "already partial"]:
+        with pytest.raises(LegitimacyInvariantError, match=message):
+            result = target(10, execution_grant=grant, execution_attempt_id="terminal")
+            if asynchronous:
+                asyncio.run(result)
+    restored = AuditLog.from_backend(JSONLAuditBackend(path))
+    assert restored.verify_chain()
+    assert not any(row.type == "execution_completed" for row in restored.entries)
+    assert calls == [10]
+
+
+@pytest.mark.parametrize("fail_confirmation", [False, True])
+def test_recovery_waits_for_durable_completion_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_confirmation: bool
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    replay_entered = threading.Event()
+    calls: list[int] = []
+    outcomes: list[Any] = []
+    audit = AuditLog(backend=JSONLAuditBackend(tmp_path / "concurrent.jsonl"))
+    guard = _guard(audit_log=audit, require_durable_audit=True)
+    original = audit.record_durable
+
+    def hold_confirmation(entry: AuditEntry) -> Any:
+        if entry.type == "execution_completed":
+            entered.set()
+            assert release.wait(10), "test release signal missing"
+            if fail_confirmation:
+                raise OSError("confirmation unavailable")
+        return original(entry)
+
+    monkeypatch.setattr(audit, "record_durable", hold_confirmation)
+
+    @guard
+    def charge(amount: int) -> str:
+        calls.append(amount)
+        return "charged"
+
+    grant = charge.issue_grant(10)
+
+    def invoke(*, replay: bool = False) -> None:
+        if replay:
+            replay_entered.set()
+        try:
+            outcomes.append(charge(10, execution_grant=grant, execution_attempt_id="same"))
+        except Exception as exc:
+            outcomes.append(exc)
+
+    first = threading.Thread(target=invoke)
+    second = threading.Thread(target=lambda: invoke(replay=True))
+    first.start()
+    try:
+        assert entered.wait(10)
+        second.start()
+        assert replay_entered.wait(10)
+        # An explicit lock observation proves exclusion without timing sleeps.
+        assert guard._completion_lock.locked()
+        assert not guard._completion_lock.acquire(blocking=False)
+        assert outcomes == []
+    finally:
+        release.set()
+        first.join(10)
+        if second.ident is not None:
+            second.join(10)
+    assert not first.is_alive() and not second.is_alive()
+    assert calls == [10]
+    if fail_confirmation:
+        assert len(outcomes) == 2
+        assert all(isinstance(value, LegitimacyInvariantError) for value in outcomes)
+        assert guard._ledger._attempts["same"].status is AttemptStatus.PARTIAL
+    else:
+        assert outcomes == ["charged", "charged"]
 
 
 def test_required_trusted_context_missing_fails_closed() -> None:

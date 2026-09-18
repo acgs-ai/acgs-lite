@@ -148,6 +148,14 @@ construction instead of silently weakening the request. A wrapper represents
 one stable actor/tenant context and is not a dynamic multi-tenant identity
 provider. Do not expose its `issue_grant()` method to untrusted callers.
 
+Production binding and execution share the same signature-derived identity
+rules. Recognized scope aliases (including `tenant_id`) must agree; conflicting
+values are refused. All recognized subject aliases (including `account_id`,
+`customer_id`, and `subjects`) are checked together, including those bound inside
+`**kwargs`. An explicit `subjects` value cannot hide another resource argument.
+The host must still map application-specific resource fields to this contract;
+the package does not infer identity from arbitrary nested payloads.
+
 Production receiver methods are currently refused because this implementation
 cannot bind a grant to an exact `self` or `cls` instance. Free functions and
 static methods remain supported. Required arguments must be present when a
@@ -182,6 +190,11 @@ When enabled, required formal-verification exemptions and the terminal
 `execution_completed` record also use the strict durable append. If terminal
 confirmation fails after user code ran, the attempt becomes `PARTIAL` and no
 result is reported or replayed as success.
+The terminal ledger commit precedes the durable completion record, with
+concurrent recovery excluded until both confirmations finish. If the ledger
+cannot even record the uncertain outcome, that wrapper disables further grant
+issuance and execution. This coordination is process-local and does not provide
+an atomic transaction across crashes or a durable execution ledger.
 
 Once wrapped user code starts, an exception or output-policy rejection cannot
 prove that no external effect occurred. The in-process ledger records that case
