@@ -203,7 +203,8 @@ def _bind_call_arguments(
         key: value for key, value in kwargs.items() if accepts_var_kwargs or key in parameters
     }
     try:
-        bound = signature.bind_partial(*args, **bindable_kwargs)
+        bound = signature.bind(*args, **bindable_kwargs)
+        bound.apply_defaults()
     except TypeError:
         return {}
     return dict(bound.arguments)

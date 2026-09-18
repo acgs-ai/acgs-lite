@@ -1,6 +1,6 @@
 # Agent Quickstart
 
-A self-verifying ACGS-Lite demo designed for AI coding agents.
+A self-verifying ACGS-Lite source-candidate demo designed for AI coding agents.
 
 Run this single script to confirm ACGS-Lite is correctly installed and
 all three core capabilities work end-to-end.
@@ -21,7 +21,7 @@ Exit code `1` = one or more assertions failed — investigate the output.
 
 | Section | What it proves |
 |---------|---------------|
-| **1. Governed Callable** | Safe requests pass; PII and destructive operations are blocked |
+| **1. Governed Callable** | Missing authorization is denied with zero calls; a same-instance production grant permits one matching safe call; PII and destructive operations are blocked |
 | **1b. YAML constitution** | `constitution.yaml` loads correctly; rules enforced from file |
 | **2. MACI Role Separation** | Proposer / Validator / Executor roles enforced; Golden Rule held |
 | **3. Audit Trail** | Decisions recorded; chain integrity verified |
@@ -78,7 +78,9 @@ Exit code `1` = one or more assertions failed — investigate the output.
 ## What this proves
 
 - A `GovernedCallable` allows a safe prompt and blocks PII / destructive
-  keywords before the wrapped function returns.
+  keywords before the wrapped function returns. The safe prompt uses a
+  same-instance, process-local production grant from this Unreleased source
+  candidate; that grant API is not part of the published 2.12.0 wheel.
 - A YAML constitution loads and still enforces those rules.
 - MACI refuses a proposer validating its own output.
 - An in-memory `AuditLog` records decisions and `verify_chain()` passes.

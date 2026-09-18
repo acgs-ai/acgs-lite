@@ -13,7 +13,12 @@ def test_release_proof_script_emits_json(tmp_path: Path) -> None:
     output_path = tmp_path / "release-proof.json"
 
     completed = subprocess.run(
-        [sys.executable, str(repo_root / "examples" / "release_proof.py"), "--output", str(output_path)],
+        [
+            sys.executable,
+            str(repo_root / "examples" / "release_proof.py"),
+            "--output",
+            str(output_path),
+        ],
         cwd=repo_root,
         capture_output=True,
         text=True,

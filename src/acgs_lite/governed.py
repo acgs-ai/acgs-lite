@@ -38,6 +38,7 @@ from acgs_lite.legitimacy.authorization import (
     AuthorizationProfile,
     ExecutionAuthority,
     ExecutionGrant,
+    TrustedExecutionContext,
     authorization_envelope_json,
     build_issue_receipt,
     extract_authorization_kwargs,
@@ -156,6 +157,7 @@ class GovernedAgent:
         maci_role: MACIRole | None = None,
         enforce_maci: bool = True,
         max_retries: int = 0,
+        side_effectful: bool = False,
         circuit_breaker: GovernanceCircuitBreaker | None = None,
         cdp_backend: Any | None = None,
         intervention_engine: Any | None = None,
@@ -177,6 +179,9 @@ class GovernedAgent:
         self.maci_role = maci_role
         self.enforce_maci = enforce_maci
         self.max_retries = min(max(0, max_retries), _MAX_RETRIES_LIMIT)
+        self.side_effectful = side_effectful
+        if self.side_effectful and self.max_retries:
+            raise ValueError("side-effectful GovernedAgent does not permit output retries")
         self._circuit_breaker = circuit_breaker
         self.constitution = constitution or Constitution.default()
         self.audit_log = AuditLog()
@@ -639,6 +644,7 @@ def _enforce_z3_gate(
     *,
     audit_log: AuditLog,
     agent_id: str,
+    require_durable_audit: bool = False,
 ) -> None:
     """Run the Z3 boundary check and raise unless the call is cleared.
 
@@ -681,23 +687,25 @@ def _enforce_z3_gate(
         # solver all fall through to the raise below regardless of any exemption.
         exemption, exemption_error = active_exemption(func)
         if exemption is not None:
-            audit_log.record_atomic(
-                AuditEntry(
-                    id=str(uuid.uuid4()),
-                    type="verification_exemption",
-                    agent_id=agent_id,
-                    action=getattr(func, "__name__", "<callable>"),
-                    # Not a clean pass: execution proceeded without verification.
-                    # Recorded as invalid so "where did we run unverified" is a
-                    # query over the audit trail, not an investigation.
-                    valid=False,
-                    violations=["Z3-VERIFICATION-INAPPLICABLE"],
-                    metadata={
-                        "verification_status": runtime_res.status.value,
-                        **exemption.to_audit_metadata(),
-                    },
-                )
+            entry = AuditEntry(
+                id=str(uuid.uuid4()),
+                type="verification_exemption",
+                agent_id=agent_id,
+                action=getattr(func, "__name__", "<callable>"),
+                # Not a clean pass: execution proceeded without verification.
+                # Recorded as invalid so "where did we run unverified" is a
+                # query over the audit trail, not an investigation.
+                valid=False,
+                violations=["Z3-VERIFICATION-INAPPLICABLE"],
+                metadata={
+                    "verification_status": runtime_res.status.value,
+                    **exemption.to_audit_metadata(),
+                },
             )
+            if require_durable_audit:
+                audit_log.record_durable(entry)
+            else:
+                audit_log.record_atomic(entry)
             return
 
     detail = (
@@ -734,10 +742,16 @@ class GovernedCallable:
         strict: bool = True,
         authorization_profile: AuthorizationProfile | str | None = None,
         trusted_issuer_keys: Mapping[str, str] | None = None,
+        audit_log: AuditLog | None = None,
+        require_durable_audit: bool = False,
+        require_durable_execution: bool = False,
+        require_restart_recovery: bool = False,
+        trusted_execution_context: TrustedExecutionContext | None = None,
+        require_trusted_context: bool = False,
     ) -> None:
         self.constitution = constitution or Constitution.default()
         self.agent_id = agent_id
-        self.audit_log = AuditLog()
+        self.audit_log = audit_log if audit_log is not None else AuditLog()
         self.engine = GovernanceEngine(
             self.constitution,
             audit_log=self.audit_log,
@@ -748,6 +762,34 @@ class GovernedCallable:
         self.trusted_issuer_keys = dict(trusted_issuer_keys or {})
         self._authority = ExecutionAuthority()
         self._ledger = InProcessGrantLedger()
+        self._grant_targets: dict[str, Callable[..., Any]] = {}
+        self.require_durable_audit = require_durable_audit
+        self.trusted_execution_context = trusted_execution_context
+        self.require_trusted_context = require_trusted_context
+        if self.authorization_profile is not AuthorizationProfile.PRODUCTION and (
+            trusted_execution_context is not None
+            or require_trusted_context
+            or require_durable_audit
+        ):
+            raise LegitimacyInvariantError(
+                "trusted context and durable audit requirements require the production profile"
+            )
+        if require_trusted_context and trusted_execution_context is None:
+            raise LegitimacyInvariantError("required trusted execution context is missing")
+        if require_durable_execution:
+            raise LegitimacyInvariantError(
+                "production durable execution ledger is not supported by the in-process ledger"
+            )
+        if require_restart_recovery:
+            raise LegitimacyInvariantError(
+                "production restart recovery is not supported by the in-process ledger"
+            )
+        if require_durable_audit:
+            contract = self.audit_log.invariant_contract()
+            if not (contract.durable and contract.supports_fail_closed_persistence):
+                raise LegitimacyInvariantError(
+                    "required durable audit confirmation needs a supported durable backend"
+                )
 
     def issue_grant(
         self, target: Callable[..., Any], /, *args: Any, **kwargs: Any
@@ -759,20 +801,49 @@ class GovernedCallable:
         """
         if "receipt" in kwargs or "decision_receipt" in kwargs or "acgs_receipt" in kwargs:
             raise TypeError("issue_grant refuses caller-created receipts")
+        if self.require_durable_audit:
+            self.audit_log.validate_durable_state()
         func = inspect.unwrap(target)
+        self._reject_production_receiver(func)
         tokens = extract_authorization_kwargs(kwargs)
         if any(tokens.get(name) is not None for name in tokens):
             raise TypeError("issue_grant refuses authorization transport kwargs")
         self._validate_payloads(func, args, kwargs, invoke_denied=True)
         invocation = bind_invocation(func, args, kwargs)
+        context_digest = self._trusted_context_digest(invocation)
         policy = bind_policy(self.constitution)
         receipt = build_issue_receipt(func=func, invocation=invocation, policy=policy)
-        return self._authority.issue(
+        grant = self._authority.issue(
             receipt=receipt,
             invocation=invocation,
             policy=policy,
             single_use=True,
+            context_digest=context_digest,
         )
+        self._grant_targets[grant.grant_id] = func
+        return grant
+
+    def _trusted_context_digest(self, invocation: InvocationBinding) -> str | None:
+        context = self.trusted_execution_context
+        if context is None:
+            if self.require_trusted_context:
+                raise LegitimacyInvariantError("required trusted execution context is missing")
+            return None
+        context.authorize(invocation)
+        return context.digest
+
+    def _reject_production_receiver(self, func: Callable[..., Any]) -> None:
+        """Refuse receiver methods until their exact instance can be grant-bound."""
+        if self.authorization_profile is not AuthorizationProfile.PRODUCTION:
+            return
+        try:
+            parameters = tuple(inspect.signature(func).parameters.values())
+        except (TypeError, ValueError) as exc:
+            raise LegitimacyInvariantError("callable has no inspectable signature") from exc
+        if parameters and parameters[0].name in {"self", "cls"}:
+            raise LegitimacyInvariantError(
+                "production grants do not support receiver methods without exact instance binding"
+            )
 
     def _validate_payloads(
         self,
@@ -795,11 +866,15 @@ class GovernedCallable:
     def _gate(
         self, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> ConsumeDecision | None:
+        if self.require_durable_audit:
+            self.audit_log.validate_durable_state()
         tokens = extract_authorization_kwargs(kwargs)
         production = self.authorization_profile is AuthorizationProfile.PRODUCTION
         if production:
+            self._reject_production_receiver(func)
             reject_method_spoof_kwargs(func, kwargs)
         invocation = bind_invocation(func, args, kwargs)
+        context_digest = self._trusted_context_digest(invocation) if production else None
         policy = bind_policy(self.constitution)
         grant = tokens.get("execution_grant") or tokens.get("acgs_grant")
         signed = tokens.get("signed_receipt")
@@ -819,10 +894,23 @@ class GovernedCallable:
             if grant is not None:
                 if not isinstance(grant, ExecutionGrant):
                     raise LegitimacyInvariantError("Invalid execution grant type")
-                self._authority.verify(grant, invocation=invocation, policy=policy)
+                self._authority.verify(
+                    grant,
+                    invocation=invocation,
+                    policy=policy,
+                    context_digest=context_digest,
+                )
+                if self._grant_targets.get(grant.grant_id) is not func:
+                    raise LegitimacyInvariantError("grant callable identity mismatch")
+                if not grant.single_use:
+                    raise LegitimacyInvariantError(
+                        "production execution requires a single-use grant"
+                    )
                 verified_receipt = grant.receipt
             else:
-                verified_receipt = self._verify_signed_production(signed, invocation, policy)
+                raise LegitimacyInvariantError(
+                    "unsigned or unconsumed signed receipt is not executable in production"
+                )
             self._enforce_receipt(
                 verified_receipt,
                 func=func,
@@ -837,13 +925,42 @@ class GovernedCallable:
                     raise LegitimacyInvariantError(
                         "execution_attempt_id must be a non-empty string"
                     )
-                return self._ledger.consume(
+                outcome = self._ledger.consume(
                     grant_id=grant.grant_id,
                     attempt_id=attempt_id,
                     receipt_hash=grant.receipt.receipt_hash,
                     invocation=invocation,
                     policy=policy,
+                    context_digest=context_digest,
                 )
+                if self.require_durable_audit and outcome.mode == "proceed":
+                    try:
+                        self.audit_log.record_durable(
+                            AuditEntry(
+                                id=f"execution-authorized-{outcome.record.attempt_id}",
+                                type="execution_authorized",
+                                agent_id=self.agent_id,
+                                action=invocation.method_id,
+                                valid=True,
+                                constitutional_hash=policy.version,
+                                metadata={
+                                    "attempt_id": outcome.record.attempt_id,
+                                    "grant_id": grant.grant_id,
+                                    "receipt_hash": grant.receipt.receipt_hash,
+                                    "policy_digest": policy.digest,
+                                    "argument_digest": invocation.argument_digest,
+                                    "trusted_context_digest": context_digest,
+                                },
+                            )
+                        )
+                    except Exception:
+                        self._ledger.finalize(
+                            attempt_id=outcome.record.attempt_id,
+                            status=AttemptStatus.FAILED,
+                            error_code="audit_persistence_failed",
+                        )
+                        raise
+                return outcome
             return None
 
         if grant is not None:
@@ -897,6 +1014,19 @@ class GovernedCallable:
         if outcome is None or outcome.mode == "proceed":
             return _PROCEED
         if outcome.record.status is AttemptStatus.COMPLETED:
+            recovered_digest = digest_output(outcome.result)
+            if (
+                recovered_digest is None
+                or outcome.record.output_sha256 is None
+                or recovered_digest != outcome.record.output_sha256
+            ):
+                self._ledger.mark_unknown(
+                    attempt_id=outcome.record.attempt_id,
+                    error_code="recovered_result_mismatch",
+                )
+                raise LegitimacyInvariantError(
+                    "stored side-effect result is unknown; recovery integrity check failed"
+                )
             return outcome.result
         raise LegitimacyInvariantError(f"attempt already {outcome.record.status.value}")
 
@@ -917,6 +1047,38 @@ class GovernedCallable:
             error_code=error_code,
             output_sha256=digest_output(result) if status is AttemptStatus.COMPLETED else None,
         )
+
+    def _finalize_completed(self, outcome: ConsumeDecision | None, result: Any) -> None:
+        """Commit success, exposing unknown outcome if terminal evidence cannot be stored."""
+        try:
+            if self.require_durable_audit and outcome is not None:
+                self.audit_log.record_durable(
+                    AuditEntry(
+                        id=f"execution-completed-{outcome.record.attempt_id}",
+                        type="execution_completed",
+                        agent_id=self.agent_id,
+                        action=outcome.record.method_id,
+                        valid=True,
+                        metadata={
+                            "attempt_id": outcome.record.attempt_id,
+                            "grant_id": outcome.record.grant_id,
+                            "output_sha256": digest_output(result),
+                        },
+                    )
+                )
+            self._finalize_attempt(outcome, AttemptStatus.COMPLETED, result=result)
+        except Exception as exc:
+            try:
+                if outcome is not None:
+                    self._ledger.mark_unknown(
+                        attempt_id=outcome.record.attempt_id,
+                        error_code="terminal_commit_failed",
+                    )
+            except Exception:
+                pass
+            raise LegitimacyInvariantError(
+                "side effect may have completed but terminal result is unknown"
+            ) from exc
 
     def _verify_signed_production(
         self,
@@ -1010,6 +1172,7 @@ class GovernedCallable:
                 if recovered is not _PROCEED:
                     return recovered
 
+                execution_started = False
                 try:
                     # Fail-closed: only a completed check that found no violation
                     # clears the call. Missing solver, malformed policy, timeout,
@@ -1023,18 +1186,28 @@ class GovernedCallable:
                             policies,
                             audit_log=audit_log,
                             agent_id=agent_id,
+                            require_durable_audit=self.require_durable_audit,
                         )
 
                     for payload in iter_governance_payloads(*args, kwargs):
                         engine.validate(payload, agent_id=agent_id)
+                    execution_started = True
                     result = await func(*args, **kwargs)
                     output_payload = serialize_for_governance(result)
                     if output_payload:
                         engine.validate(output_payload, agent_id=f"{agent_id}:output")
-                except Exception:
-                    self._finalize_attempt(outcome, AttemptStatus.FAILED, error_code="exception")
+                except asyncio.CancelledError:
+                    self._finalize_attempt(
+                        outcome,
+                        AttemptStatus.CANCELLED,
+                        error_code="cancelled",
+                    )
                     raise
-                self._finalize_attempt(outcome, AttemptStatus.COMPLETED, result=result)
+                except Exception:
+                    status = AttemptStatus.PARTIAL if execution_started else AttemptStatus.FAILED
+                    self._finalize_attempt(outcome, status, error_code="exception")
+                    raise
+                self._finalize_completed(outcome, result)
                 return result
 
             async_wrapper.issue_grant = (  # type: ignore[attr-defined]
@@ -1052,6 +1225,7 @@ class GovernedCallable:
                 if recovered is not _PROCEED:
                     return recovered
 
+                execution_started = False
                 try:
                     # Fail-closed: only a completed check that found no violation
                     # clears the call. Missing solver, malformed policy, timeout,
@@ -1065,18 +1239,21 @@ class GovernedCallable:
                             policies,
                             audit_log=audit_log,
                             agent_id=agent_id,
+                            require_durable_audit=self.require_durable_audit,
                         )
 
                     for payload in iter_governance_payloads(*args, kwargs):
                         engine.validate(payload, agent_id=agent_id)
+                    execution_started = True
                     result = func(*args, **kwargs)
                     output_payload = serialize_for_governance(result)
                     if output_payload:
                         engine.validate(output_payload, agent_id=f"{agent_id}:output")
                 except Exception:
-                    self._finalize_attempt(outcome, AttemptStatus.FAILED, error_code="exception")
+                    status = AttemptStatus.PARTIAL if execution_started else AttemptStatus.FAILED
+                    self._finalize_attempt(outcome, status, error_code="exception")
                     raise
-                self._finalize_attempt(outcome, AttemptStatus.COMPLETED, result=result)
+                self._finalize_completed(outcome, result)
                 return result
 
             sync_wrapper.issue_grant = (  # type: ignore[attr-defined]

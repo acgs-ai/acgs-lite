@@ -26,6 +26,44 @@ class AuthorizationProfile(str, Enum):
 
 
 AUTHORIZATION_MAC_DOMAIN = b"acgs-grant-v1\x00"
+TRUSTED_CONTEXT_DOMAIN = b"acgs-trusted-context-v1\x00"
+
+
+@dataclass(slots=True, frozen=True)
+class TrustedExecutionContext:
+    """Host-supplied actor and tenant bounds; the host performs authentication."""
+
+    actor_id: str
+    scope: str
+    allowed_subjects: frozenset[str]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.actor_id, str) or not self.actor_id.strip():
+            raise LegitimacyInvariantError("trusted context actor_id must be non-empty")
+        if not isinstance(self.scope, str) or not self.scope.strip():
+            raise LegitimacyInvariantError("trusted context scope must be non-empty")
+        if not isinstance(self.allowed_subjects, frozenset) or not self.allowed_subjects:
+            raise LegitimacyInvariantError("trusted context allowed_subjects must be non-empty")
+        if any(not isinstance(subject, str) or not subject for subject in self.allowed_subjects):
+            raise LegitimacyInvariantError("trusted context subjects must be non-empty strings")
+
+    @property
+    def digest(self) -> str:
+        payload = {
+            "actor_id": self.actor_id,
+            "scope": self.scope,
+            "allowed_subjects": sorted(self.allowed_subjects),
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(TRUSTED_CONTEXT_DOMAIN + canonical.encode("utf-8")).hexdigest()
+
+    def authorize(self, invocation: InvocationBinding) -> None:
+        if invocation.scope != self.scope:
+            raise LegitimacyInvariantError("trusted context scope mismatch")
+        if not invocation.subjects:
+            raise LegitimacyInvariantError("trusted context requires bound subjects")
+        if not set(invocation.subjects).issubset(self.allowed_subjects):
+            raise LegitimacyInvariantError("trusted context subjects are not allowed")
 
 
 @runtime_checkable
@@ -58,6 +96,7 @@ class ExecutionGrant:
     expires_at: str | None
     single_use: bool
     binding_mac: str
+    context_digest: str | None = None
 
     def to_evidence_dict(self) -> dict[str, Any]:
         """Serializable evidence. The MAC is omitted so this cannot be replayed as a grant."""
@@ -70,6 +109,7 @@ class ExecutionGrant:
             "policy_digest": self.policy_digest,
             "scope": self.scope,
             "subjects": list(self.subjects),
+            "context_digest": self.context_digest,
             "issued_at": self.issued_at,
             "expires_at": self.expires_at,
             "single_use": self.single_use,
@@ -91,6 +131,7 @@ class ExecutionAuthority:
         policy: PolicyBinding,
         expires_at: str | None = None,
         single_use: bool = True,
+        context_digest: str | None = None,
     ) -> ExecutionGrant:
         issued_at = datetime.now(timezone.utc).isoformat()
         grant_id = uuid.uuid4().hex
@@ -102,6 +143,7 @@ class ExecutionAuthority:
             policy_digest=policy.digest,
             scope=invocation.scope,
             subjects=invocation.subjects,
+            context_digest=context_digest,
             issued_at=issued_at,
             expires_at=expires_at,
             single_use=single_use,
@@ -115,6 +157,7 @@ class ExecutionAuthority:
             policy_digest=policy.digest,
             scope=invocation.scope,
             subjects=invocation.subjects,
+            context_digest=context_digest,
             issued_at=issued_at,
             expires_at=expires_at,
             single_use=single_use,
@@ -127,6 +170,7 @@ class ExecutionAuthority:
         *,
         invocation: InvocationBinding,
         policy: PolicyBinding,
+        context_digest: str | None = None,
     ) -> None:
         if grant.issuer_id != self.issuer_id:
             raise LegitimacyInvariantError("grant issuer does not match this authority")
@@ -138,6 +182,7 @@ class ExecutionAuthority:
             policy_digest=grant.policy_digest,
             scope=grant.scope,
             subjects=grant.subjects,
+            context_digest=grant.context_digest,
             issued_at=grant.issued_at,
             expires_at=grant.expires_at,
             single_use=grant.single_use,
@@ -152,6 +197,8 @@ class ExecutionAuthority:
             raise LegitimacyInvariantError("invocation binding mismatch")
         if grant.policy_digest != policy.digest:
             raise LegitimacyInvariantError("policy binding mismatch")
+        if grant.context_digest != context_digest:
+            raise LegitimacyInvariantError("trusted execution context binding mismatch")
         if grant.expires_at is not None:
             try:
                 expires = datetime.fromisoformat(grant.expires_at)
@@ -172,6 +219,7 @@ class ExecutionAuthority:
         policy_digest: str,
         scope: str | None,
         subjects: tuple[str, ...],
+        context_digest: str | None,
         issued_at: str,
         expires_at: str | None,
         single_use: bool,
@@ -184,6 +232,7 @@ class ExecutionAuthority:
             "policy_digest": policy_digest,
             "scope": scope,
             "subjects": list(subjects),
+            "context_digest": context_digest,
             "issued_at": issued_at,
             "expires_at": expires_at,
             "single_use": single_use,
@@ -301,6 +350,7 @@ __all__ = [
     "ExecutionAuthority",
     "ExecutionGrant",
     "GrantResolver",
+    "TrustedExecutionContext",
     "authorization_envelope_json",
     "build_issue_receipt",
     "extract_authorization_kwargs",

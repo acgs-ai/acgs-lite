@@ -596,7 +596,9 @@ def test_wrap_attaches_to_dict_keyed_step_callbacks():
     gov = SmolagentsGovernor()
     gov.wrap(agent)
     # Every registered step-type list now carries the governance callback.
-    assert any(getattr(h, "_acgs_governor", None) is not None for h in agent.step_callbacks["ActionStep"])
+    assert any(
+        getattr(h, "_acgs_governor", None) is not None for h in agent.step_callbacks["ActionStep"]
+    )
     planning = agent.step_callbacks["PlanningStep"]
     assert isinstance(planning, list)  # tuple coerced in place
     assert any(getattr(h, "_acgs_governor", None) is not None for h in planning)

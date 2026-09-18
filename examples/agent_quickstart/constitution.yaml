@@ -15,6 +15,7 @@ rules:
   - id: no-pii
     text: "Block requests exposing personally-identifiable information"
     severity: CRITICAL
+    keywords: ["ssn", "social security", "passport number"]
     patterns:
       - "\\b\\d{3}-\\d{2}-\\d{4}\\b"       # SSN pattern
       - "(?i)\\bsocial\\s+security\\b"
@@ -23,6 +24,7 @@ rules:
   - id: no-destructive
     text: "Block destructive system or database operations"
     severity: HIGH
+    keywords: ["drop table", "rm -rf", "delete from"]
     patterns:
       - "(?i)\\bdrop\\s+table\\b"
       - "(?i)\\brm\\s+-[rRfF]{1,2}\\b"

@@ -2,8 +2,11 @@
 
 Uses Mistral's Leanstral model to auto-formalize constitutional rules into
 Lean 4 predicates, generate proofs, and verify them against the Lean kernel.
-The LLM generates; the kernel verifies. The trust boundary is the Lean type
-checker, not the language model.
+The model generates candidate source. A trusted Lean runtime checks the target
+theorem and its reported axiom dependencies. Lean source must be reviewed and
+executed in an appropriately isolated environment: this adapter is not a sandbox
+for arbitrary model-generated programs. Formalization semantics are not
+independently established by type checking.
 
 Architecture::
 
@@ -118,10 +121,10 @@ _LEAN_WORKDIR_ENV_VAR = "ACGS_LEAN_WORKDIR"
 
 @dataclass(frozen=True, slots=True)
 class ProofCertificate:
-    """Machine-verifiable proof certificate for a governance decision.
+    """Evidence of a target check in a trusted, controlled Lean environment.
 
-    Attach to AuditEntry for compliance-grade evidence that an action
-    satisfies constitutional constraints.
+    This does not establish natural-language/formalization equivalence or confer
+    execution authority. The source/compiler boundary is not a code sandbox.
     """
 
     lean_statement: str
@@ -391,11 +394,22 @@ def _extract_lean_errors(result: subprocess.CompletedProcess[str], command: list
     return errors
 
 
-def _run_lean_check(lean_source: str, timeout_s: int = _LEAN_TIMEOUT_S) -> tuple[bool, list[str]]:
-    """Run the Lean 4 kernel on source code. Returns (success, errors).
+def _checked_source(lean_source: str, expected_theorem: str | None) -> str:
+    if expected_theorem is None:
+        return lean_source
+    if re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", expected_theorem) is None:
+        raise ValueError("invalid expected theorem name")
+    return lean_source.rstrip() + f"\n#print axioms _root_.{expected_theorem}\n"
 
-    This is the TRUST BOUNDARY. If this returns True, the proof is
-    machine-verified — not LLM-generated-and-hoped-for.
+
+def _run_lean_check(
+    lean_source: str, timeout_s: int = _LEAN_TIMEOUT_S, *, expected_theorem: str | None = None
+) -> tuple[bool, list[str]]:
+    """Check controlled Lean source with a trusted local toolchain.
+
+    Certificate callers must specify the target for an allowed-axiom check.
+    Without a target this only checks compilation. Neither mode sandboxes Lean
+    source, validates natural-language formalization, nor authorizes execution.
     """
     command, command_error = _resolve_lean_command_with_error()
     command = command or (["lean"] if LEAN_AVAILABLE else None)
@@ -409,7 +423,10 @@ def _run_lean_check(lean_source: str, timeout_s: int = _LEAN_TIMEOUT_S) -> tuple
 
     with tempfile.TemporaryDirectory(prefix="acgs-lean-") as temp_dir:
         lean_file = Path(temp_dir) / "Proof.lean"
-        lean_file.write_text(lean_source)
+        try:
+            lean_file.write_text(_checked_source(lean_source, expected_theorem), encoding="utf-8")
+        except ValueError as exc:
+            return False, [str(exc)]
         cwd, workdir_error = _resolve_lean_workdir(Path(temp_dir))
         if workdir_error is not None:
             return False, [workdir_error]
@@ -427,7 +444,24 @@ def _run_lean_check(lean_source: str, timeout_s: int = _LEAN_TIMEOUT_S) -> tuple
                 env=env,
             )
             errors = _extract_lean_errors(result, command)
-            return result.returncode == 0, errors
+            if result.returncode != 0:
+                return False, errors
+            if expected_theorem is not None:
+                output = result.stdout if isinstance(result.stdout, str) else ""
+                prefix = f"'{expected_theorem}' "
+                reports = [line for line in output.splitlines() if line.startswith(prefix)]
+                if len(reports) != 1:
+                    return False, ["missing or ambiguous target axiom report"]
+                report = reports[0][len(prefix) :]
+                if report == "does not depend on any axioms":
+                    return True, []
+                match = re.fullmatch(r"depends on axioms: \[([^\[\]]+)\]", report)
+                if match is None:
+                    return False, ["unrecognized target axiom report"]
+                axioms = {name.strip() for name in match.group(1).split(",")}
+                if not axioms.issubset({"propext", "Classical.choice", "Quot.sound"}):
+                    return False, [f"unapproved axiom dependencies: {sorted(axioms)}"]
+            return True, []
         except subprocess.TimeoutExpired:
             return False, [f"Lean kernel timed out after {timeout_s}s using {' '.join(command)}"]
         except Exception as exc:
@@ -442,7 +476,9 @@ def run_lean_runtime_smoke_check(timeout_s: int = _LEAN_TIMEOUT_S) -> dict[str, 
     resolved_workdir, _ = _resolve_lean_workdir(Path.cwd())
     smoke_workdir = configured_workdir or str(resolved_workdir)
     smoke_source = "theorem acgsLeanSmoke : True := by\n  trivial\n"
-    ok, errors = _run_lean_check(smoke_source, timeout_s=timeout_s)
+    ok, errors = _run_lean_check(
+        smoke_source, timeout_s=timeout_s, expected_theorem="acgsLeanSmoke"
+    )
     if command_error is not None and not errors:
         errors = [command_error]
     result = LeanRuntimeSmokeResult(
@@ -751,7 +787,9 @@ class LeanstralVerifier:
 
             # Verify with Lean kernel (TRUST BOUNDARY)
             if _lean_runtime_available():
-                ok, errors = _run_lean_check(full_source, self._lean_timeout_s)
+                ok, errors = _run_lean_check(
+                    full_source, self._lean_timeout_s, expected_theorem="action_compliant"
+                )
                 if ok:
                     return True, proof_body, all_errors, attempt
                 all_errors.extend(errors)
@@ -872,7 +910,9 @@ class LeanstralVerifier:
                         proposed_theorem=theorem,
                         proposed_proof=proof_body,
                     )
-                full_source = lean_source + "\n" + theorem + " := " + proof_body
+                full_source = _checked_source(
+                    lean_source + "\n" + theorem + " := " + proof_body, "action_compliant"
+                )
                 certificate = ProofCertificate(
                     lean_statement=theorem,
                     lean_proof=proof_body,

@@ -63,7 +63,7 @@ class PolicyBinding:
 
 def trusted_method_id(func: Callable[..., Any], *, override: str | None = None) -> str:
     """Return a decorator-owned identity. Never derived from call-time kwargs."""
-    if override:
+    if override is not None:
         if not isinstance(override, str) or not override.strip():
             raise LegitimacyInvariantError("method override must be a non-empty string")
         return override
@@ -145,7 +145,7 @@ def _bound_arguments(
         raise ArgumentNotDigestible("callable has no inspectable signature") from exc
     filtered = {key: value for key, value in kwargs.items() if key not in CONTROL_KWARGS}
     try:
-        bound = signature.bind_partial(*args, **filtered)
+        bound = signature.bind(*args, **filtered)
         bound.apply_defaults()
     except TypeError as exc:
         raise ArgumentNotDigestible(f"arguments do not match callable signature: {exc}") from exc
@@ -165,6 +165,15 @@ def _canonical_json(value: Any, *, _seen: set[int] | None = None) -> Any:
         seen.add(identity)
     if value is None or isinstance(value, bool):
         return value
+    if isinstance(value, Enum):
+        enum_type = type(value)
+        return {
+            "__enum__": [
+                enum_type.__module__,
+                enum_type.__qualname__,
+                _canonical_json(value.value, _seen=seen),
+            ]
+        }
     if isinstance(value, int) and not isinstance(value, bool):
         return {"__int__": str(value)}
     if isinstance(value, float):
@@ -179,8 +188,6 @@ def _canonical_json(value: Any, *, _seen: set[int] | None = None) -> Any:
         return {"__decimal__": str(value)}
     if isinstance(value, datetime):
         return {"__datetime__": value.isoformat()}
-    if isinstance(value, Enum):
-        return {"__enum__": [type(value).__name__, _canonical_json(value.value, _seen=seen)]}
     if isinstance(value, tuple):
         return {"__tuple__": [_canonical_json(item, _seen=seen) for item in value]}
     if isinstance(value, list):

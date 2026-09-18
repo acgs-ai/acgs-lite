@@ -1,10 +1,19 @@
-name: Publish to PyPI
+name: Publish qualified candidate to PyPI
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful Qualify release candidate workflow run ID
+        required: true
+        type: string
+      tag:
+        description: Exact vX.Y.Z tag qualified by that run
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
   id-token: write
 
@@ -15,27 +24,99 @@ jobs:
       name: pypi
       url: https://pypi.org/project/acgs-lite/
     steps:
+      - name: Validate requested identifiers
+        env:
+          RUN_ID: ${{ inputs.candidate_run_id }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          case "$RUN_ID" in (*[!0-9]*|'') exit 1;; esac
+          case "$TAG" in (v[0-9]*.[0-9]*.[0-9]*) ;; (*) exit 1;; esac
+      - name: Verify trusted candidate workflow run before download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.candidate_run_id }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" > "$RUNNER_TEMP/run.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          run = json.loads(Path(os.environ["RUNNER_TEMP"], "run.json").read_text())
+          expected = {"id": int(os.environ["RUN_ID"]), "event": "workflow_dispatch", "status": "completed", "conclusion": "success", "path": ".github/workflows/release-candidate.yml"}
+          for field, value in expected.items():
+              if run.get(field) != value:
+                  raise SystemExit(f"untrusted candidate run {field}")
+          repository = os.environ["GITHUB_REPOSITORY"]
+          if run.get("repository", {}).get("full_name") != repository or run.get("head_repository", {}).get("full_name") != repository:
+              raise SystemExit("candidate repository mismatch")
+          if run.get("head_branch") != os.environ["TAG"]:
+              raise SystemExit("candidate tag mismatch")
+          PY
       - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
-      - name: Verify tag matches package version
+      - name: Verify tag source and current main ancestry
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PYPROJECT_VERSION=$(python -c "import tomllib; data=tomllib.load(open('pyproject.toml','rb')); print(data['project']['version'])")
-          if [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]; then
-            echo "Tag version '$TAG_VERSION' does not match pyproject.toml version '$PYPROJECT_VERSION'."
+          git fetch origin main --no-tags
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          git merge-base --is-ancestor HEAD origin/main
+          test "${TAG#v}" = "$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+      - uses: actions/download-artifact@v8
+        with:
+          name: acgs-lite-release-candidate-${{ inputs.candidate_run_id }}
+          path: ${{ runner.temp }}/candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify downloaded evidence and exact artifacts
+        env:
+          RUN_ID: ${{ inputs.candidate_run_id }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          python scripts/release_candidate.py verify-publish \
+            --manifest "$RUNNER_TEMP/candidate/candidate.json" \
+            --artifact-dir "$RUNNER_TEMP/candidate" --source-root . \
+            --repository "$GITHUB_REPOSITORY" \
+            --workflow-path .github/workflows/release-candidate.yml \
+            --run-id "$RUN_ID" --source-ref "refs/tags/$TAG" \
+            --run-json "$RUNNER_TEMP/run.json" --max-age-hours 24
+      - name: Refuse an already published version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if ! status=$(curl --connect-timeout 10 --max-time 30 --silent --show-error --output /dev/null --write-out '%{http_code}' "https://pypi.org/pypi/acgs-lite/${TAG#v}/json"); then
+            echo "Cannot confirm PyPI version availability." >&2
             exit 1
           fi
-          echo "Version check passed: $PYPROJECT_VERSION"
-      - name: Install build tools
-        run: pip install build twine
-      - name: Build
-        run: python -m build --wheel --sdist
-      - name: Check
-        run: twine check dist/*
-      - name: Publish
+          case "$status" in
+            404) ;;
+            200) echo "Version ${TAG#v} already exists on PyPI; overwrite is forbidden." >&2; exit 1 ;;
+            *) echo "Unexpected PyPI HTTP status: $status" >&2; exit 1 ;;
+          esac
+      - name: Stage only the verified distributions
+        run: |
+          mkdir _publish_artifacts
+          python - <<'PY'
+          import hashlib, json, os, shutil
+          from pathlib import Path
+          manifest = json.loads(Path(os.environ["RUNNER_TEMP"], "candidate/candidate.json").read_text())
+          candidate = Path(os.environ["RUNNER_TEMP"], "candidate")
+          expected_names = {item["name"] for item in manifest["artifacts"]}
+          actual_names = {path.name for path in candidate.iterdir() if path.suffix == ".whl" or path.name.endswith(".tar.gz")}
+          if actual_names != expected_names:
+              raise SystemExit("candidate distribution set mismatch")
+          for expected in manifest["artifacts"]:
+              source = candidate / expected["name"]
+              if source.stat().st_size != expected["size"] or hashlib.sha256(source.read_bytes()).hexdigest() != expected["sha256"]:
+                  raise SystemExit("staged artifact mismatch")
+              shutil.copy2(source, Path("_publish_artifacts", expected["name"]))
+          PY
+      - name: Publish exact qualified artifacts without rebuilding
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: dist/
-          skip-existing: true
+          packages-dir: _publish_artifacts/

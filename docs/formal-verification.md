@@ -216,8 +216,21 @@ printed alongside an exit 0 would not be a machine-readable signal.
 
 ## The Lean 4 layer
 
-The trust boundary is the **Lean kernel**, not the language model. `LeanstralVerifier`
-formalizes rules and generates a candidate proof with an LLM, then type-checks it.
+`LeanstralVerifier` formalizes rules and generates candidate source with an LLM,
+then checks the fixed `action_compliant` theorem with a trusted Lean runtime.
+Acceptance also requires one target axiom report whose dependencies are limited
+to `propext`, `Classical.choice`, and `Quot.sound` (or none). `sorryAx`, custom
+axioms, missing or ambiguous reports, and compiler failures are rejected.
+The certificate hash covers the exact UTF-8 compiler input, including the axiom
+inspection command.
+
+This is a check of **controlled, reviewed Lean source**, not a sandbox for
+arbitrary model output. Lean elaborators and evaluation commands can execute
+code, and untrusted programs can forge textual diagnostics. Run untrusted
+candidates in a separately qualified isolation/checking environment before
+treating certificates as trusted evidence. This adapter does not establish
+that a model's predicates mean the original natural-language rules, and its
+certificate is not execution authorization.
 
 The stages are reported separately:
 
@@ -225,13 +238,25 @@ The stages are reported separately:
 |---|---|
 | `proposed_theorem` | The theorem statement that was built |
 | `proposed_proof` | The model's candidate proof text — unverified |
-| `proved` | **True only if the Lean kernel accepted the proof** |
+| `proved` | Target check and allowed-axiom report passed in the trusted runtime |
 | `certificate` | Populated only for a kernel-verified proof |
 
 With no Lean toolchain installed, verification returns `proved=False`, `certificate=None`,
 and the candidate in `proposed_proof`. No `ProofCertificate` is minted for text no kernel
 has read, and nothing reporting success reaches the audit trail on the strength of a
 generated proof.
+
+The local qualification uses Lean 4.34.0 with controlled positive and negative
+inputs; no model API calls are required. Run the real lane with Lean on `PATH`:
+
+```bash
+LEAN_INTEGRATION=1 python -m pytest tests/test_lean_qualification.py \
+  tests/test_lean_verify.py::test_run_lean_runtime_smoke_check_real_toolchain -q
+```
+
+Without `LEAN_INTEGRATION=1`, the new parser tests use mock diagnostics and do
+not claim real compiler qualification. Release candidate wheel qualification
+uses `--require-lean` to require the real lane with no skipped tests.
 
 ## What none of this claims
 

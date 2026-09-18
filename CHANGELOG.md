@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-18
+
+### Migration from 2.12
+
+- This major release changes formal-verification failure behavior. Install the
+  `z3` extra for Z3 policies, annotate governed callable parameters, and repair
+  invalid or inapplicable policies before executing. Missing solvers, unknown
+  results and invalid policies now refuse execution; do not use a failed check
+  as permission to proceed. A documented, attributed exemption can cover only
+  an inapplicable policy, as described below.
+- Treat Lean output as a proposed proof until the installed Lean kernel accepts
+  the controlled theorem. Update callers that assumed an unavailable toolchain
+  returned a verified certificate. This is not a sandbox for arbitrary Lean code.
+- Handle CLI verification exit codes `0` (verified), `1` (defect), and `2`
+  (not verified); supply `--constitution FILE` with actual policies.
+- Compatibility receipt calls retain their default profile. For production
+  execution, configure the trusted runtime identity and audit prerequisites,
+  issue a grant for the actual callable and arguments, and supply stable attempt
+  identifiers. Ordinary and signed receipts alone are not production execution
+  capabilities. The current ledger is in-process: use explicit reconciliation
+  after an unknown outcome and do not assume restart-safe or external exactly-once
+  execution. See `docs/api/legitimacy.md` and `docs/api/audit.md` for the supported
+  trust domain and durability contract.
+- Streaming validation retains its compatibility default: pass
+  `blocking_severities={"critical"}` (or additional severities) to halt a stream
+  on violations. The earlier warning promising a default change in 3.0 has been
+  corrected; this release does not silently change that default.
+
 ### Security
 
 - **Z3 policy strings are no longer evaluated as Python.** Policy text carried in
@@ -94,9 +122,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Opt-in production execution grants: `GovernedCallable(..., authorization_profile="production")`
   rejects self-minted unsigned `DecisionReceipt` values. The executable tokens are a
-  same-instance `ExecutionGrant` from `issue_grant()`, or a v2 execution-scope
-  `SignedReceipt` whose envelope matches the current invocation and a pinned issuer
-  key. Grants bind `module:qualname` plus a typed canonical argument digest.
+  same-instance `ExecutionGrant` from `issue_grant()`. Production rejects
+  `SignedReceipt` as execution authority because it cannot provide the same
+  consumption contract. Grants bind the actual callable, typed canonical
+  arguments, policy content and trusted runtime context.
   The default profile remains compatibility so existing receipt-passing callers
   keep working. In-process HMAC authenticity is process-scoped, not a
   distributed capability. Production `issue_grant()` mints single-use grants
@@ -105,6 +134,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not re-executed, and concurrent races admit exactly one winner. The ledger is
   not durable across processes. `DecisionReceipt` and `ExecutionBoundary` field
   schemas are unchanged. Grant IDs are still not a wire capability.
+- Versioned full-SHA-256 audit records, retained-window predecessor anchors,
+  strict persistence confirmation and recovery checks. Legacy logs retain their
+  original verification strength; self-contained chains do not prove that no
+  complete history was deleted or rewritten.
+- Qualified-artifact publishing: a fixed source/tag is built once, its installed
+  wheel and source are tested, and a separate authorized publish workflow uploads
+  those exact digest-checked artifacts without rebuilding.
 
 ## [2.12.0] - 2026-08-15
 
@@ -672,7 +708,8 @@ Stability table in the README for the stability tier of each subsystem.
 - CLI tool (`acgs` / `acgs-lite`)
 - Keyword-based and regex rule matching
 
-[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v2.12.0...HEAD
+[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.12.0...v3.0.0
 [2.12.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/acgs-ai/acgs-lite/compare/v2.9.0...v2.10.1

@@ -1,11 +1,12 @@
 """
-Agent Quickstart — Self-Verifying ACGS-Lite Demo
-=================================================
+Agent Quickstart — Self-Verifying ACGS-Lite Source-Candidate Demo
+==================================================================
 A single script that an AI coding agent (Claude Code, Codex CLI) can run
 verbatim to confirm ACGS-Lite is correctly installed and working.
 
 Covers three capabilities in sequence:
-  1. Governed callable  — safe requests pass, violations are blocked
+  1. Governed callable  — missing authorization and violations are blocked;
+     a same-instance production grant allows one matching safe request
   2. MACI role separation — roles are enforced; cross-role actions are denied
   3. Audit trail        — governance decisions are chained and verifiable
 
@@ -22,6 +23,7 @@ import sys
 from pathlib import Path
 
 from acgs_lite import (
+    AuthorizationProfile,
     Constitution,
     ConstitutionalViolationError,
     GovernedCallable,
@@ -32,6 +34,7 @@ from acgs_lite import (
     Severity,
 )
 from acgs_lite.audit import AuditEntry, AuditLog
+from acgs_lite.legitimacy import LegitimacyInvariantError
 
 _PASS = "✅"
 _FAIL = "❌"
@@ -65,32 +68,53 @@ def section_governed_callable() -> None:
             Rule(
                 id="no-pii",
                 text="Block SSN patterns",
+                keywords=["ssn", "social security"],
                 patterns=[r"\b\d{3}-\d{2}-\d{4}\b"],
                 severity=Severity.CRITICAL,
             ),
             Rule(
                 id="no-destructive",
                 text="Block destructive operations",
+                keywords=["drop table", "rm -rf"],
                 patterns=[r"(?i)\bdrop table\b", r"(?i)\brm -rf\b"],
                 severity=Severity.HIGH,
             ),
         ],
     )
 
+    calls: list[str] = []
+
     def my_agent(prompt: str) -> str:
+        calls.append(prompt)
         return f"Response to: {prompt}"
 
-    governed = GovernedCallable(constitution=constitution)(my_agent)
+    governed = GovernedCallable(
+        constitution=constitution,
+        authorization_profile=AuthorizationProfile.PRODUCTION,
+    )(my_agent)
 
-    # Safe request passes
-    result = governed("What is the capital of France?")
+    # Missing authorization is denied before the callable runs.
+    safe_prompt = "What is the capital of France?"
+    try:
+        governed(safe_prompt)
+        _assert(False, "missing authorization must be blocked")
+    except LegitimacyInvariantError:
+        _assert(calls == [], "missing authorization causes zero callable invocations")
+
+    # A same-instance production grant allows exactly the matching call.
+    grant = governed.issue_grant(safe_prompt)  # type: ignore[attr-defined]
+    result = governed(
+        safe_prompt,
+        execution_grant=grant,
+        execution_attempt_id="quickstart-inline-safe",
+    )
     if "Response to:" in result:
         print(f"  {_PASS}  Allowed:  {result}")
     _assert("Response to:" in result, "safe request passes through")
 
     # PII is blocked
     try:
-        governed("My SSN is 123-45-6789")
+        governed.issue_grant("My SSN is 123-45-6789")  # type: ignore[attr-defined]
         _assert(False, "PII request must be blocked")
     except ConstitutionalViolationError as exc:
         print(f"  {_BLOCK}  Blocked:  {exc.rule_id} — {exc}")
@@ -98,7 +122,7 @@ def section_governed_callable() -> None:
 
     # Destructive operation is blocked
     try:
-        governed("drop table users")
+        governed.issue_grant("drop table users")  # type: ignore[attr-defined]
         _assert(False, "destructive request must be blocked")
     except ConstitutionalViolationError as exc:
         print(f"  {_BLOCK}  Blocked:  {exc.rule_id} — {exc}")
@@ -112,16 +136,27 @@ def section_governed_callable() -> None:
     yaml_path = Path(__file__).parent / "constitution.yaml"
     try:
         yaml_const = Constitution.from_yaml(str(yaml_path))
-        yaml_governed = GovernedCallable(constitution=yaml_const)(my_agent)
+        yaml_governed = GovernedCallable(
+            constitution=yaml_const,
+            authorization_profile=AuthorizationProfile.PRODUCTION,
+        )(my_agent)
         _assert(len(yaml_const.rules) == 3, f"YAML loads 3 rules (got {len(yaml_const.rules)})")
 
-        yaml_result = yaml_governed("Tell me about Paris")
+        yaml_prompt = "Tell me about Paris"
+        yaml_grant = yaml_governed.issue_grant(yaml_prompt)  # type: ignore[attr-defined]
+        yaml_result = yaml_governed(
+            yaml_prompt,
+            execution_grant=yaml_grant,
+            execution_attempt_id="quickstart-yaml-safe",
+        )
         if "Response to:" in yaml_result:
             print(f"  {_PASS}  YAML load OK — rules: {len(yaml_const.rules)}")
         _assert("Response to:" in yaml_result, "safe request passes via YAML constitution")
 
         try:
-            yaml_governed("My social security number is 999-88-7777")
+            yaml_governed.issue_grant(  # type: ignore[attr-defined]
+                "My social security number is 999-88-7777"
+            )
             _assert(False, "YAML PII rule must block")
         except ConstitutionalViolationError as exc:
             print(f"  {_BLOCK}  YAML block: {exc.rule_id} — still enforced from file")

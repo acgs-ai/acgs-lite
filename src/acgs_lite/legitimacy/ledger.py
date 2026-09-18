@@ -10,7 +10,14 @@ from enum import Enum
 from typing import Any
 
 from acgs_lite.legitimacy.invariants import LegitimacyInvariantError
-from acgs_lite.legitimacy.invocation import InvocationBinding, PolicyBinding
+from acgs_lite.legitimacy.invocation import (
+    InvocationBinding,
+    PolicyBinding,
+    _canonical_json,
+    _dumps,
+)
+
+OUTPUT_DIGEST_DOMAIN = b"acgs-output-v1\x00"
 
 
 class AttemptStatus(str, Enum):
@@ -39,6 +46,7 @@ class ExecutionAttemptRecord:
     error_code: str | None
     started_at: str
     finished_at: str | None
+    context_digest: str | None = None
 
 
 @dataclass(slots=True)
@@ -58,7 +66,10 @@ class InProcessGrantLedger:
         self._grant_attempt: dict[str, str] = {}
         self._attempts: dict[str, ExecutionAttemptRecord] = {}
         self._results: dict[str, Any] = {}
-        self._bindings: dict[str, tuple[str, str, str, str | None, tuple[str, ...]]] = {}
+        self._bindings: dict[
+            str,
+            tuple[str, str, str, str, str | None, tuple[str, ...], str | None],
+        ] = {}
 
     def consume(
         self,
@@ -68,18 +79,26 @@ class InProcessGrantLedger:
         receipt_hash: str,
         invocation: InvocationBinding,
         policy: PolicyBinding,
+        context_digest: str | None = None,
     ) -> ConsumeDecision:
         """Atomically reserve or recover one attempt for a single-use grant."""
         binding = (
+            receipt_hash,
             invocation.method_id,
             invocation.argument_digest,
             policy.digest,
             invocation.scope,
             invocation.subjects,
+            context_digest,
         )
         with self._lock:
             existing = self._grant_attempt.get(grant_id)
             if existing is None:
+                attempt_owner = self._attempts.get(attempt_id)
+                if attempt_owner is not None and attempt_owner.grant_id != grant_id:
+                    raise LegitimacyInvariantError(
+                        "execution attempt id is already bound to a different grant"
+                    )
                 now = datetime.now(timezone.utc).isoformat()
                 record = ExecutionAttemptRecord(
                     attempt_id=attempt_id,
@@ -93,6 +112,7 @@ class InProcessGrantLedger:
                     error_code=None,
                     started_at=now,
                     finished_at=None,
+                    context_digest=context_digest,
                 )
                 self._grant_attempt[grant_id] = attempt_id
                 self._attempts[attempt_id] = record
@@ -140,16 +160,27 @@ class InProcessGrantLedger:
                 self._results[attempt_id] = result
             return record
 
+    def mark_unknown(self, *, attempt_id: str, error_code: str) -> ExecutionAttemptRecord:
+        """Conservatively replace an uncertain terminal commit with PARTIAL."""
+        with self._lock:
+            record = self._attempts.get(attempt_id)
+            if record is None:
+                raise LegitimacyInvariantError("unknown execution attempt")
+            record.status = AttemptStatus.PARTIAL
+            record.error_code = error_code
+            record.output_sha256 = None
+            record.finished_at = datetime.now(timezone.utc).isoformat()
+            self._results.pop(attempt_id, None)
+            return record
+
 
 def digest_output(value: Any) -> str | None:
-    """Best-effort SHA-256 of a stringified result. None if not representable."""
-    if value is None:
-        return hashlib.sha256(b"null").hexdigest()
+    """Digest the supported canonical value domain; reject opaque objects."""
     try:
-        payload = repr(value).encode("utf-8")
+        payload = _dumps(_canonical_json(value)).encode("utf-8")
     except Exception:
         return None
-    return hashlib.sha256(payload).hexdigest()
+    return hashlib.sha256(OUTPUT_DIGEST_DOMAIN + payload).hexdigest()
 
 
 __all__ = [

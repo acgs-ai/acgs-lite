@@ -67,19 +67,16 @@ For mathematical and logic-based constraints (e.g., "Never allow a transaction t
 
 This moves governance from "highly likely safe" to a deterministically checked path for the constraints it models.
 
+<!-- doc-test: supervisor-z3 -->
 ```python
-from acgs_lite.verification import Z3ConstraintVerifier
+from acgs_lite.z3_verify import VerificationStatus, Z3ConstraintVerifier
 
-# Define a formal constraint
-# "transaction_amount + current_usage <= daily_limit"
-verifier = Z3ConstraintVerifier(
-    constraints=["amount + usage <= 1000"],
-    variables={"amount": "int", "usage": "int"}
+verifier = Z3ConstraintVerifier()
+result = verifier.verify(
+    action="read an approved account",
+    context={"environment": "staging", "authenticated": True},
 )
-
-# Validate at runtime
-result = verifier.verify({"amount": 500, "usage": 200})
-assert result.is_safe == True
+assert result.status is VerificationStatus.PASS
 ```
 
 ---

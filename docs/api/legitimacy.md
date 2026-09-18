@@ -55,10 +55,12 @@ DENY_GOAL
 HARD_DENY
 ```
 
-Only `ALLOW` and `ALLOW_WITH_CONTROLS` can reach execution, and
-`ALLOW_WITH_CONTROLS` must still satisfy every required control. Unknown,
-ambiguous, denied, review, transform, replan, and hard-deny states are not
-executable by default.
+Only `ALLOW` and `ALLOW_WITH_CONTROLS` are allow-class decisions. The
+production profile refuses controlled authorization carriers because this
+package has no general trusted control-verification service. The historical
+compatibility profile has weaker control handling, as described below.
+Unknown, ambiguous, denied, review, transform, replan, and hard-deny states
+are not executable by default.
 
 Use `canonicalize_decision_state()` to map known legacy strings into the
 canonical taxonomy. Use `route_ambiguous_decision()` when confidence is missing
@@ -102,9 +104,8 @@ reserved for deserialization paths that must still satisfy the same invariants.
 
 ## Execution Boundary Binding
 
-Before a wrapped callable executes, `GovernedCallable` removes
-`decision_receipt`/`acgs_receipt` and checks it with
-`validate_receipt_for_execution()`.
+Before a wrapped callable executes, `GovernedCallable` removes authorization
+metadata and checks the actual bound invocation.
 
 The verifier normalizes the actual call into `ActualCall(method, scope,
 subjects)` and compares it to the receipt boundary:
@@ -121,17 +122,69 @@ arguments are also bound to the wrapped function signature so common subject
 parameters such as `customer_id`, `account_id`, `subject_id`, `resource_id`, and
 `user_id` cannot bypass the boundary by being passed positionally.
 
+`authorization_profile="production"` requires an `ExecutionGrant` issued by
+that exact `GovernedCallable` instance. The grant binds the current policy
+digest, canonical arguments, method identifier, and exact callable object. It
+is single-use through the instance's in-process ledger. An attempt identifier
+cannot be reused for a different grant, and a terminal or cancelled attempt is
+never executed again. Completed result recovery verifies the recorded output
+digest; mutation or an undigestible result changes the attempt to `PARTIAL`
+instead of returning unverifiable success.
+
+`TrustedExecutionContext(actor_id, scope, allowed_subjects)` optionally binds a
+grant to a host-supplied actor and tenant snapshot. The host is responsible for
+authenticating those values; acgs-lite only binds them to the grant and actual
+call. `allowed_subjects` must be a non-empty `frozenset`, and every actual
+subject must be inside it. Set `require_trusted_context=True` to reject a missing
+context. Trusted-context and durable-audit requirements are production-profile
+features; configuring them under the compatibility profile fails at
+construction instead of silently weakening the request. A wrapper represents
+one stable actor/tenant context and is not a dynamic multi-tenant identity
+provider. Do not expose its `issue_grant()` method to untrusted callers.
+
+Production receiver methods are currently refused because this implementation
+cannot bind a grant to an exact `self` or `cls` instance. Free functions and
+static methods remain supported. Required arguments must be present when a
+grant is issued, while declared defaults are applied consistently during grant
+issuance and execution-boundary validation.
+
+This ledger has process-instance scope. It does not provide restart recovery,
+distributed exclusion, or general exactly-once delivery to external APIs.
+`require_durable_execution=True` and `require_restart_recovery=True` therefore
+fail closed instead of implying those guarantees. A plain or signed
+`SignedReceipt` is evidence that can be independently verified, but the
+production executor refuses it because this package has no durable single-use
+consumption contract for that carrier.
+
+Production grants currently carry no required controls. An authorization
+carrier with controls that cannot be verified at the execution boundary is not
+accepted by the production path. Compatibility receipt validation retains its
+historical structured human-approval behavior and must not be described as a
+general trusted control-verification service.
+
 ## Audit Evidence Expectations
 
-`AuditLog` is tamper-evident. Execution paths that carry audit evidence must
-verify the audit chain before side effects. `GovernedCallable` passes its audit
-log into `validate_receipt_for_execution()`, and a failed `verify_chain()` blocks
-the wrapped callable before user code runs.
+`AuditLog` is tamper-evident within its documented retained segment. Execution
+paths that carry audit evidence verify the chain before side effects.
+`GovernedCallable(require_durable_audit=True, audit_log=...)` also records and
+confirms an `execution_authorized` entry through `record_durable()` before user
+code runs. Unsupported backends and write/flush/rollback uncertainty fail
+closed. This acknowledgement is separate from durable execution-result storage.
+When enabled, required formal-verification exemptions and the terminal
+`execution_completed` record also use the strict durable append. If terminal
+confirmation fails after user code ran, the attempt becomes `PARTIAL` and no
+result is reported or replayed as success.
+
+Once wrapped user code starts, an exception or output-policy rejection cannot
+prove that no external effect occurred. The in-process ledger records that case
+as `PARTIAL`; it does not automatically retry. Cancellation is terminal as well,
+but does not by itself prove rollback of an external operation.
 
 Receipts and audit logs are complementary:
 
 - the receipt proves authorization for this proposed execution boundary;
-- the audit log provides tamper-evident, hash-chained evidence that recorded entries were not altered;
+- the audit log detects alteration within the supplied retained segment; without
+  an external trusted anchor it cannot detect whole-history deletion or rewrite;
 - either proof becoming missing or unverifiable is a fail-closed condition.
 
 ## Signed, Replay-Verifiable Receipts (optional)
@@ -178,8 +231,9 @@ Boundaries (fail closed, by design):
   symmetric scheme.
 - The signing key is held in process memory. Back `Ed25519ReceiptSigner` with a
   KMS/HSM before relying on receipts for non-repudiation.
-- Receipts carry no nonce or timestamp in the signed bytes; enforce `request_id`
-  uniqueness at the application layer to prevent replay of a valid receipt.
+- Signature validity alone does not provide single-use consumption. Use the
+  production `ExecutionGrant` path within its stated in-process trust domain;
+  externally signed carriers need a separately qualified consumption protocol.
 
 ## Failure Contract
 
