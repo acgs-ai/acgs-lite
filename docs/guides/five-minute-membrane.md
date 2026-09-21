@@ -8,7 +8,7 @@ script below (or clone the repo and run
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install "acgs-lite==2.12.0"
+pip install "acgs-lite==3.0.1"
 python membrane_5min.py
 ```
 
@@ -19,7 +19,7 @@ Core invariant:
 Save the script as `membrane_5min.py`.
 
 ```python
-"""Governed side-effect membrane. Requires only: pip install acgs-lite==2.12.0"""
+"""Governed side-effect membrane. Requires only: pip install acgs-lite==3.0.1"""
 from __future__ import annotations
 
 import re
@@ -207,7 +207,7 @@ if __name__ == "__main__":
 
 ## Expected output
 
-Recorded against **acgs-lite 2.12.0**. Receipt hashes include `issued_at`, so the
+Recorded against **acgs-lite 3.0.1**. Receipt hashes include `issued_at`, so the
 hex prefix will change. The decisions and the two refusal strings must not.
 
 ```text

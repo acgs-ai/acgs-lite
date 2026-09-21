@@ -14,7 +14,7 @@ or the in-tree scripts.
 Install the core package:
 
 ```bash
-pip install acgs-lite==2.12.0
+pip install acgs-lite==3.0.1
 ```
 
 Install an extra only when you need a specific integration:

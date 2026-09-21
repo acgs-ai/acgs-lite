@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-09-21
+
+### Fixed
+
+- Metadata-only: sync README / docs install pins and "public package" statements from
+  stale **2.12.0** wording to the published **3.0.0** surface so the PyPI long description
+  matches the wheel version. No runtime or API changes.
+
 ## [3.0.0] - 2026-09-18
 
 - Coordinate terminal ledger and durable audit confirmation before result recovery;
@@ -719,6 +727,7 @@ Stability table in the README for the stability tier of each subsystem.
 - Keyword-based and regex rule matching
 
 [Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v3.0.0...HEAD
+[3.0.1]: https://github.com/acgs-ai/acgs-lite/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.12.0...v3.0.0
 [2.12.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.10.1...v2.11.0
