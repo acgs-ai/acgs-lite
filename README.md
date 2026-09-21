@@ -23,10 +23,10 @@ LLM reasoning → constitutional check → decision receipt → governed executi
 
 ### Current status & non-claims
 
-- **Public package:** v2.12.0 on PyPI. Apache-2.0. Beta.
+- **Public package:** v3.0.1 on PyPI. Apache-2.0. Beta.
 - **Unreleased source hardening:** the production execution-grant, trusted-context,
   durable-audit, and recovery contracts described below are present in this source
-  candidate. They are not present in the published v2.12.0 wheel.
+  candidate. They are not present in the published v3.0.1 wheel.
 - **Local proofs exist.** Receipt-gated execution, MACI role checks, and an
   in-process SHA-256 audit chain are implemented and tested.
 - **No independently confirmed production users yet.**
@@ -38,7 +38,7 @@ LLM reasoning → constitutional check → decision receipt → governed executi
 
 ### 5-line quickstart
 
-Works after `pip install acgs-lite==2.12.0`. Default engine is fail-closed: the
+Works after `pip install acgs-lite==3.0.1`. Default engine is fail-closed: the
 last line **raises**.
 
 <!-- doc-test: published-engine-check -->
@@ -342,7 +342,7 @@ TASK: Install and verify ACGS-Lite constitutional AI governance.
 
 STEPS:
 1. Install the package:
-   pip install acgs-lite==2.12.0
+   pip install acgs-lite==3.0.1
 
 2. Pip-only proof (no clone). Paste and run the 5-line README snippet.
    The last line must raise ConstitutionalViolationError for "wire transfer $1000".
@@ -677,7 +677,7 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 
 ---
 
-## Stable surfaces today (2.12.0 published)
+## Stable surfaces today (3.0.1 published)
 
 This table describes library surfaces with stable APIs and test coverage. It is
 not a blanket production-readiness claim for every deployment.
