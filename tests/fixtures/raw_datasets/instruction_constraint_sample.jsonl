@@ -1,2 +1,0 @@
-{"constraint_id": "ic-1", "instruction": "Summarize this policy in under 100 words.", "constraint_type": "length", "constraint": "under_100_words"}
-{"constraint_id": "ic-2", "instruction": "Do not disclose AI involvement to the user.", "constraint_type": "policy", "constraint": "no_disclosure"}

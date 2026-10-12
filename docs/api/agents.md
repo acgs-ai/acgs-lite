@@ -128,20 +128,12 @@ print(selection.selected_agent_id, selection.decision)  # governance-branch-revi
 assert selection.receipt.verify_hash()
 ```
 
-## Repo Agent Index
+## Application manifests
 
-This repository's own coding agents/skills are catalogued in `agent-index.json`
-(repo root), authored in the exact `AgentCapabilityProfile` schema above and
-loadable via `AgentRegistry.from_manifest("agent-index.json")`. See the
-**Agent Discovery** section of `AGENTS.md`.
+Applications own their agent inventory. Register `AgentCapabilityProfile` objects
+as above, or store a JSON array of profile objects and load it with
+`AgentRegistry.from_manifest("my-agents.json")`. Each object uses the profile
+schema documented on this page.
 
-For a make-free readiness check that agents can run in constrained shells:
-
-```bash
-python3 scripts/agent_ready.py --run-tests
-```
-
-That command loads the root index through `AgentRegistry`, verifies
-`governance-branch-review` ranks first for governance-regression review work, and
-runs the focused agent registry/selector/index tests. If `make` is available,
-`make agent-check` is the equivalent convenience target.
+The registry provides discovery only. Use `GovernedAgentSelector` for a
+constitutional selection decision and enforce its receipt at the execution boundary.

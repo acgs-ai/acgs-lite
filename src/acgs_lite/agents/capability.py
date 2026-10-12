@@ -7,10 +7,9 @@
 
 A :class:`AgentCapabilityProfile` is a declarative, framework-neutral description
 of *an agent* (or skill) that an orchestrator might delegate a task to. It is the
-shared schema for both layers of agent discovery: the runtime
-:class:`~acgs_lite.agents.registry.AgentRegistry` consumes these profiles, and the
-repo's machine-readable ``agent-index.json`` (repo root) is authored in the exact
-same shape so the two layers cannot drift.
+schema consumed by the runtime
+:class:`~acgs_lite.agents.registry.AgentRegistry`. Application-provided JSON
+manifests use this same profile shape.
 
 The profile carries no executable behavior -- selection returns a decision and a
 receipt, it does not run the agent. Profiles are frozen value objects, mirroring
@@ -76,7 +75,7 @@ class AgentCapabilityProfile:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> AgentCapabilityProfile:
-        """Build a profile from agent-index / manifest data.
+        """Build a profile from application manifest data.
 
         List-valued fields are coerced to tuples; missing optional fields fall back
         to defaults. An empty ``agent_id`` or ``name`` raises ``ValueError`` so a
@@ -105,7 +104,7 @@ class AgentCapabilityProfile:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize the profile into agent-index / manifest shape."""
+        """Serialize the profile into application manifest shape."""
         return {
             "agent_id": self.agent_id,
             "name": self.name,

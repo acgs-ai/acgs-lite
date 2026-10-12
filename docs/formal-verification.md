@@ -44,8 +44,8 @@ length, node count, and nesting depth.
 This is a security boundary, not a convenience limit. Policy text comes from the
 constitution; before this parser existed it was passed to `eval` behind an empty
 `__builtins__`, which does not stop attribute traversal — `And.__globals__` reached a
-populated builtins mapping, and a rule could execute arbitrary code. See
-`docs/reviews/z3-lean-verification-audit.md`.
+populated builtins mapping, and a rule could execute arbitrary code. The restricted
+parser rejects those constructs before solver evaluation.
 
 ### Failure behavior — fail-closed
 

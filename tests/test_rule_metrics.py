@@ -1,12 +1,10 @@
-"""Tests for per-rule precision/recall/F1 metrics and eval harness.
+"""Tests for per-rule precision/recall/F1 metrics.
 
 Constitutional Hash: 608508a9bd224290
 """
 
 from __future__ import annotations
 
-import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -16,7 +14,6 @@ import pytest
 ACGS_LITE_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(ACGS_LITE_SRC))
 
-_AUTORESEARCH_DIR = Path(__file__).resolve().parents[1] / "autoresearch"
 from acgs_lite.constitution.rule_metrics import (  # noqa: E402
     EvalReport,
     RuleMetrics,
@@ -133,108 +130,6 @@ class TestScenarioOutcomeMetrics:
         sm = ScenarioOutcomeMetrics(total=10, correct=8, incorrect=2)
         d = sm.to_dict()
         assert d["accuracy"] == pytest.approx(0.8)
-
-
-# --- Test 3: label validation (rule ID not in constitution) ---
-
-
-class TestLabelValidation:
-    def test_catches_unknown_rule_id(self):
-        """validate_annotations should catch rule IDs not in the constitution."""
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import validate_annotations
-
-        annotations = {
-            "hash1": {"expected_rules": ["SAFETY-099"]},
-        }
-        active_rules = {"SAFETY-001", "SAFETY-002"}
-        errors = validate_annotations(annotations, active_rules)
-        assert len(errors) == 1
-        assert "SAFETY-099" in errors[0]
-
-    def test_passes_valid_rule_ids(self):
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import validate_annotations
-
-        annotations = {
-            "hash1": {"expected_rules": ["SAFETY-001"]},
-        }
-        active_rules = {"SAFETY-001", "SAFETY-002"}
-        errors = validate_annotations(annotations, active_rules)
-        assert len(errors) == 0
-
-
-# --- Test 4: case mismatch (safety-001 vs SAFETY-001) ---
-
-
-class TestCaseCanonicalization:
-    def test_lowercase_caught_by_validation(self):
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import validate_annotations
-
-        annotations = {
-            "hash1": {"expected_rules": ["safety-001"]},  # lowercase
-        }
-        # active_rules are uppercase
-        active_rules = {"SAFETY-001"}
-        errors = validate_annotations(annotations, active_rules)
-        # Should pass because validate_annotations uppercases before comparison
-        assert len(errors) == 0
-
-
-# --- Test 5: content hash deterministic ---
-
-
-class TestContentHash:
-    def test_deterministic(self):
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import content_hash
-
-        h1 = content_hash("deploy model", {"env": "prod"})
-        h2 = content_hash("deploy model", {"env": "prod"})
-        assert h1 == h2
-
-    def test_different_context(self):
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import content_hash
-
-        h1 = content_hash("deploy model", {"env": "prod"})
-        h2 = content_hash("deploy model", {"env": "staging"})
-        assert h1 != h2
-
-    def test_empty_context(self):
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import content_hash
-
-        h1 = content_hash("deploy model", {})
-        h2 = content_hash("deploy model", {})
-        assert h1 == h2
-
-    def test_context_order_independent(self):
-        """Sorted keys should produce same hash regardless of dict insertion order."""
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import content_hash
-
-        h1 = content_hash("action", {"b": "2", "a": "1"})
-        h2 = content_hash("action", {"a": "1", "b": "2"})
-        assert h1 == h2
-
-
-def test_eval_cli_reports_failure_with_nonzero_exit(tmp_path):
-    """The restored adversarial set has mismatches; a reporting run must not go green."""
-    result = subprocess.run(
-        [sys.executable, "-m", "autoresearch.eval_rules", "--output-dir", str(tmp_path)],
-        cwd=ACGS_LITE_SRC.parent,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 1, result.stdout + result.stderr
-    metrics = json.loads((tmp_path / "rule_metrics.json").read_text())["scenario_metrics"]
-    assert metrics["incorrect"] > 0
-    assert metrics["errors"] == 0
-    assert metrics["skipped"] == 0
-    assert "FAIL" in result.stdout
 
 
 # --- Test 6: compute_eval_report integration ---

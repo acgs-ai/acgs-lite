@@ -2,8 +2,7 @@
 
 Legacy scores and compliance verdicts are intentionally replaced with observable
 evidence, confidence, filtering, and JSON-safe bundle contracts. Evidence presence
-does not certify compliance. The old-to-current mapping is recorded in
-planning/test-skip-remediation.md.
+does not certify compliance.
 
 Constitutional Hash: 608508a9bd224290
 """

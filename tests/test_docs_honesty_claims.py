@@ -6,28 +6,13 @@ import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SIMULATION_PREFIX = "SIMULATION (seed=42), not empirical benchmark"
 
 PUBLIC_SURFACES = (
     REPO_ROOT / "README.md",
     REPO_ROOT / "docs" / "index.md",
     REPO_ROOT / "docs" / "compliance.md",
     REPO_ROOT / "docs" / "cli.md",
-    REPO_ROOT / "research" / "README.md",
 )
-
-EXPERIMENT_SCRIPTS = tuple(
-    REPO_ROOT / "research" / name
-    for name in (
-        "x1_constitutional_humaneval.py",
-        "x2_swe_secrets.py",
-        "x3_maci_decisions.py",
-        "x4_maci_latency.py",
-        "x5_prov_export.py",
-        "x6_diff_audit.py",
-    )
-)
-
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
@@ -146,29 +131,3 @@ def test_acgs_verify_docs_do_not_claim_constitutional_hash_validation() -> None:
     )
     assert "Validate the integrity of your license key and constitutional hash." not in cli
     assert "does not validate constitutional hash integrity" in cli_normalized
-
-
-def test_research_result_lines_are_simulation_prefixed() -> None:
-    text = _read(REPO_ROOT / "research" / "README.md")
-    result_block = text.split("## Experiment Results (seed=42)", maxsplit=1)[1].split(
-        "## Compliance Anchors",
-        maxsplit=1,
-    )[0]
-
-    offenders = [
-        line
-        for line in result_block.splitlines()
-        if line.startswith("- ") and not line.startswith(f"- {SIMULATION_PREFIX}")
-    ]
-
-    assert not offenders, "research result lines missing simulation prefix: " + "\n".join(offenders)
-
-
-def test_experiment_generators_emit_simulation_metadata() -> None:
-    offenders = []
-    for path in EXPERIMENT_SCRIPTS:
-        text = _read(path)
-        if '"simulation"' not in text or "not empirical benchmark" not in text:
-            offenders.append(str(path.relative_to(REPO_ROOT)))
-
-    assert not offenders, "experiment outputs lack simulation metadata: " + ", ".join(offenders)

@@ -231,7 +231,7 @@ supported-version, scope, and disclosure-window policy is in
 
 - **Pip-only script in-tree** — `python examples/membrane_5min.py`
 - **Richer membrane walkthrough** — [`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py)
-- **Agent readiness gate** — `python3 scripts/agent_ready.py --run-tests`
+- **Contributor validation** — `make verify` (see [contributor setup](CONTRIBUTING.md))
 - **Self-verifying install** — [`examples/agent_quickstart/`](./examples/agent_quickstart/)
 - **Audit trail demo** — [`examples/audit_trail/`](./examples/audit_trail/)
 - **Shared infrastructure path** — [`examples/mcp_agent_client.py`](./examples/mcp_agent_client.py)

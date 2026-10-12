@@ -44,14 +44,9 @@ ACGS-Lite is a Python 3.10+ project. We use `ruff` for linting and `pytest` for 
 git clone https://github.com/acgs-ai/acgs-lite.git
 cd acgs-lite
 
-# Option A — uv workspace (recommended, matches CI exactly)
-uv sync --all-extras           # first-time: installs the locked venv
-uv run make test-quick         # runs tests inside the locked venv
-
-# Option B — standalone venv (standalone/offline use)
 python3 -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -e ".[dev,mcp,all]"
+python -m pip install -e ".[dev,mcp]" httpx
 make test-quick
 ```
 
@@ -63,6 +58,44 @@ We follow a strict **Test-Driven Development** workflow. Every feature or fix mu
 *   **Location**: All tests go in the `tests/` directory.
 *   **Stubs**: Use the `InMemoryAuditBackend` and `InMemoryGovernanceEngine` patterns to keep tests fast and deterministic.
 *   **Coverage**: We target **80%+ coverage** for the core engine and **70%+** for integration adapters.
+
+## Optional integration qualification
+
+Use a dedicated Python 3.12 environment for the complete optional integration lane.
+The minimal Python fallback lane intentionally omits Rust and Z3. Pinned test
+packages in `requirements-test-optional.txt` are not base runtime dependencies.
+
+Install Rust **1.93.1** (matching the optional integration CI job), then run:
+
+```bash
+python -m pip install -e ".[dev,mcp,autonoma,anthropic,otel]" httpx
+python -m pip install -r requirements-test-optional.txt "maturin==1.12.6"
+maturin build --release --locked --manifest-path rust/pyo3/Cargo.toml --out /tmp/acgs-rust-wheels
+python -m pip install /tmp/acgs-rust-wheels/acgs_lite_rust-*.whl
+```
+
+Install Lean **4.34.0** from the checksum-verified archive used in
+[the optional integration CI job](.github/workflows/ci.yml), and put its `bin/`
+directory on `PATH`. Then run:
+
+```bash
+make test-optional PYTHON=python
+LEAN_INTEGRATION=1 make verify PYTHON=python
+LEAN_INTEGRATION=1 make test PYTHON=python 'PYTEST=python -m pytest -o addopts='
+```
+
+`test-optional` requires the real optional imports and compiler before testing,
+and enables the real Lean smoke test itself. CI rejects skipped tests in that
+focused lane. The final command clears the default end-to-end exclusion and
+includes benchmarks. Qualify minimal environments separately; missing optional
+SDKs or toolchains there can legitimately skip their corresponding tests.
+
+## Public repository scope
+
+The repository contains the runtime library, supported examples, public guides,
+build configuration, and their validation tests. Maintainer automation, internal
+plans, experiment corpora, and generated working data remain local. Public
+validation commands do not depend on those local files.
 
 ## 📏 Coding Standards
 
@@ -78,11 +111,8 @@ We follow a strict **Test-Driven Development** workflow. Every feature or fix mu
 3.  Implement your changes and add tests.
 4.  Run the verification suite:
     ```bash
-    uv run make lint
-    uv run make typecheck
-    uv run make test-cov
-    # or with the standalone venv active:
-    # make lint && make typecheck && make test-cov
+    make verify
+    make test-cov
     ```
 5.  Submit your PR with a **Conventional Commit** message (e.g., `feat: add NIST AI RMF mapping`).
 

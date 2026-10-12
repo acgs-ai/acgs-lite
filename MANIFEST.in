@@ -1,6 +1,6 @@
-# Keep the restored research regression surface runnable from source distributions.
-include requirements-test-optional.txt
-include tests/conftest.py
-include tests/fixtures/real_use_case_datasets.json
-recursive-include tests/fixtures/raw_datasets *.csv *.json *.jsonl
-recursive-include autoresearch *.py *.json *.yaml *.patch *.md
+# Publish only runtime sources and build metadata. Local files stay in this checkout.
+global-exclude *
+include pyproject.toml README.md LICENSE
+recursive-include src/acgs_lite *.py *.json *.yaml *.md py.typed
+recursive-include src/acgs *.py
+global-exclude __pycache__ *.py[cod] .DS_Store

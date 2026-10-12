@@ -6,6 +6,16 @@ repo_url: https://github.com/acgs-ai/acgs-lite
 repo_name: acgs-ai/acgs-lite
 edit_uri: edit/main/docs/
 
+# Internal notes stay on maintainers' disks, outside the published site.
+exclude_docs: |
+  /plans/
+  /research/
+  /reviews/
+  /evidence/
+  /agent-native-adaptation-plan.md
+  /policygen-evolution-design.md
+  /integration-dashboard.html
+
 plugins:
   - search
   - mkdocstrings:
@@ -115,8 +125,6 @@ nav:
       - MCP Notes: mcp.md
       - Telegram Webhook: telegram-webhook.md
       - Upgrade to v2.10: upgrade-v2.10.md
-  - Research:
-      - smolagents adaptation: research/smolagents-adaptation.md
 
 markdown_extensions:
   - pymdownx.highlight:

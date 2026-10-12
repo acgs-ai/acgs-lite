@@ -360,14 +360,6 @@ def authenticate(username, password):
         assert len(secret_lines) == 1
         assert secret_lines[0][0] == 2
 
-    def test_cap_demo_05_agents_md_exists(self) -> None:
-        import pathlib
-
-        agents_md = pathlib.Path(__file__).parent.parent / "AGENTS.md"
-        assert agents_md.exists()
-        content = agents_md.read_text()
-        assert any(w in content.lower() for w in ("governance", "constitution", "maci", "acgs"))
-
     def test_cap_demo_07_gitlab_template(self) -> None:
         from acgs_lite.constitution import Constitution
 

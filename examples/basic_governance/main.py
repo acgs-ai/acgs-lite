@@ -11,8 +11,7 @@ Two loading styles shown:
 Run:
     python examples/basic_governance/main.py
 
-Inspect the constitution:
-    python scripts/visualizer.py rules --constitution examples/basic_governance/constitution.yaml
+The YAML constitution is in examples/basic_governance/constitution.yaml.
 """
 
 from pathlib import Path

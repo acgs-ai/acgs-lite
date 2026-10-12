@@ -33,6 +33,11 @@ make test-cov      # with coverage report
     OpenAI and Anthropic keys for tests; use its setup and verification commands to
     reproduce the repository environment.
 
+For Rust, solver, adapter, and Lean qualification, follow the
+[optional integration setup](https://github.com/acgs-ai/acgs-lite/blob/main/CONTRIBUTING.md#optional-integration-qualification).
+The public contributor guide includes the pinned toolchain prerequisites and
+`make test-optional` commands.
+
 ## License
 
 ACGS is licensed under Apache-2.0. See the

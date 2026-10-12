@@ -1,8 +1,7 @@
 # Architecture
 
 How the Phoenix + ACGS-lite governed-execution telemetry example fits
-together. Companion to `GOVERNANCE_ATTRIBUTES.md` (the schema) and
-`UPSTREAM_STRATEGY.md` (the contribution plan).
+together. Companion to `GOVERNANCE_ATTRIBUTES.md` (the schema).
 
 ## Data Flow
 
@@ -117,7 +116,6 @@ examples/phoenix_acgs_governed_agent/
 ├── test_phoenix_integration.py   # InMemorySpanExporter assertions per scenario
 ├── GOVERNANCE_ATTRIBUTES.md      # Finalized attribute schema (read first)
 ├── ARCHITECTURE.md               # This file
-├── UPSTREAM_STRATEGY.md          # Plan for upstreaming to arize-phoenix docs
 ├── README.md                     # Quick start
 ├── requirements.txt              # acgs-lite + Phoenix + OTel + pytest
 └── .env.example                  # OPENAI_API_KEY, PHOENIX_HOST, PHOENIX_PORT

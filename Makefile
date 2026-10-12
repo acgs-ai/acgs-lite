@@ -1,6 +1,5 @@
 # acgs-lite package Makefile
-# Run from packages/acgs-lite/ or from repo root via:
-#   make -C packages/acgs-lite <target>
+# Run from the repository root: make <target>
 #
 # All tests run without API keys — InMemory* stubs handle external deps.
 
@@ -18,25 +17,23 @@ SCRIPT_DIR  = $(PACKAGE_DIR)/scripts
 # Detect repo root (two levels up from this Makefile)
 REPO_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 
-.PHONY: help setup dev-setup install install-dev agent-check agents-sync validate verify smoke dev \
+.PHONY: help setup dev-setup install install-dev validate verify smoke dev \
         test test-quick test-optional test-cov test-examples \
         test-governance \
         lint format typecheck check build publish-dry-run publish \
-        examples visualize clean
+        examples clean
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help:
 	@echo ""
 	@echo "  acgs-lite development targets"
 	@echo ""
-	@echo "  Agent-ready (one-command surfaces for coding agents):"
+	@echo "  Development:"
 	@echo "    make setup         One-shot: create .venv + install all dev deps (= dev-setup)"
 	@echo "    make dev           Run the local FastAPI governance server (autoreload)"
 	@echo "    make smoke         Fast smoke: run bundled examples + import check"
-	@echo "    make verify        Pre-handoff gate: lint + typecheck + test-quick + validate + agent-check"
-	@echo "    make validate      Workspace integrity: manifests, tool registry, readiness"
-	@echo "    make agents-sync   Regenerate agents/*.agent.yaml from agent-index.json"
-	@echo "    make agent-check   Agent discovery/readiness gate (direct script fallback exists)"
+	@echo "    make verify        Gate: lint + typecheck + test-quick + validate"
+	@echo "    make validate      Check documentation links"
 	@echo ""
 	@echo "  Setup:"
 	@echo "    make dev-setup     One-shot: create .venv + install all dev deps"
@@ -46,7 +43,7 @@ help:
 	@echo "  Testing (no API keys required — InMemory* stubs used):"
 	@echo "    make test          Full test suite"
 	@echo "    make test-quick    Skip slow/benchmark tests (-m 'not slow')"
-	@echo "    make test-optional Require and test solver, adapters, Rust, and Lean (see TOOLS.md)"
+	@echo "    make test-optional Require and test solver, adapters, Rust, and Lean (see CONTRIBUTING.md)"
 	@echo "    make test-cov      Test + coverage report (HTML in htmlcov/)"
 	@echo "    make test-governance  Governance-regression safety gate"
 	@echo "    make test-examples Run all examples/ as smoke tests"
@@ -64,7 +61,6 @@ help:
 	@echo ""
 	@echo "  Utilities:"
 	@echo "    make examples      Run all examples interactively"
-	@echo "    make visualize     Open visualizer help (see scripts/visualizer.py)"
 	@echo "    make clean         Remove caches, dist, build artifacts"
 	@echo ""
 
@@ -104,25 +100,11 @@ install-dev:
 	@echo "Placeholder keys: OPENAI_API_KEY=test-key ANTHROPIC_API_KEY=test-key"
 	@echo "See .env.example for the full set."
 
-agent-check:
-	$(TEST_ENV) $(PYTHON) scripts/agent_ready.py --run-tests
-
-# ── Agent-ready execution ─────────────────────────────────────────────────────
-# Regenerate the per-agent manifests from the canonical agent-index.json.
-agents-sync:
-	$(PYTHON) scripts/sync_agents.py
-
-# Workspace integrity without running the focused test gate: manifest↔index sync,
-# tool-registry liveness, documentation link health, and the make-free readiness summary.
+# Public validation works from a fresh clone without local agent configuration.
 validate:
-	$(PYTHON) scripts/sync_agents.py --check
-	$(PYTHON) scripts/validate_tools.py
 	$(PYTHON) scripts/check_links.py
-	$(TEST_ENV) $(PYTHON) scripts/agent_ready.py --no-run-tests
 
-# Comprehensive pre-handoff gate. Keep validate explicit so the public command
-# graph matches tools/runbooks/verify.md and tools/registry.yaml.
-verify: lint typecheck test-quick validate agent-check
+verify: lint typecheck test-quick validate
 	@echo "verify: all gates passed"
 
 # Fast smoke: bundled examples as executable checks + a bare import.
@@ -257,9 +239,6 @@ examples:
 	$(PYTHON) examples/audit_trail/main.py
 	$(PYTHON) examples/mock_stub_testing/main.py
 
-visualize:
-	$(PYTHON) scripts/visualizer.py --help
-
 clean-dist:
 	rm -rf dist/ build/
 
@@ -270,3 +249,6 @@ clean: clean-dist
 	find . -type d -name htmlcov -exec rm -rf {} + 2>/dev/null || true
 	find . -name "*.pyc" -delete 2>/dev/null || true
 	@echo "Clean."
+
+# Optional workstation-only targets are never needed by public CI.
+-include Makefile.local

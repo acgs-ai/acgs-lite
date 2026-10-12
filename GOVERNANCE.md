@@ -55,7 +55,7 @@ sustained objection within a reasonable window (typically 3–5 days for non-tri
 changes) is considered accepted.
 
 - **Routine changes** (bug fixes, tests, docs, new adapters/templates that follow existing patterns): one maintainer/reviewer approval is enough.
-- **Significant changes** (public API, the [matcher hot path](CLAUDE.md), MACI enforcement semantics, security defaults, governance itself): require explicit maintainer consensus and an open discussion period. These are also the changes most likely to touch our safety guarantees, so we err on the side of more review.
+- **Significant changes** (public API, the matcher hot path, MACI enforcement semantics, security defaults, governance itself): require explicit maintainer consensus and an open discussion period. These are also the changes most likely to touch our safety guarantees, so we err on the side of more review. Follow the [contributor conventions](CONTRIBUTING.md) when preparing changes.
 - **Disagreement:** if consensus can't be reached, the matter is decided by a simple
   majority of maintainers; the founder breaks ties while the project remains founder-led.
 
