@@ -262,3 +262,13 @@ exact call.
   understanding. A rephrased wire transfer that avoids the keyword is a
   different proposed action — write a better rule, do not assume the engine
   “knows finance.”
+
+### A concrete policy-coverage gap
+
+The demo constitution allows `please send $1000 by bank wire`: it does not
+contain the exact `wire transfer` keyword. This is a policy-coverage gap in
+the demo's narrow rule, not a receipt-gate bypass.
+
+Execution still requires a valid executable receipt bound to the actual call.
+The executor's `validate_receipt_for_execution` check continues to refuse
+missing and DENY receipts, even when the policy misses a rephrased request.

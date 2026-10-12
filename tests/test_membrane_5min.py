@@ -20,6 +20,16 @@ def _load_example() -> ModuleType:
     return module
 
 
+def test_five_minute_membrane_policy_coverage_gap_allows_rephrased_bank_wire() -> None:
+    module = _load_example()
+    engine = module.GovernanceEngine(module.make_constitution())
+
+    result = engine.validate("please send $1000 by bank wire", strict=False)
+
+    # This is a policy-coverage gap, not a receipt-gate bypass.
+    assert result.valid is True
+
+
 def test_five_minute_membrane_allows_transforms_denies_and_blocks_without_receipt() -> None:
     module = _load_example()
     result = module.run_demo()
