@@ -59,7 +59,7 @@ _FULL_KEYWORDS = frozenset({"read", "list", "get", "fetch", "view", "show", "des
 
 try:
     from mcp import types
-    from mcp.server import Server
+    from mcp.server import Server, ServerRequestContext
 
     MCP_AVAILABLE = True
 except ImportError:
@@ -95,6 +95,9 @@ def create_mcp_server(
     if not MCP_AVAILABLE:
         raise ImportError("mcp package is required. Install with: pip install acgs-lite[mcp]")
 
+    from jsonschema import ValidationError
+    from jsonschema.validators import validator_for
+
     constitution = constitution if constitution is not None else Constitution.default()
     audit_log = AuditLog()
     engine = GovernanceEngine(constitution, audit_log=audit_log, strict=strict, audit_mode="full")
@@ -109,234 +112,256 @@ def create_mcp_server(
         embedding_provider=embedding_provider,
     )
 
-    server = Server(server_name)
-
-    @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
-    async def list_tools() -> list[types.Tool]:
-        """Return the list of available governance tools."""
-        return [
-            types.Tool(
-                name="validate_action",
-                description=(
-                    "Validate an agent action against constitutional governance rules. "
-                    "Returns whether the action is compliant and any violations found."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "description": "The action text to validate",
-                        },
-                        "agent_id": {
-                            "type": "string",
-                            "description": "ID of the agent performing the action",
-                            "default": "mcp-client",
-                        },
-                        "session_id": {
-                            "type": "string",
-                            "description": "Optional session identifier for mid-trajectory checkpoint tracking",
-                        },
-                        "checkpoint_kind": {
-                            "type": "string",
-                            "description": "Optional checkpoint kind such as input_analysis or tool_invocation",
-                        },
-                        "tool_name": {
-                            "type": "string",
-                            "description": "Optional tool name when validating a tool invocation",
-                        },
-                        "runtime_context": {
-                            "type": "object",
-                            "description": "Optional runtime risk signals (e.g. untrusted_input, prompt_injection_suspected)",
-                            "default": {},
-                        },
-                        "capability_tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional capability tags used for static tool prior scoring",
-                            "default": [],
-                        },
+    tools = [
+        types.Tool(
+            name="validate_action",
+            description=(
+                "Validate an agent action against constitutional governance rules. "
+                "Returns whether the action is compliant and any violations found."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "The action text to validate",
                     },
-                    "required": ["action"],
-                },
-            ),
-            types.Tool(
-                name="get_constitution",
-                description=(
-                    "Get the current constitution: name, version, hash, and the full list of rules."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {},
-                },
-            ),
-            types.Tool(
-                name="get_audit_log",
-                description=("Get recent audit log entries showing governance decisions."),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum entries to return",
-                            "default": 20,
-                        },
+                    "agent_id": {
+                        "type": "string",
+                        "description": "ID of the agent performing the action",
+                        "default": "mcp-client",
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Optional session identifier for mid-trajectory checkpoint tracking",
+                    },
+                    "checkpoint_kind": {
+                        "type": "string",
+                        "description": "Optional checkpoint kind such as input_analysis or tool_invocation",
+                    },
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Optional tool name when validating a tool invocation",
+                    },
+                    "runtime_context": {
+                        "type": "object",
+                        "description": "Optional runtime risk signals (e.g. untrusted_input, prompt_injection_suspected)",
+                        "default": {},
+                    },
+                    "capability_tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional capability tags used for static tool prior scoring",
+                        "default": [],
                     },
                 },
+                "required": ["action"],
+            },
+        ),
+        types.Tool(
+            name="get_constitution",
+            description=(
+                "Get the current constitution: name, version, hash, and the full list of rules."
             ),
-            types.Tool(
-                name="check_compliance",
-                description=(
-                    "Quick compliance check — returns whether text contains "
-                    "any constitutional violations."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "text": {
-                            "type": "string",
-                            "description": "Text to check for compliance",
-                        },
-                    },
-                    "required": ["text"],
-                },
-            ),
-            types.Tool(
-                name="governance_stats",
-                description=(
-                    "Get governance statistics: total validations, compliance rate, "
-                    "average latency, and audit chain integrity."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {},
-                },
-            ),
-            types.Tool(
-                name="explain_violation",
-                description=(
-                    "Explain a constitutional violation in human-readable form. "
-                    "Validates the action and returns detailed violation information "
-                    "including rule text, severity, and description."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "description": "The action text to explain violations for",
-                        },
-                        "rule_id": {
-                            "type": "string",
-                            "description": "Optional rule ID to filter explanation to a specific rule",
-                        },
-                    },
-                    "required": ["action"],
-                },
-            ),
-            types.Tool(
-                name="check_capability_tier",
-                description=(
-                    "Check the autonomy capability tier for an action. "
-                    "Returns RESTRICTED, SUPERVISED, or FULL based on the action content."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "action_text": {
-                            "type": "string",
-                            "description": "The action text to check the capability tier for",
-                        },
-                        "domain": {
-                            "type": "string",
-                            "description": "Optional domain context for tier determination",
-                        },
-                    },
-                    "required": ["action_text"],
-                },
-            ),
-            types.Tool(
-                name="verify_audit_chain",
-                description=(
-                    "Verify the integrity of the audit chain. "
-                    "Checks hash chain consistency across recent audit entries."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of recent entries to check",
-                            "default": 100,
-                        },
+            input_schema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+        types.Tool(
+            name="get_audit_log",
+            description=("Get recent audit log entries showing governance decisions."),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum entries to return",
+                        "default": 20,
                     },
                 },
+            },
+        ),
+        types.Tool(
+            name="check_compliance",
+            description=(
+                "Quick compliance check — returns whether text contains "
+                "any constitutional violations."
             ),
-            *(
-                [
-                    types.Tool(
-                        name="compile_workflow",
-                        description=(
-                            "Compile a governance workflow GoalSpec into an executable TaskDAG. "
-                            "Validates step domains against known governance domains and returns "
-                            "node list with IDs, titles, domains, and dependency edges."
-                        ),
-                        inputSchema={
-                            "type": "object",
-                            "properties": {
-                                "workflow": {
-                                    "type": "object",
-                                    "description": (
-                                        "GoalSpec dict with keys: goal (str), "
-                                        "domains (list[str]), steps (list[dict])"
-                                    ),
-                                },
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to check for compliance",
+                    },
+                },
+                "required": ["text"],
+            },
+        ),
+        types.Tool(
+            name="governance_stats",
+            description=(
+                "Get governance statistics: total validations, compliance rate, "
+                "average latency, and audit chain integrity."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+        types.Tool(
+            name="explain_violation",
+            description=(
+                "Explain a constitutional violation in human-readable form. "
+                "Validates the action and returns detailed violation information "
+                "including rule text, severity, and description."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "The action text to explain violations for",
+                    },
+                    "rule_id": {
+                        "type": "string",
+                        "description": "Optional rule ID to filter explanation to a specific rule",
+                    },
+                },
+                "required": ["action"],
+            },
+        ),
+        types.Tool(
+            name="check_capability_tier",
+            description=(
+                "Check the autonomy capability tier for an action. "
+                "Returns RESTRICTED, SUPERVISED, or FULL based on the action content."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "action_text": {
+                        "type": "string",
+                        "description": "The action text to check the capability tier for",
+                    },
+                    "domain": {
+                        "type": "string",
+                        "description": "Optional domain context for tier determination",
+                    },
+                },
+                "required": ["action_text"],
+            },
+        ),
+        types.Tool(
+            name="verify_audit_chain",
+            description=(
+                "Verify the integrity of the audit chain. "
+                "Checks hash chain consistency across recent audit entries."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of recent entries to check",
+                        "default": 100,
+                    },
+                },
+            },
+        ),
+        *(
+            [
+                types.Tool(
+                    name="compile_workflow",
+                    description=(
+                        "Compile a governance workflow GoalSpec into an executable TaskDAG. "
+                        "Validates step domains against known governance domains and returns "
+                        "node list with IDs, titles, domains, and dependency edges."
+                    ),
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "workflow": {
+                                "type": "object",
+                                "description": (
+                                    "GoalSpec dict with keys: goal (str), "
+                                    "domains (list[str]), steps (list[dict])"
+                                ),
                             },
                         },
+                    },
+                ),
+                types.Tool(
+                    name="execute_workflow",
+                    description=(
+                        "Compile and execute a governance workflow. Each step is dispatched "
+                        "to the matching acgs-lite governance function. Returns per-step results "
+                        "with constitutional proof."
                     ),
-                    types.Tool(
-                        name="execute_workflow",
-                        description=(
-                            "Compile and execute a governance workflow. Each step is dispatched "
-                            "to the matching acgs-lite governance function. Returns per-step results "
-                            "with constitutional proof."
-                        ),
-                        inputSchema={
-                            "type": "object",
-                            "properties": {
-                                "workflow": {
-                                    "type": "object",
-                                    "description": "GoalSpec dict (same as compile_workflow)",
-                                },
-                                "inputs": {
-                                    "type": "object",
-                                    "description": (
-                                        "Shared inputs for steps: action (str), text (str), "
-                                        "limit (int)"
-                                    ),
-                                    "default": {},
-                                },
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "workflow": {
+                                "type": "object",
+                                "description": "GoalSpec dict (same as compile_workflow)",
+                            },
+                            "inputs": {
+                                "type": "object",
+                                "description": (
+                                    "Shared inputs for steps: action (str), text (str), limit (int)"
+                                ),
+                                "default": {},
                             },
                         },
+                    },
+                ),
+                types.Tool(
+                    name="list_workflow_templates",
+                    description=(
+                        "List pre-built governance workflow templates. "
+                        "Returns template names and YAML file paths for common patterns: "
+                        "action_validation, compliance_assessment, agent_onboarding."
                     ),
-                    types.Tool(
-                        name="list_workflow_templates",
-                        description=(
-                            "List pre-built governance workflow templates. "
-                            "Returns template names and YAML file paths for common patterns: "
-                            "action_validation, compliance_assessment, agent_onboarding."
-                        ),
-                        inputSchema={"type": "object", "properties": {}},
-                    ),
-                ]
-                if WORKFLOW_AVAILABLE
-                else []
-            ),
-        ]
+                    input_schema={"type": "object", "properties": {}},
+                ),
+            ]
+            if WORKFLOW_AVAILABLE
+            else []
+        ),
+    ]
 
-    @server.call_tool()  # type: ignore[untyped-decorator]
-    async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
-        """Dispatch a governance tool call by name."""
+    tools_by_name = {tool.name: tool for tool in tools}
+    validators = {
+        name: validator_for(tool.input_schema)(tool.input_schema)
+        for name, tool in tools_by_name.items()
+    }
+
+    async def list_tools(
+        ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+    ) -> types.ListToolsResult:
+        """Return the schemas used to validate every governance call."""
+        return types.ListToolsResult(tools=tools)
+
+    async def call_tool(
+        ctx: ServerRequestContext, params: types.CallToolRequestParams
+    ) -> types.CallToolResult:
+        """Validate the advertised schema before dispatching a governance call."""
+        name = params.name
+        arguments = params.arguments or {}
+        validator = validators.get(name)
+        if validator is not None:
+            try:
+                validator.validate(arguments)
+            except ValidationError as exc:
+                return types.CallToolResult(
+                    content=[
+                        types.TextContent(
+                            type="text", text=f"Input validation error: {exc.message}"
+                        )
+                    ],
+                    is_error=True,
+                )
         if name == "validate_action":
             action = arguments.get("action", "")
             agent_id = arguments.get("agent_id", "mcp-client")
@@ -440,12 +465,14 @@ def create_mcp_server(
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.warning("validate_action_precedent_record_failed", error=str(exc))
 
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps(response, indent=2),
-                )
-            ]
+            return types.CallToolResult(
+                content=[
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps(response, indent=2),
+                    )
+                ]
+            )
 
         elif name == "get_constitution":
             data = {
@@ -465,12 +492,14 @@ def create_mcp_server(
                     for r in constitution.rules
                 ],
             }
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps(data, indent=2),
-                )
-            ]
+            return types.CallToolResult(
+                content=[
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps(data, indent=2),
+                    )
+                ]
+            )
 
         elif name == "get_audit_log":
             limit = arguments.get("limit", 20)
@@ -480,12 +509,14 @@ def create_mcp_server(
                 "chain_valid": audit_log.verify_chain(),
                 "entries": entries,
             }
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps(data, indent=2, default=str),
-                )
-            ]
+            return types.CallToolResult(
+                content=[
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps(data, indent=2, default=str),
+                    )
+                ]
+            )
 
         elif name == "check_compliance":
             text = arguments.get("text", "")
@@ -498,12 +529,14 @@ def create_mcp_server(
                     {"rule_id": v.rule_id, "severity": v.severity.value} for v in result.violations
                 ],
             }
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps(data, indent=2),
-                )
-            ]
+            return types.CallToolResult(
+                content=[
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps(data, indent=2),
+                    )
+                ]
+            )
 
         elif name == "governance_stats":
             stats = {
@@ -511,12 +544,14 @@ def create_mcp_server(
                 "audit_entries": len(audit_log),
                 "audit_chain_valid": audit_log.verify_chain(),
             }
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps(stats, indent=2),
-                )
-            ]
+            return types.CallToolResult(
+                content=[
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps(stats, indent=2),
+                    )
+                ]
+            )
 
         elif name == "explain_violation":
             action = arguments.get("action", "")
@@ -530,12 +565,14 @@ def create_mcp_server(
                     error_type=type(exc).__name__,
                     constitutional_hash=CONSTITUTIONAL_HASH,
                 )
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=json.dumps({"error": type(exc).__name__, "action": action}),
-                    )
-                ]
+                return types.CallToolResult(
+                    content=[
+                        types.TextContent(
+                            type="text",
+                            text=json.dumps({"error": type(exc).__name__, "action": action}),
+                        )
+                    ]
+                )
 
             violations = result.violations
             if rule_id_filter:
@@ -569,12 +606,14 @@ def create_mcp_server(
                 violations_count=len(violations),
                 constitutional_hash=CONSTITUTIONAL_HASH,
             )
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps(explanation, indent=2),
-                )
-            ]
+            return types.CallToolResult(
+                content=[
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps(explanation, indent=2),
+                    )
+                ]
+            )
 
         elif name == "check_capability_tier":
             action_text = arguments.get("action_text", "")
@@ -603,24 +642,30 @@ def create_mcp_server(
                     domain=domain,
                     constitutional_hash=CONSTITUTIONAL_HASH,
                 )
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=json.dumps(tier_data, indent=2),
-                    )
-                ]
+                return types.CallToolResult(
+                    content=[
+                        types.TextContent(
+                            type="text",
+                            text=json.dumps(tier_data, indent=2),
+                        )
+                    ]
+                )
             except Exception as exc:
                 logger.warning(
                     "check_capability_tier_error",
                     error_type=type(exc).__name__,
                     constitutional_hash=CONSTITUTIONAL_HASH,
                 )
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=json.dumps({"error": type(exc).__name__, "action_text": action_text}),
-                    )
-                ]
+                return types.CallToolResult(
+                    content=[
+                        types.TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": type(exc).__name__, "action_text": action_text}
+                            ),
+                        )
+                    ]
+                )
 
         elif name == "verify_audit_chain":
             limit = arguments.get("limit", 100)
@@ -643,34 +688,40 @@ def create_mcp_server(
                     entries_checked=len(recent),
                     constitutional_hash=CONSTITUTIONAL_HASH,
                 )
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=json.dumps(result_data, indent=2),
-                    )
-                ]
+                return types.CallToolResult(
+                    content=[
+                        types.TextContent(
+                            type="text",
+                            text=json.dumps(result_data, indent=2),
+                        )
+                    ]
+                )
             except Exception as exc:
                 logger.warning(
                     "verify_audit_chain_error",
                     error_type=type(exc).__name__,
                     constitutional_hash=CONSTITUTIONAL_HASH,
                 )
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=json.dumps({"error": type(exc).__name__}),
-                    )
-                ]
+                return types.CallToolResult(
+                    content=[
+                        types.TextContent(
+                            type="text",
+                            text=json.dumps({"error": type(exc).__name__}),
+                        )
+                    ]
+                )
 
         elif name == "compile_workflow" and WORKFLOW_AVAILABLE:
             workflow_spec = arguments.get("workflow") if arguments else None
             if not workflow_spec:
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=json.dumps({"error": "Missing required argument: workflow"}),
-                    )
-                ]
+                return types.CallToolResult(
+                    content=[
+                        types.TextContent(
+                            type="text",
+                            text=json.dumps({"error": "Missing required argument: workflow"}),
+                        )
+                    ]
+                )
             try:
                 compiler = GovernanceWorkflowCompiler(CONSTITUTIONAL_HASH)
                 dag = compiler.compile_from_dict(workflow_spec)
@@ -696,29 +747,35 @@ def create_mcp_server(
                     node_count=len(nodes),
                     constitutional_hash=CONSTITUTIONAL_HASH,
                 )
-                return [types.TextContent(type="text", text=json.dumps(data, indent=2))]
+                return types.CallToolResult(
+                    content=[types.TextContent(type="text", text=json.dumps(data, indent=2))]
+                )
             except Exception as exc:
                 logger.warning(
                     "compile_workflow_error",
                     error_type=type(exc).__name__,
                     constitutional_hash=CONSTITUTIONAL_HASH,
                 )
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=json.dumps({"error": type(exc).__name__, "detail": str(exc)}),
-                    )
-                ]
+                return types.CallToolResult(
+                    content=[
+                        types.TextContent(
+                            type="text",
+                            text=json.dumps({"error": type(exc).__name__, "detail": str(exc)}),
+                        )
+                    ]
+                )
 
         elif name == "execute_workflow" and WORKFLOW_AVAILABLE:
             workflow_spec = arguments.get("workflow") if arguments else None
             if not workflow_spec:
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=json.dumps({"error": "Missing required argument: workflow"}),
-                    )
-                ]
+                return types.CallToolResult(
+                    content=[
+                        types.TextContent(
+                            type="text",
+                            text=json.dumps({"error": "Missing required argument: workflow"}),
+                        )
+                    ]
+                )
             inputs: dict[str, Any] = (arguments.get("inputs") or {}) if arguments else {}
             try:
                 compiler = GovernanceWorkflowCompiler(CONSTITUTIONAL_HASH)
@@ -741,21 +798,25 @@ def create_mcp_server(
                     steps_completed=len(step_results),
                     constitutional_hash=CONSTITUTIONAL_HASH,
                 )
-                return [
-                    types.TextContent(type="text", text=json.dumps(data, indent=2, default=str))
-                ]
+                return types.CallToolResult(
+                    content=[
+                        types.TextContent(type="text", text=json.dumps(data, indent=2, default=str))
+                    ]
+                )
             except Exception as exc:
                 logger.warning(
                     "execute_workflow_error",
                     error_type=type(exc).__name__,
                     constitutional_hash=CONSTITUTIONAL_HASH,
                 )
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=json.dumps({"error": type(exc).__name__, "detail": str(exc)}),
-                    )
-                ]
+                return types.CallToolResult(
+                    content=[
+                        types.TextContent(
+                            type="text",
+                            text=json.dumps({"error": type(exc).__name__, "detail": str(exc)}),
+                        )
+                    ]
+                )
 
         elif name == "list_workflow_templates" and WORKFLOW_AVAILABLE:
             templates = list_workflow_templates()
@@ -764,17 +825,21 @@ def create_mcp_server(
                 "count": len(templates),
                 "constitutional_hash": CONSTITUTIONAL_HASH,
             }
-            return [types.TextContent(type="text", text=json.dumps(data, indent=2))]
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=json.dumps(data, indent=2))]
+            )
 
         else:
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps({"error": f"Unknown tool: {name}"}),
-                )
-            ]
+            return types.CallToolResult(
+                content=[
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps({"error": f"Unknown tool: {name}"}),
+                    )
+                ]
+            )
 
-    return server
+    return Server(server_name, on_list_tools=list_tools, on_call_tool=call_tool)
 
 
 def run_mcp_server(

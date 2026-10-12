@@ -391,10 +391,12 @@ class TestGovernanceMetricsMiddleware:
     """Tests for the ASGI middleware."""
 
     @pytest.mark.asyncio()
+    @pytest.mark.parametrize("otel_metrics", [None, MagicMock()], ids=["sdk-absent", "sdk-present"])
     async def test_middleware_adds_span_for_http(
         self,
         engine: GovernanceEngine,
         audit_log: AuditLog,
+        otel_metrics: object,
     ) -> None:
         mock_tracer = MagicMock()
         mock_span = MagicMock()
@@ -405,13 +407,13 @@ class TestGovernanceMetricsMiddleware:
         mock_tracer_provider = MagicMock()
         mock_tracer_provider.get_tracer.return_value = mock_tracer
 
-        with patch("acgs_lite.integrations.otel.OTEL_AVAILABLE", True):
-            from acgs_lite.integrations.otel import (
-                GovernanceMetrics,
-                GovernanceMetricsMiddleware,
-            )
+        with (
+            patch("acgs_lite.integrations.otel.OTEL_AVAILABLE", True),
+            patch("acgs_lite.integrations.otel.otel_metrics", otel_metrics),
+        ):
+            from acgs_lite.integrations.otel import GovernanceMetricsMiddleware
 
-            gm = GovernanceMetrics(engine, audit_log)
+            gm, *_ = _make_metrics(engine, audit_log)
             inner_app = AsyncMock()
             middleware = GovernanceMetricsMiddleware(
                 inner_app,
@@ -475,10 +477,12 @@ class TestGovernanceMetricsMiddleware:
         assert isinstance(middleware._tracer, _NoopTracer)
 
     @pytest.mark.asyncio()
+    @pytest.mark.parametrize("otel_metrics", [None, MagicMock()], ids=["sdk-absent", "sdk-present"])
     async def test_middleware_attaches_compliance_score(
         self,
         engine: GovernanceEngine,
         audit_log: AuditLog,
+        otel_metrics: object,
     ) -> None:
         mock_tracer = MagicMock()
         mock_span = MagicMock()
@@ -489,13 +493,13 @@ class TestGovernanceMetricsMiddleware:
         mock_tracer_provider = MagicMock()
         mock_tracer_provider.get_tracer.return_value = mock_tracer
 
-        with patch("acgs_lite.integrations.otel.OTEL_AVAILABLE", True):
-            from acgs_lite.integrations.otel import (
-                GovernanceMetrics,
-                GovernanceMetricsMiddleware,
-            )
+        with (
+            patch("acgs_lite.integrations.otel.OTEL_AVAILABLE", True),
+            patch("acgs_lite.integrations.otel.otel_metrics", otel_metrics),
+        ):
+            from acgs_lite.integrations.otel import GovernanceMetricsMiddleware
 
-            gm = GovernanceMetrics(engine, audit_log)
+            gm, *_ = _make_metrics(engine, audit_log)
             inner_app = AsyncMock()
             middleware = GovernanceMetricsMiddleware(
                 inner_app,
