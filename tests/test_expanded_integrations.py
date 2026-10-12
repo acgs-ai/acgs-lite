@@ -349,14 +349,13 @@ class TestMCPServer:
         assert server is not None
 
     async def test_list_tools(self):
-        from mcp import types as mcp_types
+        from mcp import Client
 
         from acgs_lite.integrations.mcp_server import create_mcp_server
 
         server = create_mcp_server()
-        handler = server.request_handlers[mcp_types.ListToolsRequest]
-        result = await handler(mcp_types.ListToolsRequest(method="tools/list"))
-        tools = result.root.tools
+        async with Client(server) as client:
+            tools = (await client.list_tools()).tools
         assert len(tools) >= 5  # core 5 + optional tools (unit2: +3, workflow: +3)
         tool_names = {t.name for t in tools}
         assert "validate_action" in tool_names
@@ -366,16 +365,12 @@ class TestMCPServer:
         assert "governance_stats" in tool_names
 
     async def _call_tool(self, server: Any, name: str, args: dict[str, Any]) -> Any:
-        from mcp import types as mcp_types
+        from mcp import Client
 
-        handler = server.request_handlers[mcp_types.CallToolRequest]
-        result = await handler(
-            mcp_types.CallToolRequest(
-                method="tools/call",
-                params=mcp_types.CallToolRequestParams(name=name, arguments=args),
-            )
-        )
-        return json.loads(result.root.content[0].text)
+        async with Client(server) as client:
+            result = await client.call_tool(name, args)
+        assert not result.is_error
+        return json.loads(result.content[0].text)
 
     async def test_validate_action_tool(self):
         from acgs_lite.integrations.mcp_server import create_mcp_server

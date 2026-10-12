@@ -107,70 +107,27 @@ class _StubEmbeddingProvider:
 
 
 async def _call_tool(server: Any, name: str, arguments: dict[str, Any] | None = None) -> Any:
-    """Helper: invoke the call_tool handler registered on the MCP server.
-
-    Returns the parsed JSON from the first TextContent item.
-    """
-    # Access the registered handler via the server's internal routing
-    # The MCP Server stores handlers in request_handlers dict
-    from mcp import types
-
-    handlers = server.request_handlers
-    # Find the CallToolRequest handler
-    call_handler = handlers.get(types.CallToolRequest)
-    if call_handler is None:
-        raise RuntimeError("call_tool handler not registered")
-
-    request = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(
-            name=name,
-            arguments=arguments or {},
-        ),
-    )
-    server_result = await call_handler(request)
-    # MCP SDK wraps in ServerResult; unwrap via .root
-    call_result = server_result.root if hasattr(server_result, "root") else server_result
-    assert len(call_result.content) >= 1
-    return json.loads(call_result.content[0].text)
+    """Call through the public client and parse the first JSON text result."""
+    result = await _call_tool_raw(server, name, arguments)
+    assert not result.is_error
+    assert result.content
+    return json.loads(result.content[0].text)
 
 
 async def _call_tool_raw(server: Any, name: str, arguments: dict[str, Any] | None = None) -> Any:
-    """Helper: invoke call_tool and return the raw CallToolResult (no JSON parsing)."""
-    from mcp import types
+    """Call through the public client and retain protocol errors."""
+    from mcp import Client
 
-    handlers = server.request_handlers
-    call_handler = handlers.get(types.CallToolRequest)
-    if call_handler is None:
-        raise RuntimeError("call_tool handler not registered")
-
-    request = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(
-            name=name,
-            arguments=arguments or {},
-        ),
-    )
-    server_result = await call_handler(request)
-    return server_result.root if hasattr(server_result, "root") else server_result
+    async with Client(server) as client:
+        return await client.call_tool(name, arguments)
 
 
 async def _list_tools(server: Any) -> list[Any]:
-    """Helper: invoke the list_tools handler on the MCP server."""
-    from mcp import types
+    """Discover the registered tools through the public client."""
+    from mcp import Client
 
-    handlers = server.request_handlers
-    list_handler = handlers.get(types.ListToolsRequest)
-    if list_handler is None:
-        raise RuntimeError("list_tools handler not registered")
-
-    request = types.ListToolsRequest(
-        method="tools/list",
-        params=None,
-    )
-    server_result = await list_handler(request)
-    list_result = server_result.root if hasattr(server_result, "root") else server_result
-    return list_result.tools
+    async with Client(server) as client:
+        return (await client.list_tools()).tools
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +167,8 @@ class TestListTools:
         for tool in tools:
             assert tool.name
             assert tool.description
-            assert tool.inputSchema is not None
-            assert tool.inputSchema["type"] == "object"
+            assert tool.input_schema is not None
+            assert tool.input_schema["type"] == "object"
 
     @pytest.mark.asyncio
     async def test_validate_action_schema_requires_action(
@@ -221,7 +178,7 @@ class TestListTools:
         tools = await _list_tools(server)
 
         validate_tool = next(t for t in tools if t.name == "validate_action")
-        assert "action" in validate_tool.inputSchema.get("required", [])
+        assert "action" in validate_tool.input_schema.get("required", [])
 
     @pytest.mark.asyncio
     async def test_check_compliance_schema_requires_text(
@@ -231,7 +188,7 @@ class TestListTools:
         tools = await _list_tools(server)
 
         compliance_tool = next(t for t in tools if t.name == "check_compliance")
-        assert "text" in compliance_tool.inputSchema.get("required", [])
+        assert "text" in compliance_tool.input_schema.get("required", [])
 
 
 # ---------------------------------------------------------------------------
@@ -509,12 +466,13 @@ class TestValidateAction:
     async def test_missing_action_returns_validation_error(
         self, default_constitution: Constitution
     ) -> None:
-        """MCP SDK schema validation rejects calls missing required 'action' field."""
+        """Advertised schema validation rejects calls missing required 'action' field."""
         server = create_mcp_server(default_constitution)
         raw = await _call_tool_raw(server, "validate_action", {})
 
-        # The SDK returns a validation error (non-JSON text) when required params are missing
+        assert raw.is_error
         assert raw.content[0].text.startswith("Input validation error")
+        assert (await _call_tool(server, "get_audit_log"))["total_entries"] == 0
 
     @pytest.mark.asyncio
     async def test_strict_mode_does_not_raise_via_mcp(
@@ -780,11 +738,13 @@ class TestCheckCompliance:
     async def test_missing_text_returns_validation_error(
         self, default_constitution: Constitution
     ) -> None:
-        """MCP SDK schema validation rejects calls missing required 'text' field."""
+        """Advertised schema validation rejects calls missing required 'text' field."""
         server = create_mcp_server(default_constitution)
         raw = await _call_tool_raw(server, "check_compliance", {})
 
+        assert raw.is_error
         assert raw.content[0].text.startswith("Input validation error")
+        assert (await _call_tool(server, "get_audit_log"))["total_entries"] == 0
 
     @pytest.mark.asyncio
     async def test_compliance_check_uses_fixed_agent_id(
@@ -1520,3 +1480,119 @@ class TestExecuteWorkflow:
         names = {t.name for t in tools}
         assert "compile_workflow" in names
         assert "execute_workflow" in names
+
+
+@pytest.mark.asyncio
+async def test_invalid_action_type_does_not_dispatch(default_constitution: Constitution) -> None:
+    server = create_mcp_server(default_constitution)
+    with patch("acgs_lite.integrations.mcp_server.GovernanceEngine.validate") as validate:
+        result = await _call_tool_raw(server, "validate_action", {"action": 42})
+    assert result.is_error
+    assert result.content[0].text.startswith("Input validation error")
+    validate.assert_not_called()
+    assert (await _call_tool(server, "get_audit_log"))["total_entries"] == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_client_jsonrpc_roundtrip(default_constitution: Constitution) -> None:
+    from mcp import Client
+
+    server = create_mcp_server(default_constitution)
+    async with Client(server, mode="legacy") as client:
+        tools = (await client.list_tools()).tools
+        assert "validate_action" in {tool.name for tool in tools}
+        assert all(tool.input_schema["type"] == "object" for tool in tools)
+        valid = await client.call_tool("validate_action", {"action": "hello world"})
+        assert not valid.is_error
+        assert json.loads(valid.content[0].text)["valid"] is True
+        before = await client.call_tool("get_audit_log")
+        invalid = await client.call_tool("validate_action")
+        assert invalid.is_error
+        assert invalid.content[0].text.startswith("Input validation error")
+        after = await client.call_tool("get_audit_log")
+        assert json.loads(after.content[0].text) == json.loads(before.content[0].text)
+
+
+@pytest.mark.asyncio
+async def test_optional_workflow_dispatch_results(default_constitution: Constitution) -> None:
+    """Exercise SDK dispatch/serialization with controlled optional backend results."""
+    from types import SimpleNamespace
+
+    from acgs_lite.integrations import mcp_server
+    from acgs_lite.integrations.workflow import StepResult
+
+    node = SimpleNamespace(
+        node_id="step-1", title="Validate", domain="validation", depends_on=[], priority=1
+    )
+    dag = SimpleNamespace(dag_id="dag-1", goal="Validate safely", nodes={"step-1": node})
+    step = StepResult("step-1", "Validate", "validation", {"valid": True}, "608508a9bd224290")
+    with (
+        patch.object(mcp_server, "WORKFLOW_AVAILABLE", True),
+        patch.object(mcp_server, "GovernanceWorkflowCompiler") as compiler,
+        patch.object(mcp_server, "GovernanceWorkflowExecutor") as executor,
+        patch.object(mcp_server, "list_workflow_templates", return_value={"example": "demo.yaml"}),
+    ):
+        compiler.return_value.compile_from_dict.return_value = dag
+        executor.return_value.execute.return_value = [step]
+        server = create_mcp_server(default_constitution)
+        assert {"compile_workflow", "execute_workflow", "list_workflow_templates"} <= {
+            tool.name for tool in await _list_tools(server)
+        }
+        compiled = await _call_tool(server, "compile_workflow", {"workflow": _SIMPLE_WORKFLOW})
+        assert compiled == {
+            "dag_id": "dag-1",
+            "goal": "Validate safely",
+            "node_count": 1,
+            "nodes": [
+                {
+                    "node_id": "step-1",
+                    "title": "Validate",
+                    "domain": "validation",
+                    "depends_on": [],
+                    "priority": 1,
+                }
+            ],
+            "constitutional_hash": "608508a9bd224290",
+        }
+        executed = await _call_tool(server, "execute_workflow", {"workflow": _SIMPLE_WORKFLOW})
+        assert executed["goal"] == "Validate safely"
+        assert executed["steps_completed"] == 1
+        assert executed["steps"][0]["result"] == {"valid": True}
+        templates = await _call_tool(server, "list_workflow_templates")
+        assert templates["templates"] == {"example": "demo.yaml"}
+        assert templates["count"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["compile_workflow", "execute_workflow"])
+@pytest.mark.parametrize("missing", [False, True])
+async def test_optional_workflow_dispatch_errors(
+    default_constitution: Constitution, tool_name: str, missing: bool
+) -> None:
+    """Preserve workflow error payloads through the public client without the backend."""
+    from acgs_lite.integrations import mcp_server
+
+    with (
+        patch.object(mcp_server, "WORKFLOW_AVAILABLE", True),
+        patch.object(mcp_server, "GovernanceWorkflowCompiler") as compiler,
+    ):
+        compiler.return_value.compile_from_dict.side_effect = ValueError("invalid workflow")
+        server = create_mcp_server(default_constitution)
+        result = await _call_tool(
+            server, tool_name, {} if missing else {"workflow": _SIMPLE_WORKFLOW}
+        )
+        if missing:
+            assert result == {"error": "Missing required argument: workflow"}
+            compiler.assert_not_called()
+        else:
+            assert result == {"error": "ValueError", "detail": "invalid workflow"}
+        assert (await _call_tool(server, "get_audit_log"))["total_entries"] == 0
+
+
+@pytest.mark.asyncio
+async def test_workflow_tools_absent_without_backend(default_constitution: Constitution) -> None:
+    with patch("acgs_lite.integrations.mcp_server.WORKFLOW_AVAILABLE", False):
+        tools = await _list_tools(create_mcp_server(default_constitution))
+    assert not {"compile_workflow", "execute_workflow", "list_workflow_templates"} & {
+        tool.name for tool in tools
+    }
