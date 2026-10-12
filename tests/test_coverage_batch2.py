@@ -911,9 +911,6 @@ class TestPolicySandbox:
         assert report.compatibility_score == 1.0
         assert report.risk_score == 0.0
 
-    @pytest.mark.skip(
-        reason="sandbox.py calls Rule.to_dict() which does not exist on Pydantic models"
-    )
     def test_test_rule_addition(self) -> None:
         from acgs_lite import GovernanceEngine
         from acgs_lite.constitution.sandbox import PolicySandbox
@@ -925,10 +922,12 @@ class TestPolicySandbox:
         ]
         report = sandbox.test_rule_addition(new_rules, ["upload data", "safe action"])
         assert report.total_actions == 2
+        assert report.newly_blocked == 1
+        assert report.unchanged == 1
+        assert report.outcomes[0].production_decision == "allow"
+        assert report.outcomes[0].sandbox_decision == "deny"
+        assert [rule.id for rule in prod.constitution.rules] == ["R1", "R2", "R3"]
 
-    @pytest.mark.skip(
-        reason="sandbox.py calls Rule.to_dict() which does not exist on Pydantic models"
-    )
     def test_test_rule_removal(self) -> None:
         from acgs_lite import GovernanceEngine
         from acgs_lite.constitution.sandbox import PolicySandbox
@@ -937,6 +936,11 @@ class TestPolicySandbox:
         sandbox = PolicySandbox(prod)
         report = sandbox.test_rule_removal(["R1"], ["export pii data", "safe action"])
         assert report.total_actions == 2
+        assert report.newly_allowed == 1
+        assert report.unchanged == 1
+        assert report.outcomes[0].production_decision == "deny"
+        assert report.outcomes[0].sandbox_decision == "allow"
+        assert [rule.id for rule in prod.constitution.rules] == ["R1", "R2", "R3"]
 
     def test_history_and_summary(self) -> None:
         from acgs_lite import GovernanceEngine

@@ -1,0 +1,43 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for asking. Please search existing Discussions first and remove secrets or personal data from examples.
+  - type: input
+    id: version
+    attributes:
+      label: ACGS-Lite version
+      description: Run `python -c "import acgs_lite; print(acgs_lite.__version__)"` and paste the result.
+      placeholder: 3.0.1
+    validations:
+      required: true
+  - type: input
+    id: install-source
+    attributes:
+      label: Installation source
+      description: Include PyPI, editable checkout, Docker, or another source and the relevant extra.
+      placeholder: pip install acgs-lite[mcp]
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: What are you trying to do?
+      description: Describe the expected behavior and the point where you are blocked.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Paste the smallest redacted code, configuration, and complete error output that demonstrates the issue.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Python version, operating system, and integration/framework versions.
+    validations:
+      required: true

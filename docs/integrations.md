@@ -1,10 +1,9 @@
 # Integrations: Wrapping the Agentic Ecosystem
 
-**Meta Description**: Learn how to integrate ACGS-Lite with major AI frameworks like OpenAI, Anthropic, LangChain, AutoGen, and CrewAI using 2026-ready governance patterns.
-
----
-
-ACGS-Lite is designed to be framework-agnostic. It provides native adapters for the most popular AI ecosystems, ensuring you can add a governance layer to any agent in minutes.
+Use an adapter at the layer where your application needs a check. The catalog
+below describes modules in this source checkout, not a production certification.
+See [Installation and distributions](installation.md) for published-package versus
+source differences and the complete optional-dependency catalog.
 
 > **Not sure which adapter to pick?** Start with the
 > [Integration Decision Guide](integration-decision-guide.md) — a short FAQ on
@@ -12,34 +11,49 @@ ACGS-Lite is designed to be framework-agnostic. It provides native adapters for 
 > when you need the async API, and when to run the MCP server vs. embed the
 > engine in-process.
 
-| Platform | Install Extra | Governance Pattern | Status |
-|---|---|---|---|
-| **Anthropic** | `acgs-lite[anthropic]` | `GovernedAnthropic` | Production |
-| **OpenAI** | `acgs-lite[openai]` | `GovernedOpenAI` | Production |
-| **MCP Server** | `acgs-lite[mcp]` | `create_mcp_server` | 2026 Standard |
-| **Agno** | `acgs-lite[agno]` | `AgnoACGSGovernor` | Maintained |
-| **LangChain** | `acgs-lite[langchain]` | `GovernanceRunnable` | Maintained |
-| **LiteLLM** | `acgs-lite[litellm]` | `GovernedLiteLLM` | Maintained |
-| **Google GenAI** | `acgs-lite[google]` | `GovernedGenAI` | Production |
-| **AutoGen** | `acgs-lite[autogen]` | `GovernedModelClient` | Experimental |
-| **CrewAI** | `acgs-lite[crewai]` | `GovernedCrew` | Experimental |
-| **PydanticAI** | `acgs-lite[all]` | `GovernedAgent` | **New (2026)** |
-| **AMD GAIA** | `acgs-lite` | `build_gaia_components` / `AcgsLitePolicyEngine` | Local — duck-typed `PolicyEngine` for AMD GAIA |
+| Platform | Install dependency selection | Adapter / entry point |
+|---|---|---|
+| Anthropic | `acgs-lite[anthropic]` | `GovernedAnthropic` |
+| OpenAI | `acgs-lite[openai]` | `GovernedOpenAI` |
+| MCP server | `acgs-lite[mcp]` | `create_mcp_server` |
+| Agno | `acgs-lite[agno]` | `AgnoACGSGovernor` |
+| LangChain | `acgs-lite[langchain]` | `GovernanceRunnable` |
+| LiteLLM | `acgs-lite[litellm]` | `GovernedLiteLLM` |
+| Google GenAI | `acgs-lite[google]` | `GovernedGenAI` |
+| AutoGen | `acgs-lite[autogen]` | `GovernedModelClient` (Core / AgentChat APIs) |
+| CrewAI | `acgs-lite[crewai]` | `GovernedCrew` |
+| PydanticAI | Install `acgs-lite` and `pydantic-ai` separately | `GovernedPydanticAgent` / `GovernedModel` |
+| AMD GAIA | `acgs-lite`; install the host framework separately | `build_gaia_components` / `AcgsLitePolicyEngine` |
+
+`[all]` does not install PydanticAI. Adapter presence does not establish coverage
+of every SDK method, tool action, or streaming output path. The snippets below
+show integration wiring; they assume configured framework clients, a constitution,
+and any provider credentials. Pin the package version for published examples or
+use an editable source install for source-only behavior.
 
 ---
 
-## 🛡️ The Governance Pattern
+## Governance coverage
 
-All integrations follow the **Intercept-Validate-Execute-Audit** pattern:
-1.  **Intercept**: The wrapper catches the call before it reaches the model.
-2.  **Validate Input**: The `GovernanceEngine` checks the prompt for violations (e.g., prompt injection).
-3.  **Execute**: If valid, the call is passed to the underlying model.
-4.  **Validate Output**: The engine checks the response (e.g., for PII leakage).
-5.  **Audit**: Both input and output are logged to the tamper-evident audit trail.
+The common shape is input interception, a policy check, the wrapped call, and
+an audit record. Exact coverage varies by adapter:
+
+- OpenAI validates the last text user message before the call. Completed response
+  content is checked with `strict=False`; violations are logged, not blocked.
+- LangChain validates the wrapped runnable's input and checks its completed output
+  non-blockingly. Its `stream()` path validates input and forwards chunks.
+- AutoGen `create()` validates extracted input and checks completed output
+  non-blockingly; `create_stream()` checks input before forwarding chunks.
+- CrewAI `GovernedCrew.kickoff()` checks task descriptions before kickoff and
+  the final crew result non-blockingly. It does not by itself check every tool call.
+
+For enforcement of an external side effect, connect the check to that callable's
+actual execution boundary. See [Runtime Legitimacy](api/legitimacy.md) and the
+[integration decision guide](integration-decision-guide.md).
 
 ---
 
-## 🐙 Anthropic (Claude 3.5+)
+## Anthropic
 
 ```python
 from acgs_lite.integrations.anthropic import GovernedAnthropic
@@ -56,7 +70,7 @@ response = client.messages.create(
 )
 ```
 
-## 🌌 OpenAI (GPT-4o / o1)
+## OpenAI
 
 ```python
 from acgs_lite.integrations.openai import GovernedOpenAI
@@ -69,33 +83,35 @@ response = client.chat.completions.create(
 )
 ```
 
-## 🦜 LangChain (LCEL)
+## LangChain (LCEL)
 
-The `GovernanceRunnable` fits perfectly into LangChain Expression Language (LCEL) chains.
+Wrap an existing LangChain runnable or assembled chain. The `[langchain]` extra
+installs `langchain-core`; provider-specific packages are installed separately.
 
 ```python
 from acgs_lite.integrations.langchain import GovernanceRunnable
 
-governed = GovernanceRunnable(constitution=constitution)
-chain = governed | my_llm | output_parser
+chain = my_llm | output_parser
+governed = GovernanceRunnable(chain, constitution=constitution)
 
-# The entire chain is now constitutionally bounded
-result = chain.invoke("Task instructions...")
+# Checks chain input and records non-blocking completed-output violations.
+result = governed.invoke("Task instructions...")
 ```
 
-## 🤖 AutoGen
+## AutoGen
 
 For multi-agent systems, wrap the model client to screen inter-agent chatter for policy violations.
 
 ```python
 from acgs_lite.integrations.autogen import GovernedModelClient
-from autogen import ConversableAgent
+from autogen_agentchat.agents import AssistantAgent
 
+# base_client is your configured AutoGen Core model client.
 governed_client = GovernedModelClient(base_client, constitution=constitution)
-agent = ConversableAgent("SafeAgent", llm_config={"model_client_cls": governed_client})
+agent = AssistantAgent("safe_agent", model_client=governed_client)
 ```
 
-## 🏰 CrewAI
+## CrewAI
 
 Govern the entire "Crew" to check the collective output of multiple agents against your constitution's rules.
 
@@ -105,11 +121,11 @@ from acgs_lite.integrations.crewai import GovernedCrew
 crew = Crew(agents=[a1, a2], tasks=[t1])
 governed_crew = GovernedCrew(crew, constitution=constitution)
 
-# Kickoff triggers governance on every task result
+# Checks task descriptions, then records non-blocking final-output violations
 result = governed_crew.kickoff()
 ```
 
-## 🏗️ MCP (Model Context Protocol)
+## MCP (Model Context Protocol)
 
 The MCP integration allows you to expose ACGS-Lite as a tool-providing server for clients like Claude Desktop or Cursor.
 
@@ -120,7 +136,7 @@ from acgs_lite.integrations.mcp_server import create_mcp_server, run_mcp_server
 run_mcp_server(constitution=constitution)
 ```
 
-## 🧠 Agno (Agent Runtime)
+## Agno (Agent Runtime)
 
 Agno provides an agent runtime with pre-hooks (input) and post-hooks (output) and a FastAPI
 server (AgentOS). ACGS-Lite plugs in as a guardrail + output check.
@@ -145,7 +161,7 @@ agent = Agent(
 
 ---
 
-## 🛠️ Custom Integrations
+## Custom integrations
 
 If you are using a custom framework, you can use the `@fail_closed` decorator and the `GovernedCallable` wrapper to add governance to any function.
 

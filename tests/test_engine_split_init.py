@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import gc
-import sys
 import time
 from unittest.mock import patch
 
@@ -68,23 +67,15 @@ class TestWarmupFlag:
 
 
 class TestFreezeGcFlag:
-    @pytest.mark.xfail(
-        sys.version_info[:2] == (3, 12),
-        reason=(
-            "Python 3.12 gc.collect() (called inside GovernanceEngine.__init__) "
-            "re-freezes objects that were previously unfrozen by gc.unfreeze(); "
-            "this is CPython 3.12-specific GC behavior, not a freeze_gc regression."
-        ),
-        strict=False,
-        run=True,
-    )
     def test_freeze_gc_false_does_not_freeze(self) -> None:
         const = _tiny_constitution()
-        gc.unfreeze()
-        before = gc.get_freeze_count()
-        GovernanceEngine(const, warmup=False, freeze_gc=False)
-        after = gc.get_freeze_count()
-        assert after == before
+        # Test the constructor's flag contract, independently of interpreter
+        # internals changing the permanent generation during gc.collect().
+        with patch("gc.freeze", wraps=gc.freeze) as freeze:
+            GovernanceEngine(const, warmup=False, freeze_gc=False)
+            freeze.assert_not_called()
+            GovernanceEngine(const, warmup=False, freeze_gc=True)
+            freeze.assert_called_once_with()
         gc.unfreeze()
 
     def test_freeze_gc_true_freezes_objects(self) -> None:

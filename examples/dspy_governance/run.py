@@ -11,8 +11,8 @@ example stubs the predictor so it still exercises the exact same governance
 code path (``GovernedDSPyModule.forward`` -> ``engine.validate`` -> audit log)
 and still shows a real block plus a real audit entry.
 
-Install the optional extra for the full DSPy experience:
-    pip install acgs-lite[dspy]
+Install the optional dependency for the full DSPy experience:
+    pip install acgs-lite dspy
 
 Run:
     python examples/dspy_governance/run.py
@@ -62,7 +62,7 @@ def _build_governed_module(constitution: Constitution) -> GovernedDSPyModule:
     when ``dspy`` is not installed, so the demo always runs end to end.
     """
     if governed_dspy.DSPY_AVAILABLE:
-        import dspy  # local import: only when the optional extra is present
+        import dspy  # local import: only when the optional dependency is present
 
         # Configure an offline dummy LM so forward() never hits the network.
         # Older/newer dspy LM wiring differs; the demo only needs forward() to
@@ -84,7 +84,7 @@ def _build_governed_module(constitution: Constitution) -> GovernedDSPyModule:
     # Offline path: enable the adapter against a stub predictor. This still runs
     # the genuine governance code (validate-before-execute + audit recording).
     print("DSPy not installed — running offline with a stubbed predictor.")
-    print("Install the full integration with: pip install acgs-lite[dspy]")
+    print("Install the full integration with: pip install dspy")
     governed_dspy.DSPY_AVAILABLE = True
     return GovernedDSPyModule(_StubQAModule(), constitution=constitution, agent_id="dspy-demo")
 
@@ -148,7 +148,7 @@ def main() -> None:
 
     print(
         "\nDone. Unsafe input was denied before execution and the decision "
-        "is permanently in the audit chain."
+        "is recorded in the in-memory audit chain."
     )
 
 

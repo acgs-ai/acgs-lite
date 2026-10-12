@@ -33,10 +33,10 @@ LLM reasoning → constitutional check → decision receipt → governed executi
 - **Not certified. Not regulator-approved.** Production properties depend on
   *your* constitution, storage, authentication, and operational controls.
 - **`pip install` does not ship `examples/`.** Do not run a repo path after
-  install. Use the 5-line snippet below, or the
+  install. Use the minimal snippet below, or the
   [5-minute membrane page](docs/guides/five-minute-membrane.md).
 
-### 5-line quickstart
+### Minimal quickstart
 
 Works after `pip install acgs-lite==3.0.1`. Default engine is fail-closed: the
 last line **raises**.
@@ -49,8 +49,8 @@ engine = GovernanceEngine(Constitution.from_yaml_str(
 print(engine.validate("send invoice email", agent_id="demo").valid)  # True
 try:
     engine.validate("wire transfer $1000", agent_id="demo")
-except ConstitutionalViolationError:
-    pass
+except ConstitutionalViolationError as exc:
+    print(type(exc).__name__ + ":", exc)
 else:
     raise AssertionError("unsafe action was not blocked")
 ```
@@ -223,7 +223,7 @@ supported-version, scope, and disclosure-window policy is in
 
 **After `pip install` (no clone):**
 
-- **5-line fail-closed check** — the snippet above
+- **Minimal fail-closed check** — the snippet above
 - **5-minute membrane** — [docs/guides/five-minute-membrane.md](docs/guides/five-minute-membrane.md)
   (ALLOW / TRANSFORM / DENY / missing-receipt refusal + audit chain)
 
@@ -231,7 +231,7 @@ supported-version, scope, and disclosure-window policy is in
 
 - **Pip-only script in-tree** — `python examples/membrane_5min.py`
 - **Richer membrane walkthrough** — [`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py)
-- **Agent readiness gate** — `python3 scripts/agent_ready.py --run-tests`
+- **Contributor validation** — `make verify` (see [contributor setup](CONTRIBUTING.md))
 - **Self-verifying install** — [`examples/agent_quickstart/`](./examples/agent_quickstart/)
 - **Audit trail demo** — [`examples/audit_trail/`](./examples/audit_trail/)
 - **Shared infrastructure path** — [`examples/mcp_agent_client.py`](./examples/mcp_agent_client.py)
@@ -344,7 +344,7 @@ STEPS:
 1. Install the package:
    pip install acgs-lite==3.0.1
 
-2. Pip-only proof (no clone). Paste and run the 5-line README snippet.
+2. Pip-only proof (no clone). Paste and run the minimal README snippet.
    The last line must raise ConstitutionalViolationError for "wire transfer $1000".
 
 3. If you cloned this repo, also run:
@@ -887,7 +887,7 @@ acgs resume --agent-id agent-01
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](https://github.com/acgs-ai/acgs-lite/blob/main/CONTRIBUTING.md) for guidelines.
+We welcome contributions! See [CONTRIBUTING.md](https://github.com/acgs-ai/acgs-lite/blob/main/CONTRIBUTING.md) for guidelines, the [community guide](docs/community.md) for support and participation routes, and the [installation guide](docs/installation.md) for package, container, and documentation-site distribution paths.
 
 ```bash
 git clone https://github.com/acgs-ai/acgs-lite.git

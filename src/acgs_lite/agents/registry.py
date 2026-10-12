@@ -46,7 +46,7 @@ def load_agent_manifest() -> list[AgentCapabilityProfile]:
 
     The bundled manifest is intentionally allowed to be missing or empty: a fresh
     deployment populates the registry via :meth:`AgentRegistry.register` or
-    :meth:`AgentRegistry.from_manifest`, e.g. from the repo's ``agent-index.json``.
+    :meth:`AgentRegistry.from_manifest`, using an application-provided JSON manifest.
     """
     path = _manifest_path()
     if not path.exists():
@@ -147,8 +147,8 @@ class AgentRegistry:
     def from_manifest(cls, path: str | Path) -> AgentRegistry:
         """Build a registry from a JSON manifest at ``path``.
 
-        This is how the repo's ``agent-index.json`` is loaded into the same
-        runtime schema the library uses, keeping the two discovery layers in lockstep.
+        Applications can call ``AgentRegistry.from_manifest("my-agents.json")``
+        to load a JSON array of objects matching the capability profile schema.
         """
         profiles = _load_profiles(Path(path))
         registry = cls(profiles=[])

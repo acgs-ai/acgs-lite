@@ -1,0 +1,43 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share a reproducible ACGS-Lite integration, constitution, tutorial, or governance result. Remove secrets and personal data before posting.
+  - type: input
+    id: version
+    attributes:
+      label: ACGS-Lite version
+      description: Run `python -c "import acgs_lite; print(acgs_lite.__version__)"` and paste the result.
+      placeholder: 3.0.1
+    validations:
+      required: true
+  - type: input
+    id: project
+    attributes:
+      label: Project or demo link
+      description: Link to a public repository, page, or gist when available.
+      placeholder: https://github.com/
+    validations:
+      required: false
+  - type: textarea
+    id: demonstration
+    attributes:
+      label: What did you build?
+      description: Explain the integration or governance workflow and how another reader can reproduce it.
+    validations:
+      required: true
+  - type: textarea
+    id: proof
+    attributes:
+      label: Reproduction and evidence
+      description: Include install commands, a minimal redacted example, expected output, and the observed result.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: limits
+    attributes:
+      label: Known limits
+      description: State what this demonstration does not prove, including deployment, certification, or production claims.
+    validations:
+      required: true

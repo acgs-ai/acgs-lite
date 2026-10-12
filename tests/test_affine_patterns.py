@@ -1,7 +1,6 @@
 """Integration tests for AFFiNE-inspired architecture patterns.
 
-Test IDs: AS-01..05 (AgentScope), GS-01..03 (GovernanceStream), PS-01..03 (PolicyStorage).
-GW-01 lives in src/core/services/api_gateway/tests/unit/test_redis_backend.py.
+Test IDs: GS-01..03 (GovernanceStream), PS-01..03 (PolicyStorage).
 
 Constitutional Hash: 608508a9bd224290
 """
@@ -20,105 +19,6 @@ from acgs_lite.integrations.policy_storage import (
     PolicyNotFoundError,
     PolicyStorage,
 )
-from core.shared.di_container import AgentScope, DIContainer
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-class _DummyService:
-    """Minimal test service — no real behaviour needed."""
-
-    def __init__(self, label: str = "") -> None:
-        self.label = label
-
-
-# ---------------------------------------------------------------------------
-# AS-01  child_scope() returns an AgentScope
-# ---------------------------------------------------------------------------
-
-
-def test_as01_child_scope_returns_agent_scope() -> None:
-    DIContainer.reset()
-    scope = DIContainer.child_scope("agent-as01")
-    assert isinstance(scope, AgentScope)
-    assert scope.scope_id == "agent-as01"
-
-
-# ---------------------------------------------------------------------------
-# AS-02  register + resolve within scope
-# ---------------------------------------------------------------------------
-
-
-def test_as02_scope_register_and_resolve() -> None:
-    DIContainer.reset()
-    scope = DIContainer.child_scope("agent-as02")
-    svc = _DummyService("scoped")
-    scope.register(_DummyService, svc)
-
-    resolved = scope.get(_DummyService)
-    assert resolved is svc
-
-
-# ---------------------------------------------------------------------------
-# AS-03  cleanup removes scoped services
-# ---------------------------------------------------------------------------
-
-
-def test_as03_cleanup_removes_scoped_services() -> None:
-    DIContainer.reset()
-    scope = DIContainer.child_scope("agent-as03")
-    scope.register(_DummyService, _DummyService("temp"))
-    assert scope.get(_DummyService) is not None
-
-    scope.reset()
-
-    with pytest.raises(KeyError):
-        scope.get(_DummyService)
-
-
-# ---------------------------------------------------------------------------
-# AS-04  CRITICAL: scope A cannot resolve scope B's services
-# ---------------------------------------------------------------------------
-
-
-def test_as04_cross_scope_isolation() -> None:
-    DIContainer.reset()
-    scope_a = DIContainer.child_scope("agent-a")
-    scope_b = DIContainer.child_scope("agent-b")
-
-    svc_a = _DummyService("owned-by-a")
-    svc_b = _DummyService("owned-by-b")
-
-    scope_a.register(_DummyService, svc_a)
-    scope_b.register(_DummyService, svc_b)
-
-    # Each scope sees its own service
-    assert scope_a.get(_DummyService) is svc_a
-    assert scope_b.get(_DummyService) is svc_b
-
-    # A's service is NOT the same as B's service
-    assert scope_a.get(_DummyService) is not scope_b.get(_DummyService)
-
-
-# ---------------------------------------------------------------------------
-# AS-05  context manager cleans up on exception (fail-closed)
-# ---------------------------------------------------------------------------
-
-
-def test_as05_context_manager_cleans_up_on_exception() -> None:
-    DIContainer.reset()
-    scope = DIContainer.child_scope("agent-as05")
-    scope.register(_DummyService, _DummyService("will-be-cleaned"))
-
-    with pytest.raises(RuntimeError), scope:
-        raise RuntimeError("simulated session crash")
-
-    # After __exit__, scoped services are gone
-    with pytest.raises(KeyError):
-        scope.get(_DummyService)
-
 
 # ---------------------------------------------------------------------------
 # GS-01  existing EventBus subscribers still receive events after GovernanceStream

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import unquote
@@ -64,13 +65,32 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def _markdown_files(root: Path) -> list[Path]:
-    out = []
-    for path in root.rglob("*.md"):
-        if any(part in _SKIP_DIRS for part in path.relative_to(root).parts):
-            continue
-        out.append(path)
-    return sorted(out)
+def _public_files(root: Path) -> set[Path]:
+    """Use the Git index locally; source exports contain only public files."""
+    if (root / ".git").exists():
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached"],
+            check=True,
+            capture_output=True,
+        )
+        return {
+            (root / name.decode()).resolve()
+            for name in result.stdout.split(b"\0")
+            if name and (root / name.decode()).is_file()
+        }
+    return {
+        path.resolve()
+        for path in root.rglob("*")
+        if path.is_file()
+        and not any(part in _SKIP_DIRS for part in path.relative_to(root).parts)
+    }
+
+
+def _published_target(path: Path, public_files: set[Path]) -> bool:
+    resolved = path.resolve()
+    return resolved in public_files or (
+        resolved.is_dir() and any(resolved in item.parents for item in public_files)
+    )
 
 
 def _slug(heading: str) -> str:
@@ -92,10 +112,13 @@ def _link_targets(text: str) -> list[tuple[int, str]]:
 
 def check(root: Path | None = None) -> list[str]:
     """Return a list of human-readable link problems. Empty means clean."""
-    root = root or repo_root()
+    root = (root or repo_root()).resolve()
+    public_files = _public_files(root)
     problems: list[str] = []
 
-    for path in _markdown_files(root):
+    for path in sorted(public_files):
+        if path.suffix != ".md":
+            continue
         rel = path.relative_to(root)
         text = path.read_text(encoding="utf-8")
         prose = _FENCE_RE.sub("", text)
@@ -116,7 +139,7 @@ def check(root: Path | None = None) -> list[str]:
                 # Owner drift is swept repo-wide below; here we only verify that
                 # canonical blob/tree URLs still point at a path that exists.
                 blob = _BLOB_TREE_RE.match(target)
-                if blob and not (root / unquote(blob.group(1))).exists():
+                if blob and not _published_target(root / unquote(blob.group(1)), public_files):
                     problems.append(f"{where}: repo URL points at a missing path -> {target}")
                 continue
 
@@ -127,7 +150,7 @@ def check(root: Path | None = None) -> list[str]:
             if not file_part:
                 continue
             resolved = (path.parent / unquote(file_part)).resolve()
-            if not resolved.exists():
+            if not _published_target(resolved, public_files):
                 problems.append(f"{where}: dead relative link -> {target}")
                 continue
             if anchor and resolved.suffix == ".md":
@@ -136,23 +159,22 @@ def check(root: Path | None = None) -> list[str]:
                 if _slug(unquote(anchor)) not in other_anchors:
                     problems.append(f"{where}: dangling anchor -> {target}")
 
-    # Stale-owner sweep over config and source too, not just Markdown.
-    for pattern in ("*.md", "*.toml", "*.yml", "*.yaml", "*.py"):
-        for path in root.rglob(pattern):
-            if any(part in _SKIP_DIRS for part in path.relative_to(root).parts):
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
-                continue
-            for match in re.finditer(r"https://github\.com/([A-Za-z0-9_.-]+)/acgs-lite", text):
-                owner = match.group(1)
-                if owner != "acgs-ai":
-                    lineno = text[: match.start()].count("\n") + 1
-                    problems.append(
-                        f"{path.relative_to(root)}:{lineno}: stale repository owner "
-                        f"{owner!r} -- the canonical repository is {CANONICAL_REPO}"
-                    )
+    # Sweep only published configuration and source; ignore workstation documents.
+    for path in sorted(public_files):
+        if path.suffix not in {".md", ".toml", ".yml", ".yaml", ".py"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for match in re.finditer(r"https://github\.com/([A-Za-z0-9_.-]+)/acgs-lite", text):
+            owner = match.group(1)
+            if owner != "acgs-ai":
+                lineno = text[: match.start()].count("\n") + 1
+                problems.append(
+                    f"{path.relative_to(root)}:{lineno}: stale repository owner "
+                    f"{owner!r} -- the canonical repository is {CANONICAL_REPO}"
+                )
 
     return problems
 

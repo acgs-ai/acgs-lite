@@ -3,7 +3,7 @@
 This is the script documented in docs/guides/five-minute-membrane.md.
 It requires only the published package surface:
 
-    pip install acgs-lite==2.12.0
+    pip install acgs-lite==3.0.1
     python examples/membrane_5min.py   # from a clone
     # or paste the same file after pip install — no repo paths needed
 

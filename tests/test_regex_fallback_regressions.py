@@ -110,9 +110,10 @@ def test_regex_fallback_no_anchor_fix_does_not_overblock_clean_text() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.skip(reason="Engine zip(strict=True) rejects mismatched compiled_pats/patterns length")
-def test_invalid_regex_pattern_skipped_without_crash() -> None:
-    """GovernanceEngine skips rules whose patterns contain invalid regex."""
+def test_invalid_regex_pattern_is_rejected_without_dropping_rules() -> None:
+    """Invalid policy input must fail closed, never silently discard a rule."""
+    with pytest.raises(ValueError, match="Invalid regex pattern"):
+        Rule(id="BAD-INPUT", text="Invalid", patterns=["[invalid"])
     good_rule = Rule(
         id="GOOD-001",
         text="No secrets",
@@ -133,10 +134,11 @@ def test_invalid_regex_pattern_skipped_without_crash() -> None:
     object.__setattr__(bad_rule, "_compiled_pats", [])
 
     constitution = Constitution.from_rules([good_rule, bad_rule])
-    engine = GovernanceEngine(constitution, strict=False)
+    with pytest.raises(ValueError, match="zip"):
+        GovernanceEngine(constitution, strict=False)
 
-    assert len(engine._active_rules) == 1
-    assert engine._active_rules[0].id == "GOOD-001"
+    engine = GovernanceEngine(Constitution.from_rules([good_rule]), strict=False)
+    assert engine.validate("ordinary action").valid
 
     result = engine.validate("this contains a secret")
     assert result.valid is False

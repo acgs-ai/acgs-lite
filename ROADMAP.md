@@ -119,13 +119,10 @@ Expected outcomes:
 - no inflated claims about current adoption, regulatory approval, compliance
   certification, or universal production readiness.
 
-## Related Planning Documents
+## Contributing to the roadmap
 
-The existing planning documents remain useful as implementation context:
+Use [GitHub Discussions](https://github.com/acgs-ai/acgs-lite/discussions) to propose
+priorities and [GitHub Issues](https://github.com/acgs-ai/acgs-lite/issues) for concrete work.
 
-- [`planning/next-milestones.md`](planning/next-milestones.md) tracks release
-  and near-term engineering work.
-- [`planning/community-roadmap.md`](planning/community-roadmap.md) tracks
-  contributor and community work.
 - [`GOVERNANCE.md`](GOVERNANCE.md) describes project roles and decision-making.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) explains how to propose changes.

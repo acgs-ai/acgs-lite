@@ -8,8 +8,7 @@ The ``governance.decision.*`` attributes are experimental.
 
 Read the schema first — `GOVERNANCE_ATTRIBUTES.md` documents the exact
 attributes emitted on each span. Then `ARCHITECTURE.md` explains the
-context-manager pattern and span lifecycle. `UPSTREAM_STRATEGY.md`
-covers the plan for promoting this into the upstream Phoenix docs.
+context-manager pattern and span lifecycle.
 
 ## Prerequisites
 
@@ -123,6 +122,5 @@ suite needs neither network nor Phoenix.
 | `test_phoenix_integration.py` | Span-level assertions per scenario |
 | `GOVERNANCE_ATTRIBUTES.md` | Finalized OTel attribute schema |
 | `ARCHITECTURE.md` | Data flow + span lifecycle |
-| `UPSTREAM_STRATEGY.md` | Plan for the Phoenix docs PR |
 | `requirements.txt` | Dependencies |
 | `.env.example` | Sample env vars |

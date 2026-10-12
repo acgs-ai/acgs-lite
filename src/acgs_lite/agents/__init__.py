@@ -9,8 +9,8 @@ Two coordinated pieces:
 
 * :class:`~acgs_lite.agents.registry.AgentRegistry` -- discovery. A process-local
   registry of :class:`~acgs_lite.agents.capability.AgentCapabilityProfile` records,
-  seeded from a bundled manifest or loaded from a JSON index such as the repo's
-  ``agent-index.json`` (repo root).
+  seeded from a bundled manifest or loaded from an application-provided JSON
+  manifest such as ``my-agents.json``.
 * :class:`~acgs_lite.agents.selector.GovernedAgentSelector` -- decision. Picks the
   most suitable agent for a task as a fail-closed, receipted, MACI-respecting
   constitutional decision.

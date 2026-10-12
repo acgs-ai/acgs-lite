@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Community questions and integration help
+    url: https://github.com/acgs-ai/acgs-lite/discussions/categories/q-a
+    about: Ask usage, installation, and integration questions in Discussions.
+  - name: Feature ideas and roadmap proposals
+    url: https://github.com/acgs-ai/acgs-lite/discussions/categories/ideas
+    about: Discuss a proposed feature before opening an implementation issue.
+  - name: Private security report
+    url: mailto:security@acgs.ai
+    about: Report suspected governance or security vulnerabilities privately.

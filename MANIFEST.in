@@ -1,0 +1,6 @@
+# Publish only runtime sources and build metadata. Local files stay in this checkout.
+global-exclude *
+include pyproject.toml README.md LICENSE
+recursive-include src/acgs_lite *.py *.json *.yaml *.md py.typed
+recursive-include src/acgs *.py
+global-exclude __pycache__ *.py[cod] .DS_Store

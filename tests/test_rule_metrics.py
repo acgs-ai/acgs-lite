@@ -1,4 +1,4 @@
-"""Tests for per-rule precision/recall/F1 metrics and eval harness.
+"""Tests for per-rule precision/recall/F1 metrics.
 
 Constitutional Hash: 608508a9bd224290
 """
@@ -13,14 +13,6 @@ import pytest
 # Add acgs-lite src to path
 ACGS_LITE_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(ACGS_LITE_SRC))
-
-_AUTORESEARCH_DIR = Path(__file__).resolve().parents[1] / "autoresearch"
-_EVAL_RULES_AVAILABLE = (_AUTORESEARCH_DIR / "eval_rules.py").exists()
-
-_skip_eval_rules = pytest.mark.skipif(
-    not _EVAL_RULES_AVAILABLE,
-    reason="autoresearch/eval_rules.py not present in standalone package",
-)
 
 from acgs_lite.constitution.rule_metrics import (  # noqa: E402
     EvalReport,
@@ -138,94 +130,6 @@ class TestScenarioOutcomeMetrics:
         sm = ScenarioOutcomeMetrics(total=10, correct=8, incorrect=2)
         d = sm.to_dict()
         assert d["accuracy"] == pytest.approx(0.8)
-
-
-# --- Test 3: label validation (rule ID not in constitution) ---
-
-
-@_skip_eval_rules
-class TestLabelValidation:
-    def test_catches_unknown_rule_id(self):
-        """validate_annotations should catch rule IDs not in the constitution."""
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import validate_annotations
-
-        annotations = {
-            "hash1": {"expected_rules": ["SAFETY-099"]},
-        }
-        active_rules = {"SAFETY-001", "SAFETY-002"}
-        errors = validate_annotations(annotations, active_rules)
-        assert len(errors) == 1
-        assert "SAFETY-099" in errors[0]
-
-    def test_passes_valid_rule_ids(self):
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import validate_annotations
-
-        annotations = {
-            "hash1": {"expected_rules": ["SAFETY-001"]},
-        }
-        active_rules = {"SAFETY-001", "SAFETY-002"}
-        errors = validate_annotations(annotations, active_rules)
-        assert len(errors) == 0
-
-
-# --- Test 4: case mismatch (safety-001 vs SAFETY-001) ---
-
-
-@_skip_eval_rules
-class TestCaseCanonicalization:
-    def test_lowercase_caught_by_validation(self):
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import validate_annotations
-
-        annotations = {
-            "hash1": {"expected_rules": ["safety-001"]},  # lowercase
-        }
-        # active_rules are uppercase
-        active_rules = {"SAFETY-001"}
-        errors = validate_annotations(annotations, active_rules)
-        # Should pass because validate_annotations uppercases before comparison
-        assert len(errors) == 0
-
-
-# --- Test 5: content hash deterministic ---
-
-
-@_skip_eval_rules
-class TestContentHash:
-    def test_deterministic(self):
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import content_hash
-
-        h1 = content_hash("deploy model", {"env": "prod"})
-        h2 = content_hash("deploy model", {"env": "prod"})
-        assert h1 == h2
-
-    def test_different_context(self):
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import content_hash
-
-        h1 = content_hash("deploy model", {"env": "prod"})
-        h2 = content_hash("deploy model", {"env": "staging"})
-        assert h1 != h2
-
-    def test_empty_context(self):
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import content_hash
-
-        h1 = content_hash("deploy model", {})
-        h2 = content_hash("deploy model", {})
-        assert h1 == h2
-
-    def test_context_order_independent(self):
-        """Sorted keys should produce same hash regardless of dict insertion order."""
-        sys.path.insert(0, str(_AUTORESEARCH_DIR))
-        from eval_rules import content_hash
-
-        h1 = content_hash("action", {"b": "2", "a": "1"})
-        h2 = content_hash("action", {"a": "1", "b": "2"})
-        assert h1 == h2
 
 
 # --- Test 6: compute_eval_report integration ---

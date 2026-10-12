@@ -1,0 +1,10 @@
+# Optional integration qualification only; not base runtime requirements.
+# gove-zone matches the release-candidate compatibility gate.
+z3-solver==5.1.0.0
+fpdf2==2.8.9
+pyahocorasick==2.3.1
+autogen-core==0.7.5
+autogen-agentchat==0.7.5
+openai==3.29.0
+constitutional-swarm==0.1.1
+gove-zone==1.0.0rc2

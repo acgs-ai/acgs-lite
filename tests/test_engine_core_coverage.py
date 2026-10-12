@@ -457,15 +457,26 @@ class TestGovernanceEngineInternals:
         # Our fixture includes HIGH severity rules
         assert engine._has_high_rules is True
 
-    @pytest.mark.skip(reason="_pooled_result removed in engine simplification")
-    def test_pooled_result_exists(self, engine):
-        assert engine._pooled_result is not None
-        assert engine._pooled_result.valid is True
+    def test_allow_results_are_independent(self, engine):
+        first = engine.validate("ordinary action")
+        second = engine.validate("another ordinary action")
+        assert first.valid and second.valid
+        assert first is not second
+        assert first.violations is not second.violations
+        first.violations.append("caller mutation")
+        assert second.violations == []
+        assert engine.validate("ordinary action").violations == []
 
-    @pytest.mark.skip(reason="_pooled_escalate removed in engine simplification")
-    def test_pooled_escalate_exists(self, engine):
-        assert engine._pooled_escalate is not None
-        assert engine._pooled_escalate.valid is True
+    def test_escalation_result_survives_later_validation(self, constitution):
+        engine = GovernanceEngine(constitution, strict=False)
+        first = engine.validate("age-based discrimination")
+        original = first.to_dict()
+        assert first.violations
+        second = engine.validate("ordinary action")
+        assert second.valid
+        assert first is not second
+        assert first.violations is not second.violations
+        assert first.to_dict() == original
 
 
 # ---------------------------------------------------------------------------
