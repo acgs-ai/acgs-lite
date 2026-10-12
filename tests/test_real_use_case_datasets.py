@@ -20,11 +20,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "real_use_case_datasets.json"
 BENCHMARK_CONSTITUTION = REPO_ROOT / "autoresearch" / "constitution.yaml"
 
-_skip_missing_benchmark = pytest.mark.skipif(
-    not BENCHMARK_CONSTITUTION.exists(),
-    reason="autoresearch/constitution.yaml not present in standalone package",
-)
-
 
 def _load_cases() -> list[dict[str, object]]:
     return json.loads(FIXTURE_PATH.read_text())
@@ -40,11 +35,12 @@ def _decision_for(engine: GovernanceEngine, action: str, context: dict[str, obje
     except ConstitutionalViolationError:
         return "deny"
 
-    if result.valid and not result.violations:
+    if result.valid and not result.violations and not result.warnings:
         return "allow"
     if any(v.severity == Severity.CRITICAL for v in result.violations):
         return "deny"
-    if result.violations:
+    if result.violations or result.warnings:
+        # Benchmark taxonomy: warnings warrant review; runtime still permits them.
         return "escalate"
     return "allow"
 
@@ -92,7 +88,6 @@ def test_real_use_case_fixture_covers_multiple_datasets_domains_and_decisions() 
     assert decisions["escalate"] >= 2
 
 
-@_skip_missing_benchmark
 @pytest.mark.unit
 @pytest.mark.parametrize("case", _load_cases(), ids=lambda case: str(case["id"]))
 def test_benchmark_constitution_matches_real_use_case_fixture(

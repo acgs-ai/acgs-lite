@@ -19,7 +19,7 @@ SCRIPT_DIR  = $(PACKAGE_DIR)/scripts
 REPO_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 
 .PHONY: help setup dev-setup install install-dev agent-check agents-sync validate verify smoke dev \
-        test test-quick test-cov test-examples \
+        test test-quick test-optional test-cov test-examples \
         test-governance \
         lint format typecheck check build publish-dry-run publish \
         examples visualize clean
@@ -46,6 +46,7 @@ help:
 	@echo "  Testing (no API keys required — InMemory* stubs used):"
 	@echo "    make test          Full test suite"
 	@echo "    make test-quick    Skip slow/benchmark tests (-m 'not slow')"
+	@echo "    make test-optional Require and test solver, adapters, Rust, and Lean (see TOOLS.md)"
 	@echo "    make test-cov      Test + coverage report (HTML in htmlcov/)"
 	@echo "    make test-governance  Governance-regression safety gate"
 	@echo "    make test-examples Run all examples/ as smoke tests"
@@ -163,6 +164,29 @@ test-quick:
 	    --import-mode=importlib \
 	    -m "not slow and not benchmark" \
 	    -x -v
+
+# Keep this separate from the deliberately dependency-free Python fallback gate.
+# Missing dependencies fail preflight instead of silently skipping integration tests.
+test-optional:
+	$(PYTHON) -c "import z3, fpdf, ahocorasick, autogen_core, autogen_agentchat, openai, constitutional_swarm, gove_zone, acgs_lite_rust; import shutil; from acgs_lite.engine.rust import _HAS_RUST, _HAS_AHO; from acgs_lite.integrations.workflow import WORKFLOW_AVAILABLE; assert _HAS_RUST and _HAS_AHO and WORKFLOW_AVAILABLE; assert shutil.which('lean'), 'Put the pinned Lean compiler on PATH'; print('Optional integration prerequisites available')"
+	$(TEST_ENV) LEAN_INTEGRATION=1 $(PYTEST) \
+	    $(TEST_DIR)/test_smt_gate.py \
+	    $(TEST_DIR)/test_verification_exemption.py \
+	    $(TEST_DIR)/test_z3_fail_closed.py \
+	    $(TEST_DIR)/test_z3_boundary_checks.py \
+	    $(TEST_DIR)/test_z3_verify_coverage.py \
+	    $(TEST_DIR)/test_policy_ast_sandbox.py \
+	    $(TEST_DIR)/test_coverage_engine_extra.py \
+	    $(TEST_DIR)/test_engine_split_init.py::TestWarmupFlag \
+	    $(TEST_DIR)/test_cdp_certificate.py \
+	    $(TEST_DIR)/test_cli_governance.py \
+	    $(TEST_DIR)/test_workflow_compiler.py \
+	    $(TEST_DIR)/test_mcp_server.py \
+	    $(TEST_DIR)/gove \
+	    $(TEST_DIR)/test_coverage_autogen.py \
+	    $(TEST_DIR)/test_xai_integration.py \
+	    $(TEST_DIR)/test_lean_verify.py \
+	    $(PYTEST_ROOTDIR) --import-mode=importlib -q -rs
 
 test-cov:
 	$(TEST_ENV) $(PYTEST) $(TEST_DIR)/ \

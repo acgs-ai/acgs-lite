@@ -1,0 +1,28 @@
+{
+  "source_repository": "https://github.com/acgs-ai/acgs-lite",
+  "source_commit": "ae80b547700fcda871a26c8edff8ddf1a96034ad",
+  "immutable_assets_sha256": {
+    "candidate_scenarios/promote_sourced_real_use_case_candidates.patch": "89fe864d1b45273769185d3f1ad34f05de945bfaa046cde5b289be2e39ca77ee",
+    "candidate_scenarios/sourced_real_use_case_candidates.json": "f0dbae0d5ebce90326b6a76a6ec2fb9ef4e7ec3de229347066809e77e527e8e3",
+    "constitution.yaml": "0940509e7d268db93206db6e18f1d2bf1dc7a93cd2e95013139a83582064043e",
+    "eval_data/paraphrase_bypass.json": "d6d6040a08d8bef7bd3cae5a20d344c4a377a49d645647dffda84cd22f19f4fb",
+    "eval_data/rule_annotations.yaml": "476429fdc1af3c1b1913b90a8c8ce6e271e2472143779bec19d663a5b15c3762",
+    "paper_extracts/2603_19220v1.json": "1ecadd734ddd5a07e5ce0fe16a7125c90add3f97227f883f559148afb791ad9c",
+    "paper_extracts/2603_19220v1_adapter_manifest.json": "49c1123227c9678f7043a616cb1cc64e372dc5cb7c275b054a94c0047cde9356",
+    "scenarios/adversarial.json": "570861759b768c6ab6dfb9ed524d5ddee8ee832d946b07d1dca229e7f55aa14f",
+    "scenarios/context_rich.json": "7b54d33e187c006335fdcd5e92a60b959fe8740e3f7a7a13cbcfa7fa695d5856",
+    "scenarios/edge_cases_exa.json": "2aa005e683e3fe25e436b92ad7304ccbd0efddc9deed045eb2472c0b9c5b7033",
+    "scenarios/expanded.json": "0a7a0bf244ee4f9762032f2333b71cd6c2cd937f06acc7ad502b1514fae67e2a",
+    "scenarios/generated_expansion.json": "ac44cd5ad798cf7a2163175a601b8031eb0d7720f2b17452a5e4f02e8a155f2e",
+    "scenarios/real_world.json": "1380d987ad0ce320db96fb155cabc66afb20b851a6ddc13a51c61ed9c274d92f",
+    "scenarios/scenarios.json": "5bebe1429f82da92bdb3d58d7931c88a1fcf205003e19e1ba82db189773e53da"
+  },
+  "adapted_scripts": [
+    "eval_rules.py",
+    "evaluate_raw_dataset_cases.py"
+  ],
+  "restored_scripts": [
+    "raw_dataset_adapter.py",
+    "run_raw_dataset_manifest.py"
+  ]
+}

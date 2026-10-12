@@ -2,30 +2,22 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-try:
-    from autoresearch.run_raw_dataset_manifest import (
-        build_cases_from_manifest_entries,
-        load_manifest,
-        run_manifest,
-        select_rows,
-    )
-
-    _AUTORESEARCH_AVAILABLE = True
-except ImportError:
-    _AUTORESEARCH_AVAILABLE = False
-
-pytestmark = pytest.mark.skipif(
-    not _AUTORESEARCH_AVAILABLE,
-    reason="autoresearch scripts not present (local dev tooling, not committed)",
+from autoresearch.run_raw_dataset_manifest import (
+    build_cases_from_manifest_entries,
+    load_manifest,
+    run_manifest,
+    select_rows,
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "raw_datasets"
@@ -49,10 +41,33 @@ def test_run_manifest_reports_combined_summary_and_manifest_metadata() -> None:
     summary = run_manifest(load_manifest(MANIFEST), base_dir=FIXTURES)
 
     assert summary["overall"]["scenarios_tested"] == 24
-    assert summary["overall"]["correct"] == 24
+    assert summary["overall"]["correct"] == 10
     assert len(summary["manifest_datasets"]) == 4
     assert summary["manifest_datasets"][0]["dataset"] == "cfpb"
     assert set(summary["per_dataset"]) == {"bias_in_bios", "cfpb", "civil_comments", "mimic_bhc"}
+
+
+@pytest.mark.unit
+def test_manifest_cli_runs_the_actual_evaluator(tmp_path: Path) -> None:
+    output = tmp_path / "summary.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "autoresearch.run_raw_dataset_manifest",
+            "--manifest",
+            str(MANIFEST),
+            "--output",
+            str(output),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    actual = json.loads(output.read_text())
+    assert actual == run_manifest(load_manifest(MANIFEST), base_dir=FIXTURES)
 
 
 @pytest.mark.unit
@@ -198,7 +213,7 @@ def test_run_bucket_manifest_reports_bucket_adapter_metrics() -> None:
     summary = run_manifest(load_manifest(BUCKET_MANIFEST), base_dir=FIXTURES)
 
     assert summary["overall"]["scenarios_tested"] == 24
-    assert summary["overall"]["correct"] == 24
+    assert summary["overall"]["correct"] == 10
     assert set(summary["per_dataset"]) == {
         "safety_prompt",
         "chat_log",

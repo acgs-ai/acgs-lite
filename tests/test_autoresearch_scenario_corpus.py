@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import Counter
 from pathlib import Path
@@ -20,19 +21,6 @@ PROMOTION_PATCH = (
     / "candidate_scenarios"
     / "promote_sourced_real_use_case_candidates.patch"
 )
-_CANDIDATE_FILES_AVAILABLE = CANDIDATE_SCENARIOS.exists() and PROMOTION_PATCH.exists()
-_SCENARIOS_AVAILABLE = SCENARIOS_DIR.exists() and any(SCENARIOS_DIR.glob("*.json"))
-
-
-_skip_missing_candidates = pytest.mark.skipif(
-    not CANDIDATE_SCENARIOS.exists(),
-    reason="autoresearch candidate_scenarios not generated",
-)
-
-_skip_missing_scenarios = pytest.mark.skipif(
-    not _SCENARIOS_AVAILABLE,
-    reason="autoresearch scenarios not present in standalone package",
-)
 
 
 def _load_rows(path: Path) -> list[dict[str, object]]:
@@ -40,7 +28,16 @@ def _load_rows(path: Path) -> list[dict[str, object]]:
     return data if isinstance(data, list) else [data]
 
 
-@_skip_missing_scenarios
+@pytest.mark.unit
+def test_restored_research_assets_match_recorded_source_checksums() -> None:
+    root = REPO_ROOT / "autoresearch"
+    provenance = json.loads((root / "PROVENANCE.json").read_text())
+    assert provenance["source_commit"] == "ae80b547700fcda871a26c8edff8ddf1a96034ad"
+    assert len(provenance["immutable_assets_sha256"]) == 14
+    for relative_path, expected in provenance["immutable_assets_sha256"].items():
+        assert hashlib.sha256((root / relative_path).read_bytes()).hexdigest() == expected
+
+
 @pytest.mark.unit
 def test_autoresearch_scenario_files_have_valid_schema() -> None:
     expected_values = {"allow", "deny", "escalate"}
@@ -59,7 +56,6 @@ def test_autoresearch_scenario_files_have_valid_schema() -> None:
             assert isinstance(row.get("context", {}), dict)
 
 
-@_skip_missing_scenarios
 @pytest.mark.unit
 def test_autoresearch_scenario_corpus_preserves_decision_coverage() -> None:
     counts: Counter[str] = Counter()
@@ -73,7 +69,6 @@ def test_autoresearch_scenario_corpus_preserves_decision_coverage() -> None:
     assert counts["escalate"] >= 50
 
 
-@_skip_missing_scenarios
 @pytest.mark.unit
 def test_real_use_case_fixture_is_mostly_novel_relative_to_frozen_benchmark_corpus() -> None:
     benchmark_actions = {
@@ -90,12 +85,7 @@ def test_real_use_case_fixture_is_mostly_novel_relative_to_frozen_benchmark_corp
     assert len(real_use_case_actions - benchmark_actions) >= 15
 
 
-@_skip_missing_candidates
 @pytest.mark.unit
-@pytest.mark.skipif(
-    not _CANDIDATE_FILES_AVAILABLE,
-    reason="autoresearch/candidate_scenarios/ is gitignored; files unavailable in CI",
-)
 def test_candidate_scenario_pack_is_balanced_and_traceable() -> None:
     rows = _load_rows(CANDIDATE_SCENARIOS)
     counts = Counter(str(row["expected"]) for row in rows)
@@ -110,12 +100,7 @@ def test_candidate_scenario_pack_is_balanced_and_traceable() -> None:
         assert isinstance(row["source_note"], str) and row["source_note"].strip()
 
 
-@_skip_missing_candidates
 @pytest.mark.unit
-@pytest.mark.skipif(
-    not _CANDIDATE_FILES_AVAILABLE,
-    reason="autoresearch/candidate_scenarios/ is gitignored; files unavailable in CI",
-)
 def test_candidate_scenario_pack_is_fully_novel_relative_to_frozen_corpus() -> None:
     benchmark_actions = {
         str(row["action"])
@@ -128,12 +113,7 @@ def test_candidate_scenario_pack_is_fully_novel_relative_to_frozen_corpus() -> N
     assert benchmark_actions.isdisjoint(candidate_actions)
 
 
-@_skip_missing_candidates
 @pytest.mark.unit
-@pytest.mark.skipif(
-    not _CANDIDATE_FILES_AVAILABLE,
-    reason="autoresearch/candidate_scenarios/ is gitignored; files unavailable in CI",
-)
 def test_candidate_promotion_patch_targets_frozen_scenarios_path() -> None:
     patch_text = PROMOTION_PATCH.read_text()
 

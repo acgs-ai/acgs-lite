@@ -7,11 +7,10 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 EXTRACT_PATH = REPO_ROOT / "autoresearch" / "paper_extracts" / "2603_19220v1.json"
 
 
-@pytest.mark.skipif(not EXTRACT_PATH.exists(), reason="paper extract not generated")
 @pytest.mark.unit
 def test_paper_extract_contains_expected_candidate_and_out_of_scope_sets() -> None:
     data = json.loads(EXTRACT_PATH.read_text(encoding="utf-8"))

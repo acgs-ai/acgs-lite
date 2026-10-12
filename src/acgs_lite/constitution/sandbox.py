@@ -152,7 +152,7 @@ class PolicySandbox:
     ) -> SandboxReport:
         """Test adding rules to the production constitution."""
         prod_constitution = self._production.constitution
-        existing_rules = [r.to_dict() for r in prod_constitution.rules]
+        existing_rules = [r.model_dump(mode="json") for r in prod_constitution.rules]
         combined = existing_rules + new_rules
 
         from acgs_lite import Constitution
@@ -169,7 +169,11 @@ class PolicySandbox:
     ) -> SandboxReport:
         """Test removing rules from the production constitution."""
         prod_constitution = self._production.constitution
-        remaining = [r.to_dict() for r in prod_constitution.rules if r.id not in rule_ids_to_remove]
+        remaining = [
+            r.model_dump(mode="json")
+            for r in prod_constitution.rules
+            if r.id not in rule_ids_to_remove
+        ]
 
         from acgs_lite import Constitution
 

@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
-pytestmark = pytest.mark.skip(reason="Constitution.to_response_schema() not yet implemented")
-
 from acgs_lite.constitution import Constitution, Rule, Severity
 
 

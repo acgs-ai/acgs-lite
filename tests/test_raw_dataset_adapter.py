@@ -7,24 +7,14 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-try:
-    from autoresearch.raw_dataset_adapter import (
-        _load_rows,
-        adapt_dataset_rows,
-        synthesize_governance_cases,
-    )
-
-    _AUTORESEARCH_AVAILABLE = True
-except ImportError:
-    _AUTORESEARCH_AVAILABLE = False
-
-pytestmark = pytest.mark.skipif(
-    not _AUTORESEARCH_AVAILABLE,
-    reason="autoresearch scripts not present (local dev tooling, not committed)",
+from autoresearch.raw_dataset_adapter import (
+    _load_rows,
+    adapt_dataset_rows,
+    synthesize_governance_cases,
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "raw_datasets"

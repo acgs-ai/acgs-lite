@@ -92,6 +92,17 @@ tools:
     validation: make test-governance
     owner_module: scripts/run_governance_regression.py
 
+  - name: test-optional
+    purpose: Require optional dependencies and exercise real solver, adapters, Rust, and Lean.
+    command: make test-optional
+    env: ["OPENAI_API_KEY=test-key-for-unit-tests", "ANTHROPIC_API_KEY=test-key-for-unit-tests", "LEAN_INTEGRATION=1", "PATH (pinned Lean bin directory)"]
+    inputs: ["requirements-test-optional.txt", "locally built Rust companion", "Lean 4.34.0"]
+    outputs: ["optional integration pytest report"]
+    failure_modes: ["required dependency missing", "optional integration regression", "Lean unavailable"]
+    retry: "Install the documented optional test toolchain, then rerun after fixing failures."
+    validation: make test-optional
+    owner_module: Makefile
+
   - name: agent-check
     purpose: Agent discovery/readiness gate — proves the workspace is agent-executable.
     command: make agent-check

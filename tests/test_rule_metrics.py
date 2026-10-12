@@ -5,6 +5,8 @@ Constitutional Hash: 608508a9bd224290
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,13 +17,6 @@ ACGS_LITE_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(ACGS_LITE_SRC))
 
 _AUTORESEARCH_DIR = Path(__file__).resolve().parents[1] / "autoresearch"
-_EVAL_RULES_AVAILABLE = (_AUTORESEARCH_DIR / "eval_rules.py").exists()
-
-_skip_eval_rules = pytest.mark.skipif(
-    not _EVAL_RULES_AVAILABLE,
-    reason="autoresearch/eval_rules.py not present in standalone package",
-)
-
 from acgs_lite.constitution.rule_metrics import (  # noqa: E402
     EvalReport,
     RuleMetrics,
@@ -143,7 +138,6 @@ class TestScenarioOutcomeMetrics:
 # --- Test 3: label validation (rule ID not in constitution) ---
 
 
-@_skip_eval_rules
 class TestLabelValidation:
     def test_catches_unknown_rule_id(self):
         """validate_annotations should catch rule IDs not in the constitution."""
@@ -173,7 +167,6 @@ class TestLabelValidation:
 # --- Test 4: case mismatch (safety-001 vs SAFETY-001) ---
 
 
-@_skip_eval_rules
 class TestCaseCanonicalization:
     def test_lowercase_caught_by_validation(self):
         sys.path.insert(0, str(_AUTORESEARCH_DIR))
@@ -192,7 +185,6 @@ class TestCaseCanonicalization:
 # --- Test 5: content hash deterministic ---
 
 
-@_skip_eval_rules
 class TestContentHash:
     def test_deterministic(self):
         sys.path.insert(0, str(_AUTORESEARCH_DIR))
@@ -226,6 +218,23 @@ class TestContentHash:
         h1 = content_hash("action", {"b": "2", "a": "1"})
         h2 = content_hash("action", {"a": "1", "b": "2"})
         assert h1 == h2
+
+
+def test_eval_cli_reports_failure_with_nonzero_exit(tmp_path):
+    """The restored adversarial set has mismatches; a reporting run must not go green."""
+    result = subprocess.run(
+        [sys.executable, "-m", "autoresearch.eval_rules", "--output-dir", str(tmp_path)],
+        cwd=ACGS_LITE_SRC.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    metrics = json.loads((tmp_path / "rule_metrics.json").read_text())["scenario_metrics"]
+    assert metrics["incorrect"] > 0
+    assert metrics["errors"] == 0
+    assert metrics["skipped"] == 0
+    assert "FAIL" in result.stdout
 
 
 # --- Test 6: compute_eval_report integration ---

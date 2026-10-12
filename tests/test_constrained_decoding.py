@@ -40,7 +40,6 @@ def test_llguidance_engine_from_regex_builds_string_schema() -> None:
     assert engine.source == "regex"
 
 
-@pytest.mark.skip(reason="Constitution.to_response_schema() not yet wired as method")
 def test_llguidance_engine_from_constitution_uses_response_schema() -> None:
     constitution = Constitution.from_rules(
         [
