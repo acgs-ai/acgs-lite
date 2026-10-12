@@ -31,10 +31,10 @@ The script runs end to end whether or not `dspy` is installed:
   `engine.validate` → audit log) and still demonstrates a real block plus a real
   audit entry.
 
-Install the optional extra for the full DSPy experience:
+The DSPy adapter is source-supported, but this release does not publish a `dspy` optional extra. Install DSPy separately when you want the real framework; the offline stub path works with only the repository checkout:
 
 ```bash
-pip install acgs-lite[dspy]
+pip install dspy
 ```
 
 ## Expected output
@@ -46,7 +46,7 @@ pip install acgs-lite[dspy]
 
 Loaded constitution: dspy-content-policy (3 rules, hash=…)
 DSPy not installed — running offline with a stubbed predictor.
-Install the full integration with: pip install acgs-lite[dspy]
+Install the full integration with: pip install dspy
 
 ── Safe input ─────────────────────────────────────────────
   Prompt : What is constitutional AI governance?

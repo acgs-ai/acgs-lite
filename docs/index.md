@@ -1,41 +1,78 @@
-# ACGS -- Fail-Closed Legitimacy for Agent Action
+# Govern an agent action before it runs
 
-ACGS converts a declared goal and proposed method into a governed decision before side effects run. Receipt-enforced execution paths can also bind that decision to a replayable receipt and executor boundary.
+ACGS-Lite is a Python library for checking proposed actions against a constitution,
+recording decisions, and enforcing authorization at a governed execution boundary.
+Your application supplies the policy and connects the boundary to the actual tool call.
 
-ACGS is a fail-closed legitimacy layer for AI-agent action. It resolves authority, constraints, policy version, and execution boundary before execution. If that proof is missing, ambiguous, unknown, or unverifiable, ACGS blocks execution.
+**Start small:** prove that one allowed action executes and one denied action does not.
+Then add the integration and audit storage your application needs.
 
-In receipt-enforced paths, ACGS leads with three concrete checks: a canonical
-decision, a receipt issued before execution, and a bounded executor.
+[Install ACGS-Lite](installation.md){ .md-button .md-button--primary }
+[Try the 5-minute membrane](guides/five-minute-membrane.md){ .md-button }
 
-The standard `GovernedAgent` path provides deterministic input/output validation and audit logging. For receipt-enforced execution paths, ACGS can require:
+!!! note "Published package and source candidate"
+    The published PyPI package is **3.0.1**. This checkout also documents unreleased
+    execution-grant, trusted-context, durable-audit, and recovery hardening that is
+    **not in the published 3.0.1 wheel**. Match examples to the artifact you installed.
+    A source checkout reporting the same version does not prove identical contents.
 
-1. A canonical decision from the approved taxonomy
-2. A replayable receipt issued before execution
-3. An execution boundary the executor must match
-4. Fail-closed behavior on missing or unverifiable receipt proof
+## Find your next step
 
-## Quickstart
+<div class="grid cards" markdown>
 
-`pip install` does not ship `examples/`. Start with the
-[5-minute membrane](guides/five-minute-membrane.md) (receipt + executor
-refusal), or wrap an existing callable:
+- **Install and run**
 
-```python
-from acgs_lite import Constitution, GovernedAgent, MACIRole
+    Choose a package, optional dependencies, or a source checkout.
 
-# 1. Load rules from your Constitution
-constitution = Constitution.from_yaml("rules.yaml")
+    [Installation and distributions](installation.md) · [Quickstart](quickstart.md)
 
-# 2. Wrap your existing agent with an explicit MACI execution role
-agent = GovernedAgent(
-    my_llm_agent,
-    constitution=constitution,
-    maci_role=MACIRole.EXECUTOR,
-)
+- **Connect your stack**
 
-# 3. Execute through deterministic validation with per-call authorization
-result = agent.run("Process this request", governance_action="execute")
+    Locate the adapter and understand the checks it actually performs.
+
+    [Integration decision guide](integration-decision-guide.md) · [Adapter catalog](integrations.md)
+
+- **Understand the execution boundary**
+
+    Follow decisions, receipt checks, MACI roles, and audit evidence.
+
+    [Architecture](architecture.md) · [Runtime legitimacy API](api/legitimacy.md)
+
+- **Contribute a reproducible result**
+
+    Ask a focused question, improve a guide, or share a tested integration.
+
+    [Community hub](community.md) · [Write a walkthrough](community/share-a-walkthrough.md)
+
+</div>
+
+## What the checks establish
+
+A `GovernanceEngine` check evaluates text against the supplied rules. A
+`GovernedAgent` adds input/output validation and audit logging around its wrapped
+agent. Receipt-enforced execution paths add authorization checks at the executor.
+Choose the path that matches the action you must control; a model-client wrapper
+alone does not establish that a later external tool call is authorized.
+
+```text
+Proposed action → policy check → decision and receipt → governed executor
 ```
+
+The [5-minute membrane](guides/five-minute-membrane.md) demonstrates ALLOW,
+TRANSFORM, DENY, and missing-receipt refusal. It also explains what the local demo
+does not establish. `pip install` does not ship the repository's `examples/` folder.
+
+## Build confidence in your integration
+
+1. Name the side effect and the function that performs it.
+2. Put the check on that function's real call path.
+3. Demonstrate denial with a counter that proves the function did not run.
+4. Check the audit record and document storage, restart, and concurrency limits.
+
+Use [Testing Governance](testing-governance.md), the
+[MACI architecture](maci.md), and the [audit API](api/audit.md) for the next layer
+of detail. Local examples and passing tests are not proof of production readiness
+or independent adoption.
 
 ## Compliance Mapping Examples
 
@@ -58,28 +95,12 @@ or a substitute for legal review.
 
 **Run `acgs assess` to see self-assessed mapping coverage for your jurisdiction and domain.**
 
-## Next Steps & Guides
+## Reference and project resources
 
-Explore the architecture and setup guides to integrate ACGS into your agentic workflows:
+- [CLI reference](cli.md) and [constitution lifecycle API](api/lifecycle.md)
+- [Security reporting](security.md) and [changelog](changelog.md)
+- [Frequently asked questions](community/faq.md)
+- [Contribution guide](contributing.md)
 
-- [Why Constitutional Governance?](why-governance.md) -- Understand fail-closed legitimacy boundaries for agent action
-- [Industry Use Cases](use-cases.md) -- Healthcare, Finance, and Legal in practice
-- [OWASP 2026 Mitigation](owasp-2026.md) -- Mitigating the Top 10 risks for agents
-- [2026 Regulatory Compliance](compliance-2026.md) -- EU AI Act, SB 205, and TRAIGA
-- [MCP Governance Server](mcp.md) -- Shared governance for side-effectful tool calls
-- [Advanced Governance Patterns](supervisor-models.md) -- Verification Kernels & Supervisor Models
-- [MCP Governance Guide](mcp-guide.md) -- Master the Model Context Protocol
-- [Testing Governance](testing-governance.md) -- Verifying fail-closed governance behavior
-- [5-minute membrane](guides/five-minute-membrane.md) -- pip-only ALLOW / DENY / TRANSFORM + receipt refusal
-- [Quickstart](quickstart.md) -- Install and govern your first agent
-- [Integrations](integrations.md) -- Guides for Anthropic, OpenAI, LangChain, AutoGen, CrewAI, and more
-- [Telegram Webhook Integration](telegram-webhook.md) -- Safe Telegram bot intake with path-secret + header-token verification
-- [Compliance](compliance.md) -- Deep dive into multi-framework assessment
-- [MACI Architecture](maci.md) -- Implementing separation of powers for AI
-- [Architecture Overview](architecture.md) -- Internal engine and validation lifecycle
-- [CLI Reference](cli.md) -- All CLI commands for CI/CD and terminal use
-- [Constitution Lifecycle API](api/lifecycle.md) -- HTTP endpoints for draft, review, eval, activation, and rollback
-
----
 !!! info "Constitutional Hash"
     `608508a9bd224290` -- documented constitutional hash for this release line. `acgs verify` currently validates license key integrity only.

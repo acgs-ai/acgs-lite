@@ -17,7 +17,7 @@ plugins:
             show_signature_annotations: true
             docstring_style: google
   - mike:
-      version_selector: true
+      version_selector: false
       css_dir: css
       javascript_dir: js
   - git-revision-date-localized:
@@ -27,9 +27,6 @@ plugins:
       type: date
 
 extra:
-  version:
-    provider: mike
-    default: stable
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/acgs-ai/acgs-lite
@@ -55,7 +52,9 @@ theme:
         name: Switch to light mode
   features:
     - navigation.sections
-    - navigation.expand
+    - navigation.indexes
+    - navigation.tracking
+    - navigation.footer
     - navigation.top
     - content.code.copy
     - content.code.annotate
@@ -66,7 +65,12 @@ theme:
 
 nav:
   - Home: index.md
-  - 2026 Safety Standards:
+  - Start here:
+      - Installation and distributions: installation.md
+      - Quickstart: quickstart.md
+      - 5-minute membrane: guides/five-minute-membrane.md
+      - Integration decision guide: integration-decision-guide.md
+  - Governance context:
       - Why Governance?: why-governance.md
       - OWASP Top 10 for Agents: owasp-2026.md
       - Regulatory Compliance: compliance-2026.md
@@ -77,20 +81,20 @@ nav:
       - Testing Governance: testing-governance.md
       - Governed Self-Evolution: self-evolution.md
       - Stability: stability.md
-  - Quickstart: quickstart.md
   - Architecture: architecture.md
   - Integrations: integrations.md
-  - Integration Decision Guide: integration-decision-guide.md
   - Guides:
-      - 5-minute membrane: guides/five-minute-membrane.md
       - Govern a LangChain Agent: guides/langchain.md
       - Govern AMD GAIA tool calls: guides/gaia.md
       - What Gets Blocked (Walkthrough): blog/what-got-blocked.md
   - Compliance: compliance.md
   - MACI Architecture: maci.md
   - CLI Reference: cli.md
-  - Contributing:
-      - Overview: contributing.md
+  - Community:
+      - Community hub: community.md
+      - FAQ: community/faq.md
+      - Share a walkthrough: community/share-a-walkthrough.md
+      - Contributing: contributing.md
       - Adding an Integration: contributing-integrations.md
       - Adding a Compliance Framework: contributing-frameworks.md
   - API Reference:

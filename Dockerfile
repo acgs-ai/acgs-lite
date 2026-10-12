@@ -1,13 +1,14 @@
 # ACGS-Lite Constitutional Sentinel — Cloud Run deployment
 #
-# Deploy: cd packages/acgs-lite && gcloud run deploy acgs-sentinel --source . --region us-central1
+# Deploy from the repository root:
+# gcloud run deploy acgs-sentinel --source . --region us-central1
 
 FROM python:3.11-slim
 
 WORKDIR /app
 
 # Copy everything needed for pip install
-COPY pyproject.toml .
+COPY pyproject.toml README.md LICENSE ./
 COPY src/ src/
 
 # Install the package + server deps (uvicorn, starlette, httpx for GitLab API)

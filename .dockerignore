@@ -1,4 +1,11 @@
 .git
+.venv/
+venv/
+node_modules/
+site/
+.omc/
+.omx/
+.codex/
 .pytest_cache
 .mypy_cache
 .ruff_cache

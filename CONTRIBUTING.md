@@ -11,7 +11,7 @@ Thank you for your interest in contributing to ACGS-Lite! We are building the fo
 1. Find a [`good first issue`](https://github.com/acgs-ai/acgs-lite/labels/good%20first%20issue) — each is scoped to be completable by a newcomer in under a day, with full context in the issue body.
 2. Comment on it to claim it (no need to ask permission for `good first issue`s — just say you're on it).
 3. Set up your environment (below), make the change with a test, open a PR.
-4. Have a question first? Open a [Discussion](https://github.com/acgs-ai/acgs-lite/discussions) — no question is too small.
+4. Have a question first? Open a [Discussion](https://github.com/acgs-ai/acgs-lite/discussions) — no question is too small. Use the [community guide](docs/community.md) to choose between Q&A, ideas, integrations, and bug reports.
 
 ## 🤝 Our commitment to you
 
@@ -89,6 +89,8 @@ We follow a strict **Test-Driven Development** workflow. Every feature or fix mu
 ## 🛡️ Security Disclosures
 
 If you find a security vulnerability, please do **not** open a public issue. Instead, follow our [Security Policy](SECURITY.md) to report it responsibly.
+
+For installation, release channels, and local validation commands, see the [installation guide](docs/installation.md).
 
 ## 📜 License
 

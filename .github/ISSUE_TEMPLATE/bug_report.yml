@@ -9,7 +9,8 @@ body:
     id: version
     attributes:
       label: acgs-lite version
-      placeholder: "2.5.2"
+      description: Run `python -c "import importlib.metadata; print(importlib.metadata.version('acgs-lite'))"` and paste the result.
+      placeholder: "3.0.1"
     validations:
       required: true
   - type: input

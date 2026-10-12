@@ -80,7 +80,7 @@ Exit code `1` = one or more assertions failed — investigate the output.
 - A `GovernedCallable` allows a safe prompt and blocks PII / destructive
   keywords before the wrapped function returns. The safe prompt uses a
   same-instance, process-local production grant from this Unreleased source
-  candidate; that grant API is not part of the published 2.12.0 wheel.
+  candidate; that grant API is not part of the published 3.0.1 wheel.
 - A YAML constitution loads and still enforces those rules.
 - MACI refuses a proposer validating its own output.
 - An in-memory `AuditLog` records decisions and `verify_chain()` passes.
