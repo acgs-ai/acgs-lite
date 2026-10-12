@@ -86,8 +86,8 @@ def execute(maci, agent_id, method, tenant, subject, body, receipt):
     return f"executed:{body}"
 
 
-def run_demo() -> dict[str, object]:
-    constitution = Constitution(
+def make_constitution() -> Constitution:
+    return Constitution(
         name="agent-tool-membrane",
         version="2026.08",
         rules=[
@@ -105,6 +105,10 @@ def run_demo() -> dict[str, object]:
             ),
         ],
     )
+
+
+def run_demo() -> dict[str, object]:
+    constitution = make_constitution()
     audit = AuditLog()
     engine = GovernanceEngine(constitution, audit_log=audit, audit_mode="full")
     maci = MACIEnforcer()
