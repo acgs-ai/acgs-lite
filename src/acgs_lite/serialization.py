@@ -117,6 +117,8 @@ def _enforcement_payload(value: Any, index: int, *, skip_opaque: bool) -> str | 
         try:
             return bytes(value).decode("utf-8")
         except UnicodeDecodeError:
+            if skip_opaque:
+                return None
             raise _unevaluable(value, index) from None
     jsonable = _to_jsonable(value)
     if jsonable is value and not isinstance(value, (dict, list, tuple, set)):

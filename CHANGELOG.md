@@ -15,11 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   truncated before evaluation, at issue and at execute. Oversize output is detected after
   the call ran: the attempt is recorded (`PARTIAL`) and the caller does not receive the
   result.
-- Top-level scalar arguments (`int`, `float`, `bool`, `Decimal`, `Enum`, UTF-8 `bytes`)
-  are now evaluated instead of being skipped. Arguments with no evaluable projection
-  (opaque objects, undecodable bytes) are denied in every profile with
+- Top-level scalar arguments and return values (`int`, `float`, `bool`, `Decimal`,
+  `Enum`, UTF-8 `bytes`) are now evaluated instead of being skipped. Arguments with no
+  evaluable projection (opaque objects, undecodable bytes, and such values directly inside
+  the keyword-argument mapping) are denied in every profile with
   `rule_id="GOVERNANCE-PAYLOAD-UNEVALUABLE"`. Pass handles through a closure or
-  `functools.partial`, not as governed arguments.
+  `functools.partial`, not as governed arguments. Opaque or binary return values keep
+  their existing handling.
 - `GovernedCallable(strict=False)` no longer turns enforcement into log-only: a blocking
   engine verdict (or a result without `valid is True`) denies at issue, execute input and
   execute output, raising with the primary violation's `rule_id`. The production profile

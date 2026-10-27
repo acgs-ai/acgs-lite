@@ -362,6 +362,28 @@ def test_opaque_output_keeps_existing_compatibility_behaviour() -> None:
     assert f("hello", decision_receipt=_receipt("f")) is sentinel
 
 
+def test_undecodable_bytes_output_keeps_existing_compatibility_behaviour() -> None:
+    @_compat()
+    def f(text: str) -> bytes:
+        return b"\xff\xfe"
+
+    assert f("hello", decision_receipt=_receipt("f")) == b"\xff\xfe"
+
+
+def test_scalar_output_is_evaluated() -> None:
+    calls: list[str] = []
+
+    @_compat()
+    def f(text: str) -> int:
+        calls.append(text)
+        return 666
+
+    with pytest.raises(ConstitutionalViolationError) as excinfo:
+        f("hello", decision_receipt=_receipt("f"))
+    assert excinfo.value.rule_id == "NUM-666"
+    assert calls == ["hello"]
+
+
 def test_enforcement_payload_helper_counts_every_value() -> None:
     assert governance_payloads_for_enforcement("x", None, 7, {"k": 1}) == [
         "x",
