@@ -9,6 +9,8 @@ import dataclasses
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("cloud_run_exporter")
+
 # ── Regression: imports ──────────────────────────────────────────────────
 
 

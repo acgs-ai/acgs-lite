@@ -19,6 +19,12 @@ from acgs_lite.legitimacy.decide import (
     canonicalize_decision_state,
     is_allow_state,
 )
+from acgs_lite.legitimacy.identity import (
+    local_grant_identity,
+    policy_identity,
+    receipt_identity,
+    signed_envelope_identity,
+)
 from acgs_lite.legitimacy.invariants import (
     ActualCall,
     LegitimacyInvariantError,
@@ -96,11 +102,15 @@ __all__ = [
     "canonical_argument_digest",
     "canonicalize_decision_state",
     "is_allow_state",
+    "local_grant_identity",
     "normalize_actual_call",
+    "policy_identity",
+    "receipt_identity",
     "replay_and_verify",
     "route_ambiguous_decision",
     "sign_execution_authorization",
     "sign_receipt",
+    "signed_envelope_identity",
     "to_receipt_dict",
     "trusted_method_id",
     "validate_receipt_for_execution",

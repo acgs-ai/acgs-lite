@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 import pytest
 
-from tests.red_team.governance_fail_closed_cases import (
+from .governance_fail_closed_cases import (
     CASE_RUNNERS,
     EXPECTED_DECISION,
     EXPECTED_TRIGGER_CLASSES,

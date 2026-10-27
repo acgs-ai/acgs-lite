@@ -10,6 +10,9 @@ import importlib.util
 import runpy
 import sys
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 SRC_PATH = str(SRC_DIR)
@@ -63,3 +66,21 @@ if importlib.util.find_spec("opentelemetry") is None:
     collect_ignore += [
         str(_HERE / "test_otel_integration.py"),
     ]
+
+
+@pytest.fixture
+def cloud_run_exporter():
+    """Keep Cloud Run unit tests independent of Google credentials and metadata.
+
+    The server constructs its exporter at import (and reload) time. Patch the
+    external exporter boundary before either operation, while keeping the
+    dedicated CloudLoggingAuditExporter tests on their real implementation.
+    """
+    module_name = "acgs_lite.integrations.cloud_run_server"
+    original_exporter = getattr(sys.modules.get(module_name), "_cloud_exporter", None)
+    with patch("acgs_lite.integrations.cloud_logging.CloudLoggingAuditExporter") as exporter:
+        try:
+            yield exporter
+        finally:
+            if module_name in sys.modules:
+                sys.modules[module_name]._cloud_exporter = original_exporter

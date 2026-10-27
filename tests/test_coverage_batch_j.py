@@ -613,8 +613,18 @@ class TestCloudLoggingAuditExporter:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("cloud_run_exporter")
 class TestCloudRunServer:
     """Tests for cloud_run_server module functions."""
+
+    def test_init_cloud_exporter_uses_configured_project(self, cloud_run_exporter):
+        import acgs_lite.integrations.cloud_run_server as srv
+
+        cloud_run_exporter.reset_mock()
+        with patch.object(srv, "_GCP_PROJECT_ID", "unit-test-project"):
+            result = srv._init_cloud_exporter()
+        cloud_run_exporter.assert_called_once_with(project_id="unit-test-project")
+        assert result is cloud_run_exporter.return_value
 
     def test_load_constitution_default(self):
         """When no CONSTITUTION_PATH, returns default constitution."""
@@ -846,6 +856,7 @@ class TestCloudRunServer:
             srv._bot = original_bot
 
 
+@pytest.mark.usefixtures("cloud_run_exporter")
 class TestCloudRunEndpoints:
     """Tests for the Starlette endpoint functions."""
 

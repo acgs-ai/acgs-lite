@@ -40,6 +40,34 @@ The exported compatibility helpers are also stable:
 - `call_matches`
 - `to_receipt_dict`
 
+## Evidence identity adapters
+
+The public helpers `policy_identity`, `receipt_identity`,
+`signed_envelope_identity`, and `local_grant_identity` return versioned,
+namespace-separated string references for indexing evidence. They grant no
+execution authority and add no storage or Neo4j dependency.
+
+- Policy: `acgs:policy:v1:sha256:<full digest>` uses the PolicyBinding digest,
+  not its display/version label.
+- Receipt: `acgs:receipt:v1:sha256:<existing receipt hash>` preserves the
+  existing commitment and checks payload/hash consistency.
+- Signed envelope: `acgs:signed-envelope:v1:sha256:<digest>` hashes
+  `b"acgs-signed-envelope-identity-v1\x00"` (including one trailing NUL byte)
+  followed by UTF-8 canonical JSON
+  of `SignedReceipt.to_dict()` (sorted keys, compact separators, ASCII escapes).
+  It includes metadata `key_id` and `signed_at` that existing signatures do
+  **not** authenticate. This identifies serialized evidence; it does not
+  verify a signature or a trusted issuer. The raw `authorization_json` string
+  stays unchanged, and legacy omitted fields follow the existing serializer.
+- Grant: `acgs:local-grant:v1:<issuer_id>:<grant_id>` is a process-local
+  evidence reference, excluding `binding_mac`. Both identifiers must contain
+  only ASCII letters, digits, underscore or hyphen. The reference cannot replace
+  the original grant or its issuing authority's validation.
+
+Digest and signature hex must be full-length lowercase hex. Unsupported policy
+algorithms, signature algorithms/scopes and malformed identifiers fail closed.
+Existing receipt/grant dataclasses, serializers and signed payloads are unchanged.
+
 ## Decision Taxonomy
 
 `CANONICAL_DECISION_STATES` contains the canonical decision states:

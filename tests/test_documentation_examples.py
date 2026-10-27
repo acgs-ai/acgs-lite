@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -8,6 +9,26 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def local_source_for_examples(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Subprocesses change cwd, so relative PYTHONPATH cannot identify this checkout."""
+    source = str(ROOT / "src")
+    inherited = os.environ.get("PYTHONPATH")
+    monkeypatch.setenv("PYTHONPATH", source + (os.pathsep + inherited if inherited else ""))
+
+
+def test_example_subprocess_uses_current_checkout(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", "import acgs_lite; print(acgs_lite.__file__)"],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert Path(result.stdout.strip()).resolve() == ROOT / "src" / "acgs_lite" / "__init__.py"
 
 
 def _marked_python_blocks(path: Path) -> dict[str, str]:

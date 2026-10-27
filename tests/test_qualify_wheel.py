@@ -74,7 +74,9 @@ def test_passing_junit_cannot_override_failed_process(tmp_path: Path) -> None:
     junit = tmp_path / "tests.xml"
     group = qualify_wheel._run_pytest(
         "failed-session",
-        [sys.executable, "-I", "-m", "pytest", "-q", f"--junitxml={junit}"],
+        # Exercise JUnit/process-status handling using this interpreter's pytest;
+        # installed-wheel isolation belongs to the production qualify() commands.
+        [sys.executable, "-m", "pytest", "-q", f"--junitxml={junit}"],
         tmp_path,
         junit,
     )
@@ -111,7 +113,7 @@ def test_pytest_real_collection_is_accepted(tmp_path: Path) -> None:
     junit = tmp_path / "tests.xml"
     group = qualify_wheel._run_pytest(
         "real-tests",
-        [sys.executable, "-I", "-m", "pytest", "-q", f"--junitxml={junit}"],
+        [sys.executable, "-m", "pytest", "-q", f"--junitxml={junit}"],
         tmp_path,
         junit,
     )
