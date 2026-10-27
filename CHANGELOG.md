@@ -26,6 +26,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now rejects `strict=False` at construction.
 - `serialize_for_governance` / `iter_governance_payloads` are unchanged and documented as
   preview-only; enforcement uses the new `governance_payloads_for_enforcement`.
+- `replay_and_verify(..., expected_policy_digest=...)` fails closed (`ok is False`) when the
+  signed execution envelope commits no `PolicyBinding.digest` (`policy_digest_absent`) or a
+  different one (`policy_digest_mismatch`), so a same-label constitution with different
+  rule patterns no longer replays as valid.
+
+### Changed
+
+- Issue receipts minted by `GovernedCallable.issue_grant` now record the engine's real
+  decision (worst verdict across payloads) instead of a fixed `"execution-grant-issued"`
+  stamp: `ALLOW` carries `BASELINE_CONSTRAINT_MARKER`; WARN-only results are
+  `ALLOW_WITH_CONTROLS` with the warning rule ids and `required_controls=("AUDIT_WARNINGS",)`.
+  Review/escalate verdicts are refused at issue with the rule's own `rule_id`; block verdicts
+  deny with the primary blocking rule; HALT propagates the engine exception.
+- `build_issue_receipt` (untiered) now requires a keyword-only `decision: EngineDecision`.
+  `ReplayInputs` gains defaulted `required_controls` and `policy_digest`;
+  `ReplayVerification` gains `policy_digest_valid` (included in `ok`).
 
 ## [3.0.1] - 2026-09-21
 

@@ -38,11 +38,13 @@ from acgs_lite.engine import GovernanceEngine
 from acgs_lite.errors import ConstitutionalViolationError, GovernanceError
 from acgs_lite.legitimacy.authorization import (
     AuthorizationProfile,
+    EngineDecision,
     ExecutionAuthority,
     ExecutionGrant,
     TrustedExecutionContext,
     authorization_envelope_json,
     build_issue_receipt,
+    engine_decision_from_results,
     extract_authorization_kwargs,
     parse_authorization_envelope,
     resolve_profile,
@@ -842,7 +844,7 @@ class GovernedCallable:
         if any(tokens.get(name) is not None for name in tokens):
             raise TypeError("issue_grant refuses authorization transport kwargs")
         self._reject_production_receiver(func, args, kwargs)
-        self._validate_payloads(func, args, kwargs, invoke_denied=True)
+        decision = self._evaluate_invocation(args, kwargs)
         invocation = bind_invocation(
             func,
             args,
@@ -852,7 +854,9 @@ class GovernedCallable:
         )
         context_digest = self._trusted_context_digest(invocation)
         policy = bind_policy(self.constitution)
-        receipt = build_issue_receipt(func=func, invocation=invocation, policy=policy)
+        receipt = build_issue_receipt(
+            func=func, invocation=invocation, policy=policy, decision=decision
+        )
         grant = self._authority.issue(
             receipt=receipt,
             invocation=invocation,
@@ -901,18 +905,27 @@ class GovernedCallable:
                 "production grants do not support receiver methods without exact instance binding"
             )
 
-    def _validate_payloads(
-        self,
-        func: Callable[..., Any],
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-        *,
-        invoke_denied: bool,
-    ) -> None:
-        del func, invoke_denied
-        for payload in governance_payloads_for_enforcement(*args, kwargs):
-            result = self.engine.validate(payload, agent_id=self.agent_id)
-            _deny_unless_valid(result, action=payload)
+    def _evaluate_invocation(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> EngineDecision:
+        """Evaluate every governed payload and return the engine's aggregated verdict.
+
+        The per-call ``strict=False`` override returns review and block verdicts as
+        values so the issue path maps them itself; HALT still raises from the engine.
+        Only ALLOW and ALLOW_WITH_CONTROLS are mintable.
+        """
+        payloads = governance_payloads_for_enforcement(*args, kwargs)
+        results = [
+            self.engine.validate(payload, agent_id=self.agent_id, strict=False)
+            for payload in payloads
+        ]
+        decision = engine_decision_from_results(results)
+        if decision.decision_type not in ("ALLOW", "ALLOW_WITH_CONTROLS"):
+            raise ConstitutionalViolationError(
+                f"constitution decision {decision.decision_type} does not permit a grant"
+                f" ({decision.rationale})",
+                rule_id=decision.primary_rule_id or "EXECUTION-GRANT-DENIED",
+                action=payloads[0][:200] if payloads else "",
+            )
+        return decision
 
     def _gate(
         self, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]

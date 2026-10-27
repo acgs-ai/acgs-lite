@@ -7,15 +7,20 @@ import hmac
 import json
 import secrets
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
+from acgs_lite.legitimacy.decide import DecisionState
 from acgs_lite.legitimacy.invariants import LegitimacyInvariantError
 from acgs_lite.legitimacy.invocation import InvocationBinding, PolicyBinding
-from acgs_lite.legitimacy.receipt import DecisionReceipt, ExecutionBoundary
+from acgs_lite.legitimacy.receipt import (
+    BASELINE_CONSTRAINT_MARKER,
+    DecisionReceipt,
+    ExecutionBoundary,
+)
 
 
 class AuthorizationProfile(str, Enum):
@@ -255,13 +260,86 @@ class ExecutionAuthority:
         return digest
 
 
+AUDIT_WARNINGS_CONTROL = "AUDIT_WARNINGS"
+
+# Worst verdict wins when aggregating payloads.
+_DECISION_RANK: dict[str, int] = {
+    "ALLOW": 0,
+    "ALLOW_WITH_CONTROLS": 1,
+    "STRUCTURED_REVIEW_REQUIRED": 2,
+    "DENY_GOAL": 3,
+    "HARD_DENY": 4,
+}
+
+
+@dataclass(slots=True, frozen=True)
+class EngineDecision:
+    """The engine's aggregated verdict over every governed payload of one invocation."""
+
+    decision_type: DecisionState
+    matched_rule_ids: tuple[str, ...]
+    required_controls: tuple[str, ...]
+    rationale: str | None
+    payload_count: int
+    primary_rule_id: str | None = None
+
+
+def _rule_ids(items: object) -> list[str]:
+    if not isinstance(items, (list, tuple)):
+        return []
+    return [
+        rid for rid in (getattr(item, "rule_id", None) for item in items) if isinstance(rid, str)
+    ]
+
+
+def _classify_result(result: object) -> tuple[DecisionState, list[str]]:
+    """Map one engine result to a decision and the rule ids that produced it."""
+    if getattr(result, "valid", None) is True:
+        warning_ids = _rule_ids(getattr(result, "warnings", None))
+        return ("ALLOW_WITH_CONTROLS", warning_ids) if warning_ids else ("ALLOW", [])
+    blocking_ids = _rule_ids(getattr(result, "violations", None))
+    # ViolationAction is a str enum; compare by value to keep legitimacy engine-agnostic.
+    if getattr(result, "action_taken", None) == "halt_and_alert":
+        return "HARD_DENY", blocking_ids
+    review_ids = set(_rule_ids(getattr(result, "review_requests", None)))
+    review_ids.update(_rule_ids(getattr(result, "escalations", None)))
+    if blocking_ids and all(rid in review_ids for rid in blocking_ids):
+        return "STRUCTURED_REVIEW_REQUIRED", blocking_ids
+    # Any non-review blocking violation, or an invalid result with no evidence, denies.
+    deny_ids = [rid for rid in blocking_ids if rid not in review_ids]
+    return "DENY_GOAL", deny_ids
+
+
+def engine_decision_from_results(results: Sequence[object]) -> EngineDecision:
+    """Aggregate per-payload engine results; the worst verdict wins, order-independently."""
+    if not results:
+        raise LegitimacyInvariantError("no engine result to decide from")
+    classified = [_classify_result(result) for result in results]
+    worst = max((decision for decision, _ids in classified), key=_DECISION_RANK.__getitem__)
+    contributing = [ids for decision, ids in classified if decision == worst]
+    primary = next((ids[0] for ids in contributing if ids), None)
+    matched = tuple(sorted({rid for ids in contributing for rid in ids}))
+    if worst == "ALLOW":
+        return EngineDecision("ALLOW", (BASELINE_CONSTRAINT_MARKER,), (), None, len(results))
+    if worst == "ALLOW_WITH_CONTROLS":
+        return EngineDecision(
+            "ALLOW_WITH_CONTROLS", matched, (AUDIT_WARNINGS_CONTROL,), None, len(results), primary
+        )
+    rationale = f"engine {worst}: {', '.join(matched) or 'no violation evidence'}"
+    return EngineDecision(worst, matched, (), rationale, len(results), primary)
+
+
 def build_issue_receipt(
     *,
     func: Callable[..., Any],
     invocation: InvocationBinding,
     policy: PolicyBinding,
+    decision: EngineDecision,
 ) -> DecisionReceipt:
-    """Kernel-built evidence receipt. Callers cannot supply the receipt being bound."""
+    """Kernel-built evidence receipt recording the engine's decision.
+
+    Callers cannot supply the receipt being bound.
+    """
     boundary = ExecutionBoundary(
         allowed_method=func.__name__,
         allowed_scope=invocation.scope,
@@ -273,11 +351,12 @@ def build_issue_receipt(
         request_id=f"grant-{uuid.uuid4().hex}",
         goal=f"Authorized invocation of {invocation.method_id}",
         proposed_method=func.__name__,
-        decision_type="ALLOW",
+        decision_type=decision.decision_type,
         authority_basis="acgs-lite:execution-authority",
-        matched_constraints=("execution-grant-issued",),
+        matched_constraints=decision.matched_rule_ids,
         policy_version=policy.version,
-        required_controls=(),
+        required_controls=decision.required_controls,
+        denial_or_review_rationale=decision.rationale,
         execution_boundary=boundary,
     )
 
@@ -356,12 +435,14 @@ __all__ = [
     "AUTHORIZATION_MAC_DOMAIN",
     "AsyncGrantResolver",
     "AuthorizationProfile",
+    "EngineDecision",
     "ExecutionAuthority",
     "ExecutionGrant",
     "GrantResolver",
     "TrustedExecutionContext",
     "authorization_envelope_json",
     "build_issue_receipt",
+    "engine_decision_from_results",
     "extract_authorization_kwargs",
     "parse_authorization_envelope",
     "resolve_profile",

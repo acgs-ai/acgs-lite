@@ -18,11 +18,12 @@ actually correct -- not merely unaltered.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from acgs_lite.legitimacy.decide import DecisionState, canonicalize_decision_state
-from acgs_lite.legitimacy.signing import SignedReceipt
+from acgs_lite.legitimacy.signing import SIGNATURE_SCOPE_EXECUTION, SignedReceipt
 
 
 @dataclass(slots=True, frozen=True)
@@ -39,6 +40,9 @@ class ReplayInputs:
     policy_version: str
     authority_basis: str
     matched_constraints: tuple[str, ...]
+    required_controls: tuple[str, ...] = ()
+    # PolicyBinding.digest committed by the signed execution envelope, when present.
+    policy_digest: str | None = None
 
 
 # An evaluator re-derives a decision state from the receipt's recorded inputs.
@@ -56,11 +60,29 @@ class ReplayVerification:
     recorded_decision: DecisionState
     rederived_decision: DecisionState | None
     mismatches: tuple[str, ...]
+    policy_digest_valid: bool = True
 
     @property
     def ok(self) -> bool:
-        """True only when authenticity, integrity, and verdict all hold."""
-        return self.hash_valid and self.signature_valid and self.verdict_reproduced
+        """True only when authenticity, integrity, policy binding, and verdict all hold."""
+        return (
+            self.hash_valid
+            and self.signature_valid
+            and self.policy_digest_valid
+            and self.verdict_reproduced
+        )
+
+
+def _committed_policy_digest(signed: SignedReceipt) -> str | None:
+    """Policy digest from the signed execution envelope; ``None`` when not committed."""
+    if signed.signature_scope != SIGNATURE_SCOPE_EXECUTION or not signed.authorization_json:
+        return None
+    try:
+        envelope = json.loads(signed.authorization_json)
+    except (TypeError, ValueError):
+        return None
+    digest = envelope.get("policy_digest") if isinstance(envelope, dict) else None
+    return digest if isinstance(digest, str) and digest else None
 
 
 def replay_and_verify(
@@ -68,6 +90,7 @@ def replay_and_verify(
     evaluator: DecisionEvaluator,
     *,
     expected_public_key: str,
+    expected_policy_digest: str | None = None,
 ) -> ReplayVerification:
     """Verify a signed receipt's authenticity, then re-derive and confirm its verdict.
 
@@ -75,6 +98,11 @@ def replay_and_verify(
     key: authenticity cannot be established against the receipt's own embedded key
     alone. The verdict is only re-derived once the receipt is proven authentic and
     intact; an inauthentic receipt is not trusted enough to feed an evaluator.
+
+    When ``expected_policy_digest`` (a ``PolicyBinding.digest``) is given, replay
+    fails closed unless the signature commits exactly that digest: an absent or
+    different digest is a mismatch and the evaluator is not run. ``Constitution.hash``
+    is not sufficient because it omits rule patterns.
     """
     receipt = signed.receipt
     hash_valid = receipt.verify_hash()
@@ -83,8 +111,21 @@ def replay_and_verify(
     mismatches: list[str] = []
     rederived: DecisionState | None = None
     verdict_reproduced = False
+    policy_digest_valid = expected_policy_digest is None
+    committed_digest = _committed_policy_digest(signed)
 
-    if hash_valid and signature_valid:
+    if hash_valid and signature_valid and expected_policy_digest is not None:
+        if committed_digest is None:
+            mismatches.append("policy_digest_absent")
+        elif committed_digest != expected_policy_digest:
+            mismatches.append(
+                f"policy_digest_mismatch: committed={committed_digest} "
+                f"expected={expected_policy_digest}"
+            )
+        else:
+            policy_digest_valid = True
+
+    if hash_valid and signature_valid and policy_digest_valid:
         inputs = ReplayInputs(
             request_id=receipt.request_id,
             goal=receipt.goal,
@@ -92,6 +133,8 @@ def replay_and_verify(
             policy_version=receipt.policy_version,
             authority_basis=receipt.authority_basis,
             matched_constraints=receipt.matched_constraints,
+            required_controls=receipt.required_controls,
+            policy_digest=committed_digest,
         )
         try:
             rederived = canonicalize_decision_state(evaluator(inputs))
@@ -116,6 +159,7 @@ def replay_and_verify(
         recorded_decision=receipt.decision_type,
         rederived_decision=rederived,
         mismatches=tuple(mismatches),
+        policy_digest_valid=policy_digest_valid,
     )
 
 
