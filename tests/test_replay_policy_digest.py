@@ -20,8 +20,13 @@ from acgs_lite.legitimacy import (  # noqa: E402
     replay_and_verify,
     sign_receipt,
 )
-from acgs_lite.legitimacy.authorization import authorization_envelope_json  # noqa: E402
+from acgs_lite.legitimacy.authorization import (  # noqa: E402
+    EngineDecision,
+    authorization_envelope_json,
+    build_issue_receipt,
+)
 from acgs_lite.legitimacy.invocation import bind_invocation, bind_policy  # noqa: E402
+from acgs_lite.legitimacy.receipt import BASELINE_CONSTRAINT_MARKER  # noqa: E402
 from acgs_lite.legitimacy.signing import sign_execution_authorization  # noqa: E402
 
 _SIGNER = Ed25519ReceiptSigner.from_seed(bytes(range(32)))
@@ -90,7 +95,16 @@ def test_replay_rejects_same_label_different_constitution() -> None:
 
 
 def test_replay_rejects_receipt_scope_signature_when_digest_expected() -> None:
-    receipt, _signed = _signed_execution(C1)
+    # A v1 receipt commits no policy digest; only an execution envelope could.
+    # (v2 receipts commit it themselves: see tests/test_receipt_v2.py.)
+    invocation = bind_invocation(_target, ("hello",), {}, include_receiver=True)
+    receipt = build_issue_receipt(
+        func=_target,
+        invocation=invocation,
+        policy=bind_policy(C1),
+        decision=EngineDecision("ALLOW", (BASELINE_CONSTRAINT_MARKER,), (), None, 1),
+    )
+    assert receipt.schema_version is None
     signed = sign_receipt(receipt, _SIGNER)
     result = replay_and_verify(
         signed,

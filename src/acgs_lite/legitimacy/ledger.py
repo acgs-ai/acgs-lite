@@ -70,6 +70,7 @@ class InProcessGrantLedger:
             str,
             tuple[str, str, str, str, str | None, tuple[str, ...], str | None],
         ] = {}
+        self._receipt_grant: dict[str, str] = {}
 
     def consume(
         self,
@@ -92,6 +93,9 @@ class InProcessGrantLedger:
             context_digest,
         )
         with self._lock:
+            bound_grant = self._receipt_grant.get(receipt_hash)
+            if bound_grant is not None and bound_grant != grant_id:
+                raise LegitimacyInvariantError("receipt already bound to a different grant")
             existing = self._grant_attempt.get(grant_id)
             if existing is None:
                 attempt_owner = self._attempts.get(attempt_id)
@@ -117,6 +121,7 @@ class InProcessGrantLedger:
                 self._grant_attempt[grant_id] = attempt_id
                 self._attempts[attempt_id] = record
                 self._bindings[grant_id] = binding
+                self._receipt_grant[receipt_hash] = grant_id
                 return ConsumeDecision(mode="proceed", record=record)
 
             if existing != attempt_id:

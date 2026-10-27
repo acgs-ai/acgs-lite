@@ -32,6 +32,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signed execution envelope commits no `PolicyBinding.digest` (`policy_digest_absent`) or a
   different one (`policy_digest_mismatch`), so a same-label constitution with different
   rule patterns no longer replays as valid.
+- One decision receipt now mints at most one execution grant: `ExecutionAuthority.issue`
+  refuses a second grant for the same `receipt_hash`, and the grant ledger refuses to bind
+  one receipt to two grants. Grant ids are random server-side values from `secrets`,
+  pre-allocated by `ExecutionAuthority.allocate_grant_id()` and never accepted from callers.
+
+### Added
+
+- Decision receipt schema v2 (criterion 16). `DecisionReceipt` gains trailing defaulted
+  fields `schema_version`, `grant_id`, `policy_digest` (full `PolicyBinding.digest`),
+  `method_id`, `argument_digest` and `context_digest`. v2 hashes are domain-separated with
+  `RECEIPT_HASH_DOMAIN_V2 = b"acgs-receipt-v2\x00"` over the v1 keys plus
+  `schema_version: 2` and the non-None v2 keys. v1 receipts keep their byte-identical hash
+  and wire shape; a missing `schema_version` always means v1, v2 fields on a v1 receipt
+  (or v2 keys on the wire without `schema_version: 2`) are refused, and no v1 bytes verify
+  as v2 or vice versa. `receipt_identity` returns `acgs:receipt:v2:...` for v2 receipts.
 
 ### Changed
 
@@ -44,6 +59,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `build_issue_receipt` (untiered) now requires a keyword-only `decision: EngineDecision`.
   `ReplayInputs` gains defaulted `required_controls` and `policy_digest`;
   `ReplayVerification` gains `policy_digest_valid` (included in `ok`).
+- `GovernedCallable.issue_grant` now mints v2 receipts that commit the grant id and policy
+  digest. `ExecutionAuthority.issue` takes a keyword-only `grant_id` (required for v2
+  receipts and checked against the receipt's committed bindings); without it only v1
+  receipts mint (legacy path). `build_issue_receipt` takes optional keyword-only
+  `grant_id` / `context_digest` and builds a v2 receipt when `grant_id` is given.
+- `replay_and_verify` reads the policy digest from a v2 receipt itself (either signature
+  scope) and fails closed with `policy_digest_conflict` when an execution envelope names a
+  different digest; v1 receipts keep the envelope path.
 
 ## [3.0.1] - 2026-09-21
 

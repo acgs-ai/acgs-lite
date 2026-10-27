@@ -854,17 +854,28 @@ class GovernedCallable:
         )
         context_digest = self._trusted_context_digest(invocation)
         policy = bind_policy(self.constitution)
-        receipt = build_issue_receipt(
-            func=func, invocation=invocation, policy=policy, decision=decision
-        )
-        grant = self._authority.issue(
-            receipt=receipt,
-            invocation=invocation,
-            policy=policy,
-            single_use=True,
-            context_digest=context_digest,
-            callable_target=func,
-        )
+        grant_id = self._authority.allocate_grant_id()
+        try:
+            receipt = build_issue_receipt(
+                func=func,
+                invocation=invocation,
+                policy=policy,
+                decision=decision,
+                grant_id=grant_id,
+                context_digest=context_digest,
+            )
+            grant = self._authority.issue(
+                receipt=receipt,
+                invocation=invocation,
+                policy=policy,
+                single_use=True,
+                context_digest=context_digest,
+                callable_target=func,
+                grant_id=grant_id,
+            )
+        finally:
+            # No-op once issued; otherwise the allocation never outlives this call.
+            self._authority.release_grant_id(grant_id)
         return grant
 
     def _trusted_context_digest(self, invocation: InvocationBinding) -> str | None:

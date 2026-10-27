@@ -30,6 +30,7 @@ from acgs_lite.legitimacy import (
     LegitimacyInvariantError,
     TrustedExecutionContext,
 )
+from acgs_lite.legitimacy.authorization import EngineDecision, build_issue_receipt
 from acgs_lite.legitimacy.invocation import (
     InvocationBinding,
     PolicyBinding,
@@ -549,10 +550,22 @@ def test_authentic_grant_without_exact_target_is_not_production_authority() -> N
 
     protected = guard(operation)
     normal = protected.issue_grant(1)
+    invocation = bind_invocation(operation, (1,), {}, include_receiver=True)
+    policy = bind_policy(guard.constitution)
+    # One receipt mints at most one grant, so the issued receipt cannot be re-minted.
+    with pytest.raises(LegitimacyInvariantError, match="already minted"):
+        guard._authority.issue(receipt=normal.receipt, invocation=invocation, policy=policy)
+    # An otherwise authentic grant minted without the exact target still cannot execute.
+    grant_id = guard._authority.allocate_grant_id()
+    fresh = build_issue_receipt(
+        func=operation,
+        invocation=invocation,
+        policy=policy,
+        decision=EngineDecision("ALLOW", (BASELINE_CONSTRAINT_MARKER,), (), None, 1),
+        grant_id=grant_id,
+    )
     unbound = guard._authority.issue(
-        receipt=normal.receipt,
-        invocation=bind_invocation(operation, (1,), {}, include_receiver=True),
-        policy=bind_policy(guard.constitution),
+        receipt=fresh, invocation=invocation, policy=policy, grant_id=grant_id
     )
     with pytest.raises(LegitimacyInvariantError, match="callable identity"):
         protected(1, execution_grant=unbound)

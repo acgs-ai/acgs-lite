@@ -28,7 +28,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
-from acgs_lite.legitimacy.receipt import DecisionReceipt, ExecutionBoundary
+from acgs_lite.legitimacy.receipt import (
+    RECEIPT_SCHEMA_V2,
+    V2_EXTENSION_KEYS,
+    DecisionReceipt,
+    ExecutionBoundary,
+)
 
 # Domain-separation prefix: prevents a receipt signature from ever being replayed
 # as a signature over some other acgs-lite message that happens to share bytes.
@@ -310,7 +315,13 @@ def _receipt_from_dict(data: Mapping[str, Any]) -> DecisionReceipt:
 
     The receipt's ``__post_init__`` re-validates the hash against the payload, so a
     round-tripped receipt that fails reconstruction is itself evidence of tampering.
+    A missing (or null) ``schema_version`` always means v1; v2 keys without
+    ``schema_version: 2`` are refused rather than silently dropped or upgraded.
     """
+    schema_version = data.get("schema_version")
+    v2_keys = {key: data.get(key) for key in V2_EXTENSION_KEYS[1:]}
+    if schema_version != RECEIPT_SCHEMA_V2 and any(key in data for key in v2_keys):
+        raise ValueError("v2 receipt fields require schema_version 2")
     boundary_data = data["execution_boundary"]
     boundary = ExecutionBoundary(
         allowed_method=boundary_data["allowed_method"],
@@ -333,6 +344,8 @@ def _receipt_from_dict(data: Mapping[str, Any]) -> DecisionReceipt:
         execution_boundary=boundary,
         issued_at=data["issued_at"],
         receipt_hash=data["receipt_hash"],
+        schema_version=schema_version,
+        **v2_keys,
     )
 
 

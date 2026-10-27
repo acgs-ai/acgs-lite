@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import secrets
+import threading
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ from acgs_lite.legitimacy.invariants import LegitimacyInvariantError
 from acgs_lite.legitimacy.invocation import InvocationBinding, PolicyBinding
 from acgs_lite.legitimacy.receipt import (
     BASELINE_CONSTRAINT_MARKER,
+    RECEIPT_SCHEMA_V2,
     DecisionReceipt,
     ExecutionBoundary,
 )
@@ -124,11 +126,69 @@ class ExecutionGrant:
 
 
 class ExecutionAuthority:
-    """Mints and verifies same-instance grants with a per-authority HMAC key."""
+    """Mints and verifies same-instance grants with a per-authority HMAC key.
+
+    Grant ids are random, server-side and single use: v2 receipts commit an id
+    pre-allocated by :meth:`allocate_grant_id`, and one receipt mints at most one
+    grant. Both registries are process-local, like the grant ledger.
+    """
 
     def __init__(self) -> None:
         self.issuer_id = uuid.uuid4().hex
         self._secret = secrets.token_bytes(32)
+        self._lock = threading.Lock()
+        self._pending: set[str] = set()
+        self._issued_receipts: dict[str, str] = {}
+
+    def allocate_grant_id(self) -> str:
+        """Reserve a fresh random grant id to be committed into a v2 receipt."""
+        grant_id = secrets.token_hex(16)
+        with self._lock:
+            self._pending.add(grant_id)
+        return grant_id
+
+    def release_grant_id(self, grant_id: str) -> None:
+        """Discard an allocation whose receipt was never issued."""
+        with self._lock:
+            self._pending.discard(grant_id)
+
+    def _claim_grant_id(
+        self,
+        *,
+        receipt: DecisionReceipt,
+        invocation: InvocationBinding,
+        policy: PolicyBinding,
+        context_digest: str | None,
+        grant_id: str | None,
+    ) -> str:
+        v2 = receipt.schema_version == RECEIPT_SCHEMA_V2
+        with self._lock:
+            if receipt.receipt_hash in self._issued_receipts:
+                raise LegitimacyInvariantError("receipt already minted a grant")
+            if grant_id is None:
+                if v2:
+                    raise LegitimacyInvariantError("v2 receipt requires an allocated grant id")
+                claimed = secrets.token_hex(16)
+            else:
+                if grant_id not in self._pending:
+                    raise LegitimacyInvariantError("grant id was not allocated by this authority")
+                # Single use: a refused allocation is spent, never retried.
+                self._pending.discard(grant_id)
+                claimed = grant_id
+            if v2:
+                if receipt.grant_id != claimed:
+                    raise LegitimacyInvariantError("grant id does not match receipt")
+                if receipt.policy_digest != policy.digest:
+                    raise LegitimacyInvariantError("receipt policy digest does not match policy")
+                if (
+                    receipt.method_id != invocation.method_id
+                    or receipt.argument_digest != invocation.argument_digest
+                ):
+                    raise LegitimacyInvariantError("receipt does not match invocation binding")
+                if receipt.context_digest != context_digest:
+                    raise LegitimacyInvariantError("receipt does not match trusted context digest")
+            self._issued_receipts[receipt.receipt_hash] = claimed
+            return claimed
 
     def issue(
         self,
@@ -140,9 +200,21 @@ class ExecutionAuthority:
         single_use: bool = True,
         context_digest: str | None = None,
         callable_target: Callable[..., Any] | None = None,
+        grant_id: str | None = None,
     ) -> ExecutionGrant:
+        """Mint the one grant for ``receipt``.
+
+        ``grant_id`` must come from :meth:`allocate_grant_id` and is required for v2
+        receipts, which commit it. Without it only v1 receipts mint (legacy path).
+        """
+        grant_id = self._claim_grant_id(
+            receipt=receipt,
+            invocation=invocation,
+            policy=policy,
+            context_digest=context_digest,
+            grant_id=grant_id,
+        )
         issued_at = datetime.now(timezone.utc).isoformat()
-        grant_id = uuid.uuid4().hex
         mac = self._mac(
             grant_id=grant_id,
             receipt_hash=receipt.receipt_hash,
@@ -202,6 +274,11 @@ class ExecutionAuthority:
             raise LegitimacyInvariantError("grant authenticity check failed")
         if not grant.receipt.verify_hash():
             raise LegitimacyInvariantError("grant receipt integrity check failed")
+        if (
+            grant.receipt.schema_version == RECEIPT_SCHEMA_V2
+            and grant.receipt.grant_id != grant.grant_id
+        ):
+            raise LegitimacyInvariantError("grant id does not match receipt")
         if grant.method_id != invocation.method_id:
             raise LegitimacyInvariantError("grant method identity mismatch")
         if grant.argument_digest != invocation.argument_digest:
@@ -335,11 +412,28 @@ def build_issue_receipt(
     invocation: InvocationBinding,
     policy: PolicyBinding,
     decision: EngineDecision,
+    grant_id: str | None = None,
+    context_digest: str | None = None,
 ) -> DecisionReceipt:
     """Kernel-built evidence receipt recording the engine's decision.
 
-    Callers cannot supply the receipt being bound.
+    Callers cannot supply the receipt being bound. With ``grant_id`` (allocated by
+    the authority) the receipt is schema v2 and commits the grant id, the full
+    ``PolicyBinding.digest``, the method, argument and trusted-context digests.
+    Without it the receipt is v1.
     """
+    if grant_id is None and context_digest is not None:
+        raise LegitimacyInvariantError("context digest is only committed by v2 receipts")
+    v2: dict[str, Any] = {}
+    if grant_id is not None:
+        v2 = {
+            "schema_version": RECEIPT_SCHEMA_V2,
+            "grant_id": grant_id,
+            "policy_digest": policy.digest,
+            "method_id": invocation.method_id,
+            "argument_digest": invocation.argument_digest,
+            "context_digest": context_digest,
+        }
     boundary = ExecutionBoundary(
         allowed_method=func.__name__,
         allowed_scope=invocation.scope,
@@ -358,6 +452,7 @@ def build_issue_receipt(
         required_controls=decision.required_controls,
         denial_or_review_rationale=decision.rationale,
         execution_boundary=boundary,
+        **v2,
     )
 
 
