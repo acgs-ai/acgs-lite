@@ -19,6 +19,16 @@ from acgs_lite.legitimacy.decide import (
     canonicalize_decision_state,
     is_allow_state,
 )
+from acgs_lite.legitimacy.effects import (
+    EffectBudget,
+    EffectOutcome,
+    EffectProvider,
+    EffectRecord,
+    EffectRequest,
+    EffectState,
+    EffectStore,
+    ProviderResult,
+)
 from acgs_lite.legitimacy.identity import (
     local_grant_identity,
     policy_identity,
@@ -81,6 +91,13 @@ __all__ = [
     "DecisionReceipt",
     "DecisionState",
     "Ed25519ReceiptSigner",
+    "EffectBudget",
+    "EffectOutcome",
+    "EffectProvider",
+    "EffectRecord",
+    "EffectRequest",
+    "EffectState",
+    "EffectStore",
     "ExecutionAttemptRecord",
     "ExecutionAuthority",
     "ExecutionBoundary",
@@ -90,6 +107,7 @@ __all__ = [
     "InvocationBinding",
     "LegitimacyInvariantError",
     "PolicyBinding",
+    "ProviderResult",
     "ReceiptSigner",
     "ReceiptSigningUnavailable",
     "ReplayInputs",

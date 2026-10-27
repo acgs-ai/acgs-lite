@@ -297,3 +297,9 @@ authority basis, unknown decisions, and unverifiable audit evidence.
 ## Reference
 
 ::: acgs_lite.legitimacy
+
+## Durable external effects
+
+For opt-in SQLite reservations and provider reconciliation, see
+[Durable external effects](external-effects.md). This trusted host lifecycle
+does not replace execution authorization or change `AttemptStatus.PARTIAL`.
