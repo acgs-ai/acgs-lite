@@ -78,10 +78,27 @@ from acgs_lite.provider_capabilities import (
     RequestShape,
     get_capability_registry,
 )
-from acgs_lite.serialization import iter_governance_payloads, serialize_for_governance
+from acgs_lite.serialization import governance_payloads_for_enforcement, serialize_for_governance
 
 T = TypeVar("T")
 _PROCEED = object()
+
+
+def _deny_unless_valid(result: object, *, action: str) -> None:
+    """Fail closed on any engine result that is not explicitly ``valid is True``.
+
+    Under ``strict=False`` the engine returns blocking verdicts instead of raising;
+    discarding that result used to allow the call.
+    """
+    if getattr(result, "valid", None) is True:
+        return
+    violations = getattr(result, "violations", None) or ()
+    rule_id = getattr(violations[0], "rule_id", None) if violations else None
+    raise ConstitutionalViolationError(
+        "constitution denied the invocation",
+        rule_id=rule_id if isinstance(rule_id, str) and rule_id else "EXECUTION-GRANT-DENIED",
+        action=action[:200],
+    )
 
 
 @runtime_checkable
@@ -762,6 +779,8 @@ class GovernedCallable:
             audit_mode="full",
         )
         self.authorization_profile = resolve_profile(authorization_profile)
+        if self.authorization_profile is AuthorizationProfile.PRODUCTION and not strict:
+            raise LegitimacyInvariantError("production profile requires strict engine")
         self.trusted_issuer_keys = dict(trusted_issuer_keys or {})
         self._authority = ExecutionAuthority()
         self._ledger = InProcessGrantLedger()
@@ -891,14 +910,9 @@ class GovernedCallable:
         invoke_denied: bool,
     ) -> None:
         del func, invoke_denied
-        for payload in iter_governance_payloads(*args, kwargs):
+        for payload in governance_payloads_for_enforcement(*args, kwargs):
             result = self.engine.validate(payload, agent_id=self.agent_id)
-            if not getattr(result, "valid", True):
-                raise ConstitutionalViolationError(
-                    "constitution denied the invocation",
-                    rule_id="EXECUTION-GRANT-DENIED",
-                    action=str(payload),
-                )
+            _deny_unless_valid(result, action=payload)
 
     def _gate(
         self, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -1247,13 +1261,19 @@ class GovernedCallable:
                             require_durable_audit=self.require_durable_audit,
                         )
 
-                    for payload in iter_governance_payloads(*args, kwargs):
-                        engine.validate(payload, agent_id=agent_id)
+                    for payload in governance_payloads_for_enforcement(*args, kwargs):
+                        _deny_unless_valid(
+                            engine.validate(payload, agent_id=agent_id), action=payload
+                        )
                     execution_started = True
                     result = await func(*args, **kwargs)
-                    output_payload = serialize_for_governance(result)
-                    if output_payload:
-                        engine.validate(output_payload, agent_id=f"{agent_id}:output")
+                    for output_payload in governance_payloads_for_enforcement(
+                        result, skip_opaque=True
+                    ):
+                        _deny_unless_valid(
+                            engine.validate(output_payload, agent_id=f"{agent_id}:output"),
+                            action=output_payload,
+                        )
                 except asyncio.CancelledError:
                     self._finalize_attempt(
                         outcome,
@@ -1301,13 +1321,19 @@ class GovernedCallable:
                             require_durable_audit=self.require_durable_audit,
                         )
 
-                    for payload in iter_governance_payloads(*args, kwargs):
-                        engine.validate(payload, agent_id=agent_id)
+                    for payload in governance_payloads_for_enforcement(*args, kwargs):
+                        _deny_unless_valid(
+                            engine.validate(payload, agent_id=agent_id), action=payload
+                        )
                     execution_started = True
                     result = func(*args, **kwargs)
-                    output_payload = serialize_for_governance(result)
-                    if output_payload:
-                        engine.validate(output_payload, agent_id=f"{agent_id}:output")
+                    for output_payload in governance_payloads_for_enforcement(
+                        result, skip_opaque=True
+                    ):
+                        _deny_unless_valid(
+                            engine.validate(output_payload, agent_id=f"{agent_id}:output"),
+                            action=output_payload,
+                        )
                 except Exception:
                     status = AttemptStatus.PARTIAL if execution_started else AttemptStatus.FAILED
                     self._finalize_attempt(outcome, status, error_code="exception")

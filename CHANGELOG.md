@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `GovernedCallable` no longer fails open on payloads it could not evaluate. Governed
+  input and output longer than 10,000 characters are now denied with
+  `GovernancePayloadError` (`rule_id="GOVERNANCE-PAYLOAD-OVERSIZE"`) instead of being
+  truncated before evaluation, at issue and at execute. Oversize output is detected after
+  the call ran: the attempt is recorded (`PARTIAL`) and the caller does not receive the
+  result.
+- Top-level scalar arguments (`int`, `float`, `bool`, `Decimal`, `Enum`, UTF-8 `bytes`)
+  are now evaluated instead of being skipped. Arguments with no evaluable projection
+  (opaque objects, undecodable bytes) are denied in every profile with
+  `rule_id="GOVERNANCE-PAYLOAD-UNEVALUABLE"`. Pass handles through a closure or
+  `functools.partial`, not as governed arguments.
+- `GovernedCallable(strict=False)` no longer turns enforcement into log-only: a blocking
+  engine verdict (or a result without `valid is True`) denies at issue, execute input and
+  execute output, raising with the primary violation's `rule_id`. The production profile
+  now rejects `strict=False` at construction.
+- `serialize_for_governance` / `iter_governance_payloads` are unchanged and documented as
+  preview-only; enforcement uses the new `governance_payloads_for_enforcement`.
+
 ## [3.0.1] - 2026-09-21
 
 ### Fixed
