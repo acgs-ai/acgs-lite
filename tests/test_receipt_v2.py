@@ -29,12 +29,21 @@ from acgs_lite.legitimacy.authorization import EngineDecision, build_issue_recei
 from acgs_lite.legitimacy.invocation import bind_invocation, bind_policy
 from acgs_lite.legitimacy.ledger import InProcessGrantLedger
 from acgs_lite.legitimacy.receipt import BASELINE_CONSTRAINT_MARKER
-from acgs_lite.legitimacy.signing import _receipt_from_dict
+from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner, _receipt_from_dict
 
 # Captured from origin/main 0cd5e56 (receipt.py unchanged there) before the v2 change.
 GOLDEN_V1_HASH = "1733d4f44d414f94d6ec8706b13ba3b6268260c290ad89eaf11a85962ce28e56"
 
 _ALLOW = EngineDecision("ALLOW", (BASELINE_CONSTRAINT_MARKER,), (), None, 1)
+
+
+def _production_signing() -> dict[str, object]:
+    """Pinned, non-ephemeral Ed25519 execution signer the production profile requires."""
+    signer = Ed25519ReceiptSigner.from_seed(bytes(range(32)))
+    return {
+        "receipt_signer": signer,
+        "trusted_execution_keys": {signer.key_id: signer.public_key_hex()},
+    }
 
 
 def _boundary() -> ExecutionBoundary:
@@ -77,6 +86,7 @@ def _guard(constitution: Constitution | None = None) -> GovernedCallable:
     return GovernedCallable(
         constitution or Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
 

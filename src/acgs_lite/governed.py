@@ -15,14 +15,18 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hmac
 import inspect
 import logging
+import math
 import os
 import threading
+import time
 import uuid
 import warnings
 import weakref
 from collections.abc import Callable, Mapping
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol, TypeVar, cast, runtime_checkable
 
 _log = logging.getLogger(__name__)
@@ -49,6 +53,7 @@ from acgs_lite.legitimacy.authorization import (
     parse_authorization_envelope,
     resolve_profile,
 )
+from acgs_lite.legitimacy.decide import canonicalize_decision_state
 from acgs_lite.legitimacy.invariants import (
     LegitimacyInvariantError,
     normalize_actual_call,
@@ -68,10 +73,13 @@ from acgs_lite.legitimacy.ledger import (
     InProcessGrantLedger,
     digest_output,
 )
-from acgs_lite.legitimacy.receipt import DecisionReceipt
+from acgs_lite.legitimacy.receipt import RECEIPT_SCHEMA_V2, DecisionReceipt
 from acgs_lite.legitimacy.signing import (
+    SIGNATURE_ALGORITHM,
     SIGNATURE_SCOPE_EXECUTION,
+    ReceiptSigner,
     SignedReceipt,
+    sign_execution_authorization,
 )
 from acgs_lite.maci import MACIEnforcer, MACIRole
 from acgs_lite.provider_capabilities import (
@@ -84,6 +92,8 @@ from acgs_lite.serialization import governance_payloads_for_enforcement, seriali
 
 T = TypeVar("T")
 _PROCEED = object()
+
+DEFAULT_SIGNED_GRANT_TTL_SECONDS = 300.0
 
 
 def _deny_unless_valid(result: object, *, action: str) -> None:
@@ -770,7 +780,20 @@ class GovernedCallable:
         require_restart_recovery: bool = False,
         trusted_execution_context: TrustedExecutionContext | None = None,
         require_trusted_context: bool = False,
+        receipt_signer: ReceiptSigner | None = None,
+        trusted_execution_keys: Mapping[str, str] | None = None,
+        grant_ttl_seconds: float | None = None,
     ) -> None:
+        """Construct the governed-callable decorator.
+
+        The production profile requires ``receipt_signer``: a non-ephemeral Ed25519
+        signer whose public key is pinned, from outside the signer, in
+        ``trusted_execution_keys`` (``key_id -> public key hex``). Only keys pinned
+        there authorize execution; ``trusted_issuer_keys`` never does. Every
+        production grant is signed with execution scope and expires after
+        ``grant_ttl_seconds`` (default 300). The signing arguments are refused
+        outside the production profile.
+        """
         self.constitution = constitution or Constitution.default()
         self.agent_id = agent_id
         self.audit_log = audit_log if audit_log is not None else AuditLog()
@@ -784,6 +807,16 @@ class GovernedCallable:
         if self.authorization_profile is AuthorizationProfile.PRODUCTION and not strict:
             raise LegitimacyInvariantError("production profile requires strict engine")
         self.trusted_issuer_keys = dict(trusted_issuer_keys or {})
+        self.trusted_execution_keys = dict(trusted_execution_keys or {})
+        self.receipt_signer = receipt_signer
+        self.grant_ttl_seconds = (
+            DEFAULT_SIGNED_GRANT_TTL_SECONDS if grant_ttl_seconds is None else grant_ttl_seconds
+        )
+        # Production grant id -> (monotonic deadline, weak ref to the executed callable).
+        # Process-local, like the ledger: a signed receipt executes only on the instance
+        # that issued it. Weak, so the issuer never keeps an abandoned grant's target alive.
+        self._signed_grants: dict[str, tuple[float, weakref.ref[Callable[..., Any]]]] = {}
+        self._signed_grants_lock = threading.Lock()
         self._authority = ExecutionAuthority()
         self._ledger = InProcessGrantLedger()
         # Serialize terminal ledger/audit confirmation with replay visibility.
@@ -819,6 +852,45 @@ class GovernedCallable:
                 raise LegitimacyInvariantError(
                     "required durable audit confirmation needs a supported durable backend"
                 )
+        if self.authorization_profile is AuthorizationProfile.PRODUCTION:
+            self._require_production_signer()
+        elif (
+            receipt_signer is not None
+            or trusted_execution_keys is not None
+            or grant_ttl_seconds is not None
+        ):
+            raise LegitimacyInvariantError(
+                "receipt signing and execution key pins require the production profile"
+            )
+
+    def _require_production_signer(self) -> None:
+        """Refuse production construction without a pinned, non-ephemeral Ed25519 key."""
+        signer = self.receipt_signer
+        if signer is None:
+            raise LegitimacyInvariantError("production profile requires an Ed25519 receipt signer")
+        if not isinstance(signer, ReceiptSigner) or signer.algorithm != SIGNATURE_ALGORITHM:
+            raise LegitimacyInvariantError("production receipt signer must be Ed25519")
+        if getattr(signer, "ephemeral", False):
+            raise LegitimacyInvariantError(
+                "production receipt signer must not use an ephemeral per-process key"
+            )
+        pinned = self.trusted_execution_keys.get(signer.key_id)
+        public_key = signer.public_key_hex()
+        if not (
+            isinstance(pinned, str)
+            and isinstance(public_key, str)
+            and pinned.isascii()
+            and public_key.isascii()
+            and hmac.compare_digest(pinned, public_key)
+        ):
+            raise LegitimacyInvariantError(
+                "production receipt signer key must be pinned in trusted_execution_keys"
+            )
+        ttl = self.grant_ttl_seconds
+        if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not math.isfinite(ttl):
+            raise LegitimacyInvariantError("grant_ttl_seconds must be a positive finite number")
+        if ttl <= 0:
+            raise LegitimacyInvariantError("grant_ttl_seconds must be a positive finite number")
 
     def issue_grant(
         self, target: Callable[..., Any], /, *args: Any, **kwargs: Any
@@ -854,6 +926,18 @@ class GovernedCallable:
         )
         context_digest = self._trusted_context_digest(invocation)
         policy = bind_policy(self.constitution)
+        signer = (
+            self.receipt_signer
+            if self.authorization_profile is AuthorizationProfile.PRODUCTION
+            else None
+        )
+        expires_at: str | None = None
+        deadline: float | None = None
+        if signer is not None:
+            deadline = time.monotonic() + self.grant_ttl_seconds
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=self.grant_ttl_seconds)
+            ).isoformat()
         grant_id = self._authority.allocate_grant_id()
         try:
             receipt = build_issue_receipt(
@@ -863,20 +947,49 @@ class GovernedCallable:
                 decision=decision,
                 grant_id=grant_id,
                 context_digest=context_digest,
+                expires_at=expires_at,
             )
+            signed: SignedReceipt | None = None
+            if signer is not None:
+                # Sign before issue so a signing failure never leaves an unsigned grant.
+                signed = sign_execution_authorization(
+                    receipt,
+                    signer,
+                    authorization_json=authorization_envelope_json(
+                        invocation,
+                        policy,
+                        grant_id=grant_id,
+                        context_digest=context_digest,
+                        expires_at=expires_at,
+                    ),
+                )
             grant = self._authority.issue(
                 receipt=receipt,
                 invocation=invocation,
                 policy=policy,
+                expires_at=expires_at,
                 single_use=True,
                 context_digest=context_digest,
                 callable_target=func,
                 grant_id=grant_id,
+                signed_receipt=signed,
             )
         finally:
             # No-op once issued; otherwise the allocation never outlives this call.
             self._authority.release_grant_id(grant_id)
+        if deadline is not None:
+            self._register_signed_grant(grant_id, deadline, func)
         return grant
+
+    def _register_signed_grant(
+        self, grant_id: str, deadline: float, func: Callable[..., Any]
+    ) -> None:
+        now = time.monotonic()
+        with self._signed_grants_lock:
+            # Expired entries can never verify again; drop them to bound the registry.
+            for stale in [gid for gid, (due, _f) in self._signed_grants.items() if due < now]:
+                del self._signed_grants[stale]
+            self._signed_grants[grant_id] = (deadline, weakref.ref(func))
 
     def _trusted_context_digest(self, invocation: InvocationBinding) -> str | None:
         context = self.trusted_execution_context
@@ -967,7 +1080,6 @@ class GovernedCallable:
                 raise LegitimacyInvariantError("unsigned receipt is not executable")
             if tokens.get("human_approval") is not None:
                 raise LegitimacyInvariantError("raw human_approval is not executable in production")
-            verified_receipt: DecisionReceipt | None = None
             if grant is not None:
                 if not isinstance(grant, ExecutionGrant):
                     raise LegitimacyInvariantError("Invalid execution grant type")
@@ -983,11 +1095,20 @@ class GovernedCallable:
                     raise LegitimacyInvariantError(
                         "production execution requires a single-use grant"
                     )
-                verified_receipt = grant.receipt
-            else:
-                raise LegitimacyInvariantError(
-                    "unsigned or unconsumed signed receipt is not executable in production"
-                )
+                if grant.signed_receipt is None:
+                    raise LegitimacyInvariantError(
+                        "production grant carries no execution signature"
+                    )
+                if not isinstance(grant.signed_receipt, SignedReceipt) or (
+                    grant.signed_receipt.receipt.receipt_hash != grant.receipt.receipt_hash
+                ):
+                    raise LegitimacyInvariantError(
+                        "grant execution signature does not sign the grant receipt"
+                    )
+                signed = grant.signed_receipt
+            verified_receipt = self._verify_signed_production(
+                signed, invocation, policy, context_digest, func
+            )
             self._enforce_receipt(
                 verified_receipt,
                 func=func,
@@ -996,54 +1117,13 @@ class GovernedCallable:
                 human_approval=None,
                 trust_kwargs=False,
             )
-            if isinstance(grant, ExecutionGrant) and grant.single_use:
-                attempt_id = tokens.get("execution_attempt_id") or uuid.uuid4().hex
-                if not isinstance(attempt_id, str) or not attempt_id:
-                    raise LegitimacyInvariantError(
-                        "execution_attempt_id must be a non-empty string"
-                    )
-                with self._completion_lock:
-                    if self._execution_disabled:
-                        raise LegitimacyInvariantError(
-                            "execution disabled after uncertain terminal failure"
-                        )
-                    outcome = self._ledger.consume(
-                        grant_id=grant.grant_id,
-                        attempt_id=attempt_id,
-                        receipt_hash=grant.receipt.receipt_hash,
-                        invocation=invocation,
-                        policy=policy,
-                        context_digest=context_digest,
-                    )
-                if self.require_durable_audit and outcome.mode == "proceed":
-                    try:
-                        self.audit_log.record_durable(
-                            AuditEntry(
-                                id=f"execution-authorized-{outcome.record.attempt_id}",
-                                type="execution_authorized",
-                                agent_id=self.agent_id,
-                                action=invocation.method_id,
-                                valid=True,
-                                constitutional_hash=policy.version,
-                                metadata={
-                                    "attempt_id": outcome.record.attempt_id,
-                                    "grant_id": grant.grant_id,
-                                    "receipt_hash": grant.receipt.receipt_hash,
-                                    "policy_digest": policy.digest,
-                                    "argument_digest": invocation.argument_digest,
-                                    "trusted_context_digest": context_digest,
-                                },
-                            )
-                        )
-                    except Exception:
-                        self._ledger.finalize(
-                            attempt_id=outcome.record.attempt_id,
-                            status=AttemptStatus.FAILED,
-                            error_code="audit_persistence_failed",
-                        )
-                        raise
-                return outcome
-            return None
+            return self._consume_and_audit(
+                verified_receipt,
+                attempt_id=tokens.get("execution_attempt_id"),
+                invocation=invocation,
+                policy=policy,
+                context_digest=context_digest,
+            )
 
         if grant is not None:
             if not isinstance(grant, ExecutionGrant):
@@ -1176,39 +1256,163 @@ class GovernedCallable:
                 "side effect may have completed but terminal result is unknown"
             ) from exc
 
+    def _consume_and_audit(
+        self,
+        receipt: DecisionReceipt,
+        *,
+        attempt_id: object,
+        invocation: InvocationBinding,
+        policy: PolicyBinding,
+        context_digest: str | None,
+    ) -> ConsumeDecision:
+        """Single-use consume of a verified production receipt, then durable audit."""
+        grant_id = receipt.grant_id
+        if not isinstance(grant_id, str) or not grant_id:
+            raise LegitimacyInvariantError("verified receipt carries no grant id")
+        if attempt_id is None:
+            attempt_id = uuid.uuid4().hex
+        if not isinstance(attempt_id, str) or not attempt_id:
+            raise LegitimacyInvariantError("execution_attempt_id must be a non-empty string")
+        with self._completion_lock:
+            if self._execution_disabled:
+                raise LegitimacyInvariantError(
+                    "execution disabled after uncertain terminal failure"
+                )
+            outcome = self._ledger.consume(
+                grant_id=grant_id,
+                attempt_id=attempt_id,
+                receipt_hash=receipt.receipt_hash,
+                invocation=invocation,
+                policy=policy,
+                context_digest=context_digest,
+            )
+        if self.require_durable_audit and outcome.mode == "proceed":
+            try:
+                self.audit_log.record_durable(
+                    AuditEntry(
+                        id=f"execution-authorized-{outcome.record.attempt_id}",
+                        type="execution_authorized",
+                        agent_id=self.agent_id,
+                        action=invocation.method_id,
+                        valid=True,
+                        constitutional_hash=policy.version,
+                        metadata={
+                            "attempt_id": outcome.record.attempt_id,
+                            "grant_id": grant_id,
+                            "receipt_hash": receipt.receipt_hash,
+                            "policy_digest": policy.digest,
+                            "argument_digest": invocation.argument_digest,
+                            "trusted_context_digest": context_digest,
+                        },
+                    )
+                )
+            except Exception:
+                self._ledger.finalize(
+                    attempt_id=outcome.record.attempt_id,
+                    status=AttemptStatus.FAILED,
+                    error_code="audit_persistence_failed",
+                )
+                raise
+        return outcome
+
     def _verify_signed_production(
         self,
         signed: object,
         invocation: InvocationBinding,
         policy: PolicyBinding,
+        context_digest: str | None,
+        func: Callable[..., Any],
     ) -> DecisionReceipt:
+        """Verify an execution-scope Ed25519 signature against the live invocation.
+
+        Every production execution passes through here (grant and ``signed_receipt``
+        branches alike). Each failure raises; the caller then consumes the ledger,
+        which makes the receipt single use. Only this instance's issued grants
+        execute, so the in-process ledger's single-use guarantee covers them.
+        """
         if not isinstance(signed, SignedReceipt):
             raise LegitimacyInvariantError("Invalid signed receipt type")
         if signed.signature_scope != SIGNATURE_SCOPE_EXECUTION:
             raise LegitimacyInvariantError("unsigned receipt is not executable")
+        if signed.algorithm != SIGNATURE_ALGORITHM:
+            raise LegitimacyInvariantError("execution signature must be Ed25519")
         if not signed.authorization_json:
             raise LegitimacyInvariantError(
                 "execution signature is missing an authorization envelope"
             )
-        expected = self.trusted_issuer_keys.get(signed.key_id)
-        if expected is None:
-            raise LegitimacyInvariantError("signed receipt key is not pinned")
-        if not signed.verify(expected):
+        pinned = (
+            self.trusted_execution_keys.get(signed.key_id)
+            if isinstance(signed.key_id, str)
+            else None
+        )
+        if pinned is None:
+            raise LegitimacyInvariantError("signed receipt key is not pinned for execution")
+        try:
+            authentic = signed.verify(pinned)
+        except (TypeError, ValueError):
+            authentic = False
+        if not authentic:
             raise LegitimacyInvariantError("signed receipt authenticity check failed")
+        receipt = signed.receipt
+        if receipt.schema_version != RECEIPT_SCHEMA_V2:
+            raise LegitimacyInvariantError("only v2 receipts are executable in production")
+        try:
+            decision_type = canonicalize_decision_state(receipt.decision_type)
+        except ValueError as exc:
+            raise LegitimacyInvariantError("Unknown decision type is not allow") from exc
+        if decision_type not in ("ALLOW", "ALLOW_WITH_CONTROLS"):
+            raise LegitimacyInvariantError(f"Decision {decision_type} does not permit execution")
         envelope = parse_authorization_envelope(signed.authorization_json)
-        expected_json = authorization_envelope_json(invocation, policy)
-        expected_envelope = parse_authorization_envelope(expected_json)
-        if envelope.get("argument_digest") != expected_envelope["argument_digest"]:
-            raise LegitimacyInvariantError("invocation binding mismatch")
-        if envelope.get("method_id") != expected_envelope["method_id"]:
+        expires_at = envelope.get("expires_at")
+        if not isinstance(expires_at, str) or not expires_at:
+            raise LegitimacyInvariantError("execution signature has no expiry")
+        if receipt.execution_boundary.expires_at != expires_at:
+            raise LegitimacyInvariantError("execution signature expiry does not match receipt")
+        try:
+            expires = datetime.fromisoformat(expires_at)
+        except ValueError as exc:
+            raise LegitimacyInvariantError("execution signature expiry is not parseable") from exc
+        if expires.tzinfo is None:
+            raise LegitimacyInvariantError("execution signature expiry must carry a timezone")
+        if datetime.now(timezone.utc) > expires:
+            raise LegitimacyInvariantError("execution signature has expired")
+        if (
+            envelope.get("context_digest") != context_digest
+            or receipt.context_digest != context_digest
+        ):
+            raise LegitimacyInvariantError("trusted execution context binding mismatch")
+        grant_id = envelope.get("grant_id")
+        if not isinstance(grant_id, str) or not grant_id or grant_id != receipt.grant_id:
+            raise LegitimacyInvariantError("grant id does not match receipt")
+        if (
+            envelope.get("method_id") != invocation.method_id
+            or receipt.method_id != invocation.method_id
+        ):
             raise LegitimacyInvariantError("grant method identity mismatch")
-        if envelope.get("policy_digest") != expected_envelope["policy_digest"]:
+        if (
+            envelope.get("argument_digest") != invocation.argument_digest
+            or receipt.argument_digest != invocation.argument_digest
+        ):
+            raise LegitimacyInvariantError("invocation binding mismatch")
+        if envelope.get("policy_digest") != policy.digest or receipt.policy_digest != policy.digest:
             raise LegitimacyInvariantError("policy binding mismatch")
-        if envelope.get("scope") != expected_envelope["scope"]:
+        if envelope.get("scope") != invocation.scope:
             raise LegitimacyInvariantError("invocation scope mismatch")
-        if envelope.get("subjects") != expected_envelope["subjects"]:
+        if envelope.get("subjects") != list(invocation.subjects):
             raise LegitimacyInvariantError("invocation subjects mismatch")
-        return signed.receipt
+        with self._signed_grants_lock:
+            issued = self._signed_grants.get(grant_id)
+        if issued is None:
+            raise LegitimacyInvariantError(
+                "signed receipt was not issued by this governed callable"
+            )
+        deadline, issued_ref = issued
+        # Monotonic deadline: a wall-clock rollback cannot extend the grant lifetime.
+        if time.monotonic() > deadline:
+            raise LegitimacyInvariantError("execution signature has expired")
+        if issued_ref() is not func:
+            raise LegitimacyInvariantError("grant callable identity mismatch")
+        return receipt
 
     def __call__(self, func: Callable[..., T]) -> Callable[..., T]:
         engine = self.engine

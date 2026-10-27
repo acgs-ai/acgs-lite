@@ -71,7 +71,10 @@ wire, and refusal of a missing receipt
 
 The following source-candidate API binds a host-supplied actor/tenant context,
 the exact call and policy, single consumption in one wrapper instance, and a
-confirmed JSONL authorization record before the callable starts. The host must
+confirmed JSONL authorization record before the callable starts. The production
+profile requires the `crypto` extra and a persistent Ed25519 signer whose public
+key is pinned for execution scope; every grant carries an execution-scope
+signature that expires after 300 seconds by default. The host must
 authenticate the actor and tenant before constructing the context and must not
 expose `issue_grant()` to untrusted callers. This does not isolate malicious
 same-process code or provide restart recovery, distributed exclusion, or a
@@ -87,9 +90,18 @@ from acgs_lite.audit import AuditLog, JSONLAuditBackend
 from acgs_lite.governed import GovernedCallable
 from acgs_lite.legitimacy import (
     AuthorizationProfile,
+    Ed25519ReceiptSigner,
     LegitimacyInvariantError,
     TrustedExecutionContext,
 )
+
+# Load the signing key from your secret store; this fixed seed is for the demo only.
+# Per-process keys from Ed25519ReceiptSigner.generate() are refused in production.
+signer = Ed25519ReceiptSigner.from_seed(bytes(range(32)), key_id="membrane-1")
+# Pin the verifying key from deployment config, not from the signer object.
+PINNED_EXECUTION_KEYS = {
+    "membrane-1": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+}
 
 calls = []
 with TemporaryDirectory() as directory:
@@ -97,6 +109,8 @@ with TemporaryDirectory() as directory:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        receipt_signer=signer,
+        trusted_execution_keys=PINNED_EXECUTION_KEYS,
         audit_log=audit,
         require_durable_audit=True,
         trusted_execution_context=TrustedExecutionContext(
@@ -115,6 +129,7 @@ with TemporaryDirectory() as directory:
     grant = inspect_account.issue_grant(
         "safe", scope="tenant-a", subjects=("account-1",)
     )
+    assert grant.signed_receipt.verify(PINNED_EXECUTION_KEYS["membrane-1"])
     assert inspect_account(
         "safe",
         scope="tenant-a",

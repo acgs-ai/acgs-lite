@@ -150,8 +150,31 @@ arguments are also bound to the wrapped function signature so common subject
 parameters such as `customer_id`, `account_id`, `subject_id`, `resource_id`, and
 `user_id` cannot bypass the boundary by being passed positionally.
 
-`authorization_profile="production"` requires an `ExecutionGrant` issued by
-that exact `GovernedCallable` instance. The grant binds the current policy
+`authorization_profile="production"` requires an Ed25519 execution signer at
+construction (`crypto` extra) and an `ExecutionGrant` issued by that exact
+`GovernedCallable` instance.
+
+| Constructor argument | Meaning |
+|---|---|
+| `receipt_signer` | Required. A non-ephemeral Ed25519 `ReceiptSigner`. Keys from `Ed25519ReceiptSigner.generate()` are refused; load a persistent key with `from_private_bytes()` (or `from_seed()` for fixtures), or back the protocol with a KMS/HSM. |
+| `trusted_execution_keys` | Required. `key_id -> public key hex` pinned with execution scope, supplied from outside the signer. The signer's key must be pinned here. `trusted_issuer_keys` never authorizes execution. |
+| `grant_ttl_seconds` | Signed grant lifetime, default 300. Must be positive and finite. |
+
+Missing, ephemeral, unpinned, or non-Ed25519 signers raise
+`LegitimacyInvariantError`, and so does any of these arguments under the
+compatibility profile. Every production grant carries `grant.signed_receipt`: a
+v2 receipt signed with execution scope over an envelope that commits the method,
+argument, policy and trusted-context digests, scope, subjects, grant id and
+expiry. Before the ledger consume, both the `execution_grant=` and the
+`signed_receipt=` carriers are verified against the live call: the key must be
+pinned in `trusted_execution_keys`, the signature valid, the receipt v2 with an
+`ALLOW` or `ALLOW_WITH_CONTROLS` decision, unexpired on both the wall clock and a
+monotonic deadline, issued by this instance for this exact callable, and every
+envelope and receipt binding equal to the call. A receipt-scope signature, an
+unpinned key, a denied decision, an expired or mismatched envelope, and a second
+use all deny before the callable runs.
+
+The grant binds the current policy
 digest, canonical arguments, method identifier, and exact callable object. It
 is single-use through the instance's in-process ledger. An attempt identifier
 cannot be reused for a different grant, and a terminal or cancelled attempt is
@@ -195,10 +218,12 @@ in production. Actual bound or descriptor receiver methods are refused.
 This ledger has process-instance scope. It does not provide restart recovery,
 distributed exclusion, or general exactly-once delivery to external APIs.
 `require_durable_execution=True` and `require_restart_recovery=True` therefore
-fail closed instead of implying those guarantees. A plain or signed
+fail closed instead of implying those guarantees. A receipt-scope
 `SignedReceipt` is evidence that can be independently verified, but the
-production executor refuses it because this package has no durable single-use
-consumption contract for that carrier.
+production executor refuses it. An execution-scope `SignedReceipt` executes only
+on the instance that issued it, once, through the same in-process ledger as the
+grant; a different process holding the same pinned key does not share that
+ledger and refuses it.
 
 Production grants currently carry no required controls. An authorization
 carrier with controls that cannot be verified at the execution boundary is not
@@ -280,9 +305,10 @@ Boundaries (fail closed, by design):
   symmetric scheme.
 - The signing key is held in process memory. Back `Ed25519ReceiptSigner` with a
   KMS/HSM before relying on receipts for non-repudiation.
-- Signature validity alone does not provide single-use consumption. Use the
-  production `ExecutionGrant` path within its stated in-process trust domain;
-  externally signed carriers need a separately qualified consumption protocol.
+- Signature validity alone does not provide single-use consumption. The
+  production profile pairs each execution signature with its issuing instance's
+  in-process ledger; externally signed carriers need a separately qualified
+  consumption protocol.
 
 ## Failure Contract
 

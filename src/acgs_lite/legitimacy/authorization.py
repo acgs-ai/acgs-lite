@@ -23,6 +23,7 @@ from acgs_lite.legitimacy.receipt import (
     DecisionReceipt,
     ExecutionBoundary,
 )
+from acgs_lite.legitimacy.signing import SignedReceipt
 
 
 class AuthorizationProfile(str, Enum):
@@ -106,6 +107,9 @@ class ExecutionGrant:
     context_digest: str | None = None
     # Keeping the target alive prevents reuse of its MAC-bound process-local id.
     callable_target: Callable[..., Any] | None = field(default=None, repr=False, compare=False)
+    # Production: the Ed25519 execution-scope signature over this grant's receipt.
+    # Not MAC-bound; the gate requires it to sign exactly ``receipt``.
+    signed_receipt: SignedReceipt | None = field(default=None, repr=False)
 
     def to_evidence_dict(self) -> dict[str, Any]:
         """Serializable evidence. The MAC is omitted so this cannot be replayed as a grant."""
@@ -201,12 +205,18 @@ class ExecutionAuthority:
         context_digest: str | None = None,
         callable_target: Callable[..., Any] | None = None,
         grant_id: str | None = None,
+        signed_receipt: SignedReceipt | None = None,
     ) -> ExecutionGrant:
         """Mint the one grant for ``receipt``.
 
         ``grant_id`` must come from :meth:`allocate_grant_id` and is required for v2
         receipts, which commit it. Without it only v1 receipts mint (legacy path).
+        ``signed_receipt``, when given, must sign exactly ``receipt``.
         """
+        if signed_receipt is not None and (
+            signed_receipt.receipt.receipt_hash != receipt.receipt_hash
+        ):
+            raise LegitimacyInvariantError("signed receipt does not sign this grant's receipt")
         grant_id = self._claim_grant_id(
             receipt=receipt,
             invocation=invocation,
@@ -244,6 +254,7 @@ class ExecutionAuthority:
             single_use=single_use,
             binding_mac=mac,
             callable_target=callable_target,
+            signed_receipt=signed_receipt,
         )
 
     def verify(
@@ -414,6 +425,7 @@ def build_issue_receipt(
     decision: EngineDecision,
     grant_id: str | None = None,
     context_digest: str | None = None,
+    expires_at: str | None = None,
 ) -> DecisionReceipt:
     """Kernel-built evidence receipt recording the engine's decision.
 
@@ -438,7 +450,7 @@ def build_issue_receipt(
         allowed_method=func.__name__,
         allowed_scope=invocation.scope,
         allowed_subjects=invocation.subjects,
-        expires_at=None,
+        expires_at=expires_at,
         single_use=True,
     )
     return DecisionReceipt.create(
@@ -456,15 +468,33 @@ def build_issue_receipt(
     )
 
 
-def authorization_envelope_json(invocation: InvocationBinding, policy: PolicyBinding) -> str:
-    """Canonical envelope covered by a v2 execution signature."""
-    payload = {
+def authorization_envelope_json(
+    invocation: InvocationBinding,
+    policy: PolicyBinding,
+    *,
+    grant_id: str | None = None,
+    context_digest: str | None = None,
+    expires_at: str | None = None,
+) -> str:
+    """Canonical envelope covered by a v2 execution signature.
+
+    The keyword-only grant fields are emitted only when given, so callers that
+    omit them get the original five-key envelope byte for byte.
+    """
+    payload: dict[str, Any] = {
         "method_id": invocation.method_id,
         "argument_digest": invocation.argument_digest,
         "policy_digest": policy.digest,
         "scope": invocation.scope,
         "subjects": list(invocation.subjects),
     }
+    for key, value in (
+        ("grant_id", grant_id),
+        ("context_digest", context_digest),
+        ("expires_at", expires_at),
+    ):
+        if value is not None:
+            payload[key] = value
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 

@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+This is a semver-major change (4.0.0): the production profile of the stable
+`GovernedCallable` now requires Ed25519 execution signatures.
+
+### BREAKING
+
+- `GovernedCallable(authorization_profile=PRODUCTION)` now requires
+  `receipt_signer=`, a non-ephemeral Ed25519 `ReceiptSigner`, and
+  `trusted_execution_keys=` (`key_id -> public key hex`) that pins the signer's
+  key with execution scope. A missing, ephemeral (`Ed25519ReceiptSigner.generate()`),
+  unpinned or non-Ed25519 signer raises `LegitimacyInvariantError` at
+  construction. The production profile therefore needs the `crypto` extra.
+- Every production grant is signed with execution scope over a v2 receipt and an
+  envelope that commits the method, argument, policy and trusted-context digests,
+  scope, subjects, grant id and expiry (`ExecutionGrant.signed_receipt`). Grants
+  now expire after `grant_ttl_seconds` (default 300) on both the wall clock and a
+  monotonic deadline; the receipt boundary and grant carry that `expires_at`.
+- Both production carriers, `execution_grant=` and `signed_receipt=`, are verified
+  by `_verify_signed_production` before the ledger consume. Production execution
+  is denied for a receipt-scope signature, an unpinned key, a v1 receipt, a
+  decision other than `ALLOW`/`ALLOW_WITH_CONTROLS`, an expired, tampered or
+  mismatched envelope, a grant id that differs from the receipt, a signature not
+  issued by this instance for this callable, and a second use.
+- `signed_receipt=` is now executable in production when it is this instance's
+  execution signature. It shares the grant's single-use ledger entry, so a grant
+  and its signed receipt together execute once.
+- `trusted_issuer_keys` no longer authorizes execution; only
+  `trusted_execution_keys` does.
+- `receipt_signer`, `trusted_execution_keys` and `grant_ttl_seconds` are refused
+  outside the production profile. The compatibility profile is unchanged.
+
+### Migration to 4.0
+
+- Load a persistent Ed25519 key (`Ed25519ReceiptSigner.from_private_bytes(...)`,
+  or a KMS/HSM-backed `ReceiptSigner`) and pass it as `receipt_signer`. Do not use
+  `generate()` in production.
+- Distribute the public key out of band and pass it in `trusted_execution_keys`
+  from deployment configuration, keyed by the signer's `key_id`. Moving a key from
+  `trusted_issuer_keys` does not grant execution scope by itself; add it to
+  `trusted_execution_keys` deliberately.
+- Execute within `grant_ttl_seconds` of `issue_grant()`, or raise the TTL.
+- The ledger is still in-process: a signed receipt executes only on the instance
+  that issued it. See `docs/api/legitimacy.md`.
+- Install `acgs-lite[crypto]` wherever the production profile runs.
+
 ### Security
 
 - `GovernedCallable` no longer fails open on payloads it could not evaluate. Governed

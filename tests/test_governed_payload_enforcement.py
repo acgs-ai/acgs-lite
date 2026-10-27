@@ -26,6 +26,7 @@ from acgs_lite.legitimacy import (
 )
 from acgs_lite.legitimacy.invocation import ArgumentNotDigestible
 from acgs_lite.legitimacy.ledger import AttemptStatus
+from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner
 from acgs_lite.serialization import (
     GovernancePayloadError,
     governance_payloads_for_enforcement,
@@ -33,6 +34,15 @@ from acgs_lite.serialization import (
 )
 
 LIMIT = 10_000
+
+
+def _production_signing() -> dict[str, object]:
+    """Pinned, non-ephemeral Ed25519 execution signer the production profile requires."""
+    signer = Ed25519ReceiptSigner.from_seed(bytes(range(32)))
+    return {
+        "receipt_signer": signer,
+        "trusted_execution_keys": {signer.key_id: signer.public_key_hex()},
+    }
 
 
 def _constitution() -> Constitution:
@@ -77,7 +87,10 @@ def _compat(**options: Any) -> GovernedCallable:
 
 def _production(**options: Any) -> GovernedCallable:
     return GovernedCallable(
-        _constitution(), authorization_profile=AuthorizationProfile.PRODUCTION, **options
+        _constitution(),
+        authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
+        **options,
     )
 
 

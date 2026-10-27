@@ -38,13 +38,24 @@ from acgs_lite.legitimacy.invocation import (
     bind_policy,
 )
 from acgs_lite.legitimacy.ledger import AttemptStatus, InProcessGrantLedger
+from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner
 from acgs_lite.z3_verify import VerificationStatus, Z3VerifyResult
+
+
+def _production_signing() -> dict[str, object]:
+    """Pinned, non-ephemeral Ed25519 execution signer the production profile requires."""
+    signer = Ed25519ReceiptSigner.from_seed(bytes(range(32)))
+    return {
+        "receipt_signer": signer,
+        "trusted_execution_keys": {signer.key_id: signer.public_key_hex()},
+    }
 
 
 def _guard(**kwargs: Any) -> GovernedCallable:
     return GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
         **kwargs,
     )
 

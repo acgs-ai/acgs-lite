@@ -36,12 +36,25 @@ C1 = Constitution.from_rules([Rule(id="P", text="pattern rule", patterns=[r"abc\
 C2 = Constitution.from_rules([Rule(id="P", text="pattern rule", patterns=[r"xyz\d"])])
 
 
+def _production_signing() -> dict[str, object]:
+    """Pinned, non-ephemeral Ed25519 execution signer the production profile requires."""
+    signer = Ed25519ReceiptSigner.from_seed(bytes(range(32)))
+    return {
+        "receipt_signer": signer,
+        "trusted_execution_keys": {signer.key_id: signer.public_key_hex()},
+    }
+
+
 def _target(text: str) -> str:
     return text
 
 
 def _signed_execution(constitution: Constitution):
-    guard = GovernedCallable(constitution, authorization_profile=AuthorizationProfile.PRODUCTION)
+    guard = GovernedCallable(
+        constitution,
+        authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
+    )
     wrapped = guard(_target)
     grant = wrapped.issue_grant("hello")
     invocation = bind_invocation(_target, ("hello",), {}, include_receiver=True)

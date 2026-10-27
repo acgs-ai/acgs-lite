@@ -9,6 +9,16 @@ import pytest
 from acgs_lite.constitution import Constitution
 from acgs_lite.governed import GovernedCallable
 from acgs_lite.legitimacy import AuthorizationProfile, ExecutionGrant, LegitimacyInvariantError
+from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner
+
+
+def _production_signing() -> dict[str, object]:
+    """Pinned, non-ephemeral Ed25519 execution signer the production profile requires."""
+    signer = Ed25519ReceiptSigner.from_seed(bytes(range(32)))
+    return {
+        "receipt_signer": signer,
+        "trusted_execution_keys": {signer.key_id: signer.public_key_hex()},
+    }
 
 
 def test_second_attempt_on_single_use_grant_blocked() -> None:
@@ -16,6 +26,7 @@ def test_second_attempt_on_single_use_grant_blocked() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -36,6 +47,7 @@ def test_retry_same_attempt_recovers_without_reexecution() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -55,6 +67,7 @@ def test_implicit_attempt_id_is_single_use() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -76,6 +89,7 @@ def test_in_flight_same_attempt_does_not_reexecute() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -108,6 +122,7 @@ def test_raised_attempt_is_partial_and_retry_does_not_reexecute() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -130,6 +145,7 @@ def test_concurrent_single_use_has_one_winner() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -177,6 +193,7 @@ async def test_async_retry_recovers_one_terminal_record() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard

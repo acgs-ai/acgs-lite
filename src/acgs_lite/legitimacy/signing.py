@@ -98,9 +98,13 @@ class Ed25519ReceiptSigner:
     Construct with :meth:`generate` for a fresh ephemeral key, :meth:`from_seed`
     for a deterministic key (tests, reproducible fixtures), or :meth:`from_private_bytes`
     to load an existing 32-byte private key.
+
+    ``ephemeral`` is true only for :meth:`generate` keys. A per-process key cannot be
+    pinned by an independent verifier, so the production execution profile refuses it.
     """
 
     algorithm = SIGNATURE_ALGORITHM
+    ephemeral: bool
 
     def __init__(self, private_key: Any, *, key_id: str | None = None) -> None:
         ed25519 = _require_ed25519()
@@ -116,11 +120,14 @@ class Ed25519ReceiptSigner:
         self._public_key_hex = public_bytes.hex()
         # Default key id is a stable fingerprint of the public key.
         self.key_id = key_id or hashlib.sha256(public_bytes).hexdigest()[:16]
+        self.ephemeral = False
 
     @classmethod
     def generate(cls, *, key_id: str | None = None) -> Ed25519ReceiptSigner:
         ed25519 = _require_ed25519()
-        return cls(ed25519.Ed25519PrivateKey.generate(), key_id=key_id)
+        signer = cls(ed25519.Ed25519PrivateKey.generate(), key_id=key_id)
+        signer.ephemeral = True
+        return signer
 
     @classmethod
     def from_seed(cls, seed: bytes, *, key_id: str | None = None) -> Ed25519ReceiptSigner:

@@ -18,6 +18,16 @@ from acgs_lite.governed import GovernedCallable
 from acgs_lite.legitimacy import AuthorizationProfile, LegitimacyInvariantError
 from acgs_lite.legitimacy.authorization import EngineDecision, engine_decision_from_results
 from acgs_lite.legitimacy.receipt import BASELINE_CONSTRAINT_MARKER
+from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner
+
+
+def _production_signing() -> dict[str, object]:
+    """Pinned, non-ephemeral Ed25519 execution signer the production profile requires."""
+    signer = Ed25519ReceiptSigner.from_seed(bytes(range(32)))
+    return {
+        "receipt_signer": signer,
+        "trusted_execution_keys": {signer.key_id: signer.public_key_hex()},
+    }
 
 
 def _constitution(*extra: Rule) -> Constitution:
@@ -61,7 +71,10 @@ def _constitution(*extra: Rule) -> Constitution:
 
 def _production(**options: Any) -> GovernedCallable:
     return GovernedCallable(
-        _constitution(), authorization_profile=AuthorizationProfile.PRODUCTION, **options
+        _constitution(),
+        authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
+        **options,
     )
 
 
@@ -193,6 +206,7 @@ def test_quickstart_contract_rule_id_is_preserved() -> None:
     @GovernedCallable(
         Constitution.from_rules([Rule(id="no-pii", text="no ssn", keywords=["ssn"])]),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
     def f(text: str) -> str:
         calls.append(text)
