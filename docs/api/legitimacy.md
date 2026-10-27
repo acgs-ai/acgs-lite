@@ -49,7 +49,8 @@ execution authority and add no storage or Neo4j dependency.
 
 - Policy: `acgs:policy:v1:sha256:<full digest>` uses the PolicyBinding digest,
   not its display/version label.
-- Receipt: `acgs:receipt:v1:sha256:<existing receipt hash>` preserves the
+- Receipt: `acgs:receipt:v1:sha256:<receipt hash>` for v1 receipts and
+  `acgs:receipt:v2:sha256:<receipt hash>` for schema v2 receipts. It preserves the
   existing commitment and checks payload/hash consistency.
 - Signed envelope: `acgs:signed-envelope:v1:sha256:<digest>` hashes
   `b"acgs-signed-envelope-identity-v1\x00"` (including one trailing NUL byte)
@@ -66,7 +67,8 @@ execution authority and add no storage or Neo4j dependency.
 
 Digest and signature hex must be full-length lowercase hex. Unsupported policy
 algorithms, signature algorithms/scopes and malformed identifiers fail closed.
-Existing receipt/grant dataclasses, serializers and signed payloads are unchanged.
+The identity helpers do not change receipt/grant dataclasses, serializers or
+signed payloads. Receipt schema v2 is described under [Receipt Fields](#receipt-fields).
 
 ## Decision Taxonomy
 
@@ -129,6 +131,30 @@ Required receipt fields:
 
 Create receipts with `DecisionReceipt.create(...)`; direct construction is
 reserved for deserialization paths that must still satisfy the same invariants.
+
+### Receipt schema v2
+
+`GovernedCallable.issue_grant` mints schema v2 receipts only. A v2 receipt adds:
+
+| Field | Purpose |
+| --- | --- |
+| `schema_version` | `2`. A missing or `null` value always means v1; v2 is never inferred. |
+| `grant_id` | Random server-side id from `ExecutionAuthority.allocate_grant_id()`, committed before the grant is minted. Callers cannot supply one. |
+| `policy_digest` | Full `PolicyBinding.digest` of the policy that decided. |
+| `method_id` | Identity of the bound callable. |
+| `argument_digest` | Digest of the canonical bound arguments. |
+| `context_digest` | Trusted-context digest, or absent when no trusted context is bound. |
+
+v2 hashes are domain-separated: SHA-256 over `RECEIPT_HASH_DOMAIN_V2`
+(`b"acgs-receipt-v2\x00"`) followed by the canonical JSON of the v1 keys,
+`schema_version` and the non-null v2 keys. v1 receipts keep their byte-identical
+hash and wire shape, and no v1 bytes verify as v2 or vice versa. v2 fields on a
+v1 receipt, or v2 keys on the wire without `schema_version: 2`, are refused.
+The v2 wire schema is closed: unknown receipt or `execution_boundary` keys are
+refused, while v1 parsing keeps ignoring extra keys. One receipt mints at most
+one grant. `build_issue_receipt` takes the engine decision as a required
+keyword-only `decision` argument, and receipts record that decision rather than
+a fixed stamp. `RECEIPT_HASH_DOMAIN_V2` is exported from `acgs_lite.legitimacy`.
 
 ## Execution Boundary Binding
 

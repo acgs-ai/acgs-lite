@@ -502,3 +502,167 @@ def test_v2_replay_refuses_envelope_that_disagrees_with_receipt() -> None:
     )
     assert result.ok is False
     assert "policy_digest_conflict" in result.mismatches
+
+
+# --- review follow-ups: wire parser, grant-id allocation, registry bounds -----
+
+
+def test_signed_receipt_from_dict_rejects_non_mapping_receipt_with_domain_error() -> None:
+    from acgs_lite.legitimacy import SignedReceipt
+
+    for bad in ("x", [1, 2], 7):
+        with pytest.raises(ValueError, match="malformed signed-receipt payload"):
+            SignedReceipt.from_dict(
+                {
+                    "receipt": bad,
+                    "algorithm": "ed25519",
+                    "key_id": "k",
+                    "public_key": "00",
+                    "signature": "00",
+                    "signed_at": "2026-10-27T00:00:00+00:00",
+                }
+            )
+
+
+def test_v2_wire_rejects_unknown_top_level_and_boundary_keys() -> None:
+    v2_wire = DecisionReceipt.create(**_golden_fields(), **_V2_FIELDS).to_receipt_dict()
+    with pytest.raises(ValueError, match="unknown v2 receipt fields: grant_scope"):
+        _receipt_from_dict({**v2_wire, "grant_scope": "admin"})
+    boundary = {**v2_wire["execution_boundary"], "allowed_roles": ["admin"]}
+    with pytest.raises(ValueError, match="unknown v2 execution_boundary fields"):
+        _receipt_from_dict({**v2_wire, "execution_boundary": boundary})
+    assert _receipt_from_dict(v2_wire).verify_hash()
+
+
+def test_v1_wire_keeps_ignoring_unknown_keys_for_compatibility() -> None:
+    v1_wire = DecisionReceipt.create(**_golden_fields()).to_receipt_dict()
+    restored = _receipt_from_dict({**v1_wire, "legacy_extra": "x"})
+    assert restored.receipt_hash == GOLDEN_V1_HASH
+
+
+def test_allocated_grant_ids_are_unique_and_issued_grants_never_repeat() -> None:
+    authority = ExecutionAuthority()
+    allocated = {authority.allocate_grant_id() for _ in range(2000)}
+    assert len(allocated) == 2000
+    assert all(len(gid) == 32 and int(gid, 16) >= 0 for gid in allocated)
+
+    guard = _guard()
+
+    @guard
+    def act(text: str) -> str:
+        return text
+
+    grant_ids = {act.issue_grant("same input").grant_id for _ in range(50)}
+    assert len(grant_ids) == 50
+
+
+def test_allocated_but_unreleased_id_is_single_use_and_authority_scoped() -> None:
+    guard = _guard()
+    calls: list[str] = []
+
+    @guard
+    def act(text: str) -> str:
+        calls.append(text)
+        return text
+
+    invocation = bind_invocation(act.__wrapped__, ("hello",), {}, include_receiver=True)
+    policy = bind_policy(guard.constitution)
+    gid = guard._authority.allocate_grant_id()
+
+    def receipt_for(grant_id: str) -> DecisionReceipt:
+        return build_issue_receipt(
+            func=act.__wrapped__,
+            invocation=invocation,
+            policy=policy,
+            decision=_ALLOW,
+            grant_id=grant_id,
+        )
+
+    # An id allocated by another authority is never accepted here.
+    foreign = ExecutionAuthority().allocate_grant_id()
+    with pytest.raises(LegitimacyInvariantError, match="not allocated"):
+        guard._authority.issue(
+            receipt=receipt_for(foreign), invocation=invocation, policy=policy, grant_id=foreign
+        )
+    grant = guard._authority.issue(
+        receipt=receipt_for(gid), invocation=invocation, policy=policy, grant_id=gid
+    )
+    assert grant.grant_id == gid
+    # The consumed allocation cannot back a second, different receipt.
+    second = receipt_for(gid)
+    assert second.receipt_hash != grant.receipt.receipt_hash
+    with pytest.raises(LegitimacyInvariantError, match="not allocated"):
+        guard._authority.issue(receipt=second, invocation=invocation, policy=policy, grant_id=gid)
+    # A released (never issued) allocation is not reusable either.
+    released = guard._authority.allocate_grant_id()
+    guard._authority.release_grant_id(released)
+    with pytest.raises(LegitimacyInvariantError, match="not allocated"):
+        guard._authority.issue(
+            receipt=receipt_for(released), invocation=invocation, policy=policy, grant_id=released
+        )
+    assert calls == []
+
+
+def test_issued_receipt_registry_prunes_expired_grants() -> None:
+    authority = ExecutionAuthority()
+    guard = _guard()
+
+    @guard
+    def act(text: str) -> str:
+        return text
+
+    invocation = bind_invocation(act.__wrapped__, ("hello",), {}, include_receiver=True)
+    policy = bind_policy(guard.constitution)
+
+    def mint(expires_at: str | None) -> Any:
+        gid = authority.allocate_grant_id()
+        receipt = build_issue_receipt(
+            func=act.__wrapped__,
+            invocation=invocation,
+            policy=policy,
+            decision=_ALLOW,
+            grant_id=gid,
+            expires_at=expires_at,
+        )
+        return authority.issue(
+            receipt=receipt,
+            invocation=invocation,
+            policy=policy,
+            grant_id=gid,
+            expires_at=expires_at,
+        )
+
+    past = "2000-01-01T00:00:00+00:00"
+    future = "2999-01-01T00:00:00+00:00"
+    expired = [mint(past) for _ in range(5)]
+    live = mint(future)
+    unbounded = mint(None)
+    mint(future)  # next claim prunes the expired entries
+    registry = authority._issued_receipts
+    assert all(g.receipt.receipt_hash not in registry for g in expired)
+    assert live.receipt.receipt_hash in registry
+    assert unbounded.receipt.receipt_hash in registry
+    # Within its lifetime a receipt still mints at most one grant.
+    with pytest.raises(LegitimacyInvariantError, match="already minted"):
+        authority.issue(
+            receipt=live.receipt,
+            invocation=invocation,
+            policy=policy,
+            grant_id=authority.allocate_grant_id(),
+            expires_at=future,
+        )
+    # A pruned (expired) receipt still cannot mint again: its grant id was spent.
+    with pytest.raises(LegitimacyInvariantError):
+        authority.issue(
+            receipt=expired[0].receipt,
+            invocation=invocation,
+            policy=policy,
+            grant_id=authority.allocate_grant_id(),
+            expires_at=past,
+        )
+
+
+def test_v2_wire_rejects_non_mapping_boundary_with_domain_error() -> None:
+    v2_wire = DecisionReceipt.create(**_golden_fields(), **_V2_FIELDS).to_receipt_dict()
+    with pytest.raises(TypeError, match="execution_boundary must be a mapping"):
+        _receipt_from_dict({**v2_wire, "execution_boundary": ["x"]})

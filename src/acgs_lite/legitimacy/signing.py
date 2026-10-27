@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
@@ -317,6 +317,16 @@ def sign_execution_authorization(
     )
 
 
+_RECEIPT_WIRE_KEYS = frozenset(f.name for f in fields(DecisionReceipt))
+_BOUNDARY_WIRE_KEYS = frozenset(f.name for f in fields(ExecutionBoundary))
+
+
+def _reject_unknown_keys(data: Mapping[str, Any], allowed: frozenset[str], label: str) -> None:
+    unknown = sorted(str(key) for key in data if key not in allowed)
+    if unknown:
+        raise ValueError(f"unknown {label} fields: {', '.join(unknown)}")
+
+
 def _receipt_from_dict(data: Mapping[str, Any]) -> DecisionReceipt:
     """Reconstruct a frozen DecisionReceipt from its canonical dict projection.
 
@@ -325,11 +335,21 @@ def _receipt_from_dict(data: Mapping[str, Any]) -> DecisionReceipt:
     A missing (or null) ``schema_version`` always means v1; v2 keys without
     ``schema_version: 2`` are refused rather than silently dropped or upgraded.
     """
+    if not isinstance(data, Mapping):
+        # Caught by from_dict and re-raised as the domain ValueError.
+        raise TypeError(f"receipt must be a mapping, not {type(data).__name__}")
     schema_version = data.get("schema_version")
     v2_keys = {key: data.get(key) for key in V2_EXTENSION_KEYS[1:]}
     if schema_version != RECEIPT_SCHEMA_V2 and any(key in data for key in v2_keys):
         raise ValueError("v2 receipt fields require schema_version 2")
     boundary_data = data["execution_boundary"]
+    if schema_version == RECEIPT_SCHEMA_V2:
+        # v2 is a closed schema: an unknown key is refused, never silently dropped.
+        # v1 keeps its historical tolerance for extra keys.
+        if not isinstance(boundary_data, Mapping):
+            raise TypeError("execution_boundary must be a mapping")
+        _reject_unknown_keys(data, _RECEIPT_WIRE_KEYS, "v2 receipt")
+        _reject_unknown_keys(boundary_data, _BOUNDARY_WIRE_KEYS, "v2 execution_boundary")
     boundary = ExecutionBoundary(
         allowed_method=boundary_data["allowed_method"],
         allowed_scope=boundary_data["allowed_scope"],

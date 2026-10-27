@@ -60,12 +60,24 @@ This is a semver-major change (4.0.0): the production profile of the stable
   the call ran: the attempt is recorded (`PARTIAL`) and the caller does not receive the
   result.
 - Top-level scalar arguments and return values (`int`, `float`, `bool`, `Decimal`,
-  `Enum`, UTF-8 `bytes`) are now evaluated instead of being skipped. Arguments with no
-  evaluable projection (opaque objects, undecodable bytes, and such values directly inside
-  the keyword-argument mapping) are denied in every profile with
-  `rule_id="GOVERNANCE-PAYLOAD-UNEVALUABLE"`. Pass handles through a closure or
-  `functools.partial`, not as governed arguments. Opaque or binary return values keep
-  their existing handling.
+  `Enum`, UTF-8 `bytes`) are now evaluated instead of being skipped.
+- Governed arguments and return values are projected recursively for enforcement, at any
+  nesting depth and whether passed positionally or by keyword: dict values (and keys),
+  list/tuple/set/frozenset elements, every dataclass field (including `repr=False`),
+  pydantic `model_dump(mode="json")`, and plain objects' `__dict__`. Well-known value types
+  project deterministically (`datetime`/`date`/`time` → `isoformat()`, `UUID` and paths →
+  `str`, `Decimal` → `str`, `Enum` → its value, UTF-8 `bytes` → text). Previously a nested
+  object reached the engine as its `repr()`/`__str__` text, so its content was never
+  evaluated. Nothing is stringified with a `default=str` fallback any more.
+- Arguments that cannot be evaluated in full are denied in every profile with
+  `rule_id="GOVERNANCE-PAYLOAD-UNEVALUABLE"`, at any depth, inside positional values and
+  the keyword-argument mapping alike: objects with no projection (no dataclass fields,
+  `model_dump`, `dict()` or non-empty `__dict__`, e.g. file handles, generators,
+  `__slots__` objects), undecodable bytes, non-scalar dict keys, keys that collide after
+  projection, reference cycles, nesting deeper than 32 levels, and a `model_dump`/`dict()`
+  that raises. Pass handles through a closure or `functools.partial`, not as governed
+  arguments. Opaque or binary return values keep their existing handling; opaque values
+  nested inside a return value are evaluated as `null` rather than as their `repr()`.
 - `GovernedCallable(strict=False)` no longer turns enforcement into log-only: a blocking
   engine verdict (or a result without `valid is True`) denies at issue, execute input and
   execute output, raising with the primary violation's `rule_id`. The production profile
@@ -91,6 +103,10 @@ This is a semver-major change (4.0.0): the production profile of the stable
   and wire shape; a missing `schema_version` always means v1, v2 fields on a v1 receipt
   (or v2 keys on the wire without `schema_version: 2`) are refused, and no v1 bytes verify
   as v2 or vice versa. `receipt_identity` returns `acgs:receipt:v2:...` for v2 receipts.
+  The v2 wire schema is closed: `SignedReceipt.from_dict` refuses unknown v2 receipt and
+  `execution_boundary` keys (v1 keeps ignoring extra keys) and reports a non-mapping
+  `receipt` as the domain `ValueError`. `ExecutionAuthority` prunes its receipt registry
+  of expired v2 grants.
 
 ### Changed
 

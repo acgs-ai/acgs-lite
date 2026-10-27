@@ -190,6 +190,22 @@ def test_oversize_output_denied_after_call_in_production() -> None:
     assert guard._ledger._attempts["big-out"].status is AttemptStatus.PARTIAL
 
 
+def test_async_oversize_output_denied_after_call_in_production() -> None:
+    calls: list[str] = []
+    guard = _production()
+
+    @guard
+    async def f(text: str) -> str:
+        calls.append(text)
+        return "b" * (LIMIT + 1)
+
+    grant = f.issue_grant("hello")
+    with pytest.raises(GovernancePayloadError):
+        asyncio.run(f("hello", execution_grant=grant, execution_attempt_id="big-async-out"))
+    assert calls == ["hello"]
+    assert guard._ledger._attempts["big-async-out"].status is AttemptStatus.PARTIAL
+
+
 def test_oversize_output_denied_in_compatibility_profile() -> None:
     calls: list[str] = []
 
@@ -405,9 +421,9 @@ def test_enforcement_payload_helper_counts_every_value() -> None:
     ]
     with pytest.raises(GovernancePayloadError):
         governance_payloads_for_enforcement("x" * 11, max_chars=10)
-    # Unsortable mixed keys fall back to the container repr, which is still evaluated.
+    # Mixed keys project to JSON object keys (no repr fallback) and are still evaluated.
     assert governance_payloads_for_enforcement({1: "forbiddenword", "k": 2}) == [
-        "{1: 'forbiddenword', 'k': 2}"
+        '{"1": "forbiddenword", "k": 2}'
     ]
 
 
@@ -498,6 +514,62 @@ def test_result_without_valid_attribute_denies_issue_and_execute() -> None:
         f("hello", decision_receipt=_receipt("f"))
     assert excinfo.value.rule_id == "EXECUTION-GRANT-DENIED"
     assert calls == []
+
+
+def test_result_without_valid_attribute_denies_with_strict_false() -> None:
+    guard = _compat(strict=False)
+    guard.engine.validate = lambda *_a, **_k: _NoValid()  # type: ignore[method-assign]
+    calls: list[str] = []
+
+    @guard
+    def f(text: str) -> str:
+        calls.append(text)
+        return "ok"
+
+    with pytest.raises(ConstitutionalViolationError) as excinfo:
+        f.issue_grant("hello")
+    assert excinfo.value.rule_id == "EXECUTION-GRANT-DENIED"
+    with pytest.raises(ConstitutionalViolationError) as excinfo:
+        f("hello", decision_receipt=_receipt("f"))
+    assert excinfo.value.rule_id == "EXECUTION-GRANT-DENIED"
+    assert calls == []
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_output_result_without_valid_attribute_denies_with_strict_false(
+    asynchronous: bool,
+) -> None:
+    guard = _compat(strict=False)
+    original = guard.engine.validate
+
+    def validate(payload: str, **kwargs: Any) -> Any:
+        if str(kwargs.get("agent_id", "")).endswith(":output"):
+            return _NoValid()
+        return original(payload, **kwargs)
+
+    guard.engine.validate = validate  # type: ignore[method-assign]
+    calls: list[str] = []
+
+    if asynchronous:
+
+        @guard
+        async def af(text: str) -> str:
+            calls.append(text)
+            return "ok"
+
+        with pytest.raises(ConstitutionalViolationError) as excinfo:
+            asyncio.run(af("hello", decision_receipt=_receipt("af")))
+    else:
+
+        @guard
+        def f(text: str) -> str:
+            calls.append(text)
+            return "ok"
+
+        with pytest.raises(ConstitutionalViolationError) as excinfo:
+            f("hello", decision_receipt=_receipt("f"))
+    assert excinfo.value.rule_id == "EXECUTION-GRANT-DENIED"
+    assert calls == ["hello"]
 
 
 def test_warn_only_rules_still_pass() -> None:

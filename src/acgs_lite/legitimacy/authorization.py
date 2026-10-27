@@ -129,12 +129,25 @@ class ExecutionGrant:
         }
 
 
+def _parse_expiry(expires_at: str | None) -> datetime | None:
+    """Expiry as an aware datetime; ``None`` (never prune) when absent or unparseable."""
+    if expires_at is None:
+        return None
+    try:
+        expires = datetime.fromisoformat(expires_at)
+    except ValueError:
+        return None
+    return expires if expires.tzinfo is not None else expires.replace(tzinfo=timezone.utc)
+
+
 class ExecutionAuthority:
     """Mints and verifies same-instance grants with a per-authority HMAC key.
 
     Grant ids are random, server-side and single use: v2 receipts commit an id
     pre-allocated by :meth:`allocate_grant_id`, and one receipt mints at most one
-    grant. Both registries are process-local, like the grant ledger.
+    grant. Both registries are process-local, like the grant ledger. Entries for
+    expired v2 grants are pruned: such a receipt can never mint again because its
+    committed grant id is spent.
     """
 
     def __init__(self) -> None:
@@ -142,7 +155,8 @@ class ExecutionAuthority:
         self._secret = secrets.token_bytes(32)
         self._lock = threading.Lock()
         self._pending: set[str] = set()
-        self._issued_receipts: dict[str, str] = {}
+        # receipt_hash -> (grant_id, prune-after deadline or None to keep forever)
+        self._issued_receipts: dict[str, tuple[str, datetime | None]] = {}
 
     def allocate_grant_id(self) -> str:
         """Reserve a fresh random grant id to be committed into a v2 receipt."""
@@ -164,9 +178,20 @@ class ExecutionAuthority:
         policy: PolicyBinding,
         context_digest: str | None,
         grant_id: str | None,
+        expires_at: str | None,
     ) -> str:
         v2 = receipt.schema_version == RECEIPT_SCHEMA_V2
+        # Only v2 entries may be pruned: a v1 legacy receipt has no committed grant id,
+        # so dropping its entry would let it mint a second grant.
+        prune_after = _parse_expiry(expires_at) if v2 else None
         with self._lock:
+            now = datetime.now(timezone.utc)
+            for stale in [
+                receipt_hash
+                for receipt_hash, (_gid, due) in self._issued_receipts.items()
+                if due is not None and due < now
+            ]:
+                del self._issued_receipts[stale]
             if receipt.receipt_hash in self._issued_receipts:
                 raise LegitimacyInvariantError("receipt already minted a grant")
             if grant_id is None:
@@ -191,7 +216,7 @@ class ExecutionAuthority:
                     raise LegitimacyInvariantError("receipt does not match invocation binding")
                 if receipt.context_digest != context_digest:
                     raise LegitimacyInvariantError("receipt does not match trusted context digest")
-            self._issued_receipts[receipt.receipt_hash] = claimed
+            self._issued_receipts[receipt.receipt_hash] = (claimed, prune_after)
             return claimed
 
     def issue(
@@ -223,6 +248,7 @@ class ExecutionAuthority:
             policy=policy,
             context_digest=context_digest,
             grant_id=grant_id,
+            expires_at=expires_at,
         )
         issued_at = datetime.now(timezone.utc).isoformat()
         mac = self._mac(
