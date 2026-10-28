@@ -10,18 +10,10 @@ Constitutional Hash: 608508a9bd224290
 
 from __future__ import annotations
 
-import datetime
 import json
-import types
-import typing
-import uuid
-from dataclasses import asdict, fields, is_dataclass
-from decimal import Decimal
-from enum import Enum
-from pathlib import Path, PosixPath, PurePath, PurePosixPath, PureWindowsPath, WindowsPath
+import math
+from dataclasses import asdict, is_dataclass
 from typing import Any
-
-from pydantic import BaseModel
 
 from acgs_lite.errors import ConstitutionalViolationError
 
@@ -102,10 +94,11 @@ def iter_governance_payloads(
 
 def _unevaluable(value: Any, index: int) -> GovernancePayloadError:
     return GovernancePayloadError(
-        f"governed value #{index} of type {type(value).__name__} is not a projectable "
-        "type; governed values may only contain str/int/float/bool/None, exact "
-        "dict/list/tuple/set/frozenset, dataclasses, pydantic v2 models and well-known "
-        "value types. Pass handles via closure or functools.partial, not as governed values",
+        f"governed value #{index} of type {type(value).__name__} is not JSON-native; "
+        "governed values may only contain exact str/int/finite float/bool/None, UTF-8 "
+        "bytes, list/tuple and dict with str keys. Convert rich objects first (e.g. "
+        'model_dump(mode="json"), isoformat(), str(uuid)); pass handles via closure or '
+        "functools.partial, not as governed values",
         rule_id=_UNEVALUABLE_RULE_ID,
     )
 
@@ -136,98 +129,23 @@ def _oversize(index: int, size: int, max_chars: int) -> GovernancePayloadError:
     )
 
 
-# --- closed type allowlist --------------------------------------------------------
+# --- JSON-only contract ----------------------------------------------------------
 #
-# The projector never asks a value what it contains through methods its own type can
-# override (``items()``, ``model_dump()``, ``dict()``, ``__dict__``, ``__getattr__``).
-# Types are matched exactly (``type(v) is ...``), never with ``isinstance``, so a
-# subclass that adds hidden state is not mistaken for its base. Anything outside the
-# allowlist denies, on input and on output alike.
-
-_PRIMITIVE_TYPES: frozenset[type] = frozenset({str, int, float, bool})
-_TEXT_TYPES: frozenset[type] = frozenset(
-    {Decimal, uuid.UUID, PurePath, PurePosixPath, PureWindowsPath, Path, PosixPath, WindowsPath}
-)
-_ISOFORMAT_TYPES: frozenset[type] = frozenset({datetime.datetime, datetime.date, datetime.time})
-_SEQUENCE_TYPES: frozenset[type] = frozenset({list, tuple})
-_SET_TYPES: frozenset[type] = frozenset({set, frozenset})
-
-# Interpreter-level accessors: a class (or its metaclass) cannot override these.
-_TYPE_NAMESPACE: Any = type.__dict__["__dict__"]
-_TYPE_MRO: Any = type.__dict__["__mro__"]
-_TYPE_FLAGS: Any = type.__dict__["__flags__"]
-_TYPE_LAYOUT: tuple[Any, ...] = tuple(
-    type.__dict__[name]
-    for name in ("__basicsize__", "__itemsize__", "__dictoffset__", "__weakrefoffset__")
-)
-_HEAPTYPE = 1 << 9
-# Bases that add no instance state; ``typing.Generic`` is a C type on 3.12+.
-_STATELESS_BASES: frozenset[type] = frozenset({object, typing.Generic})  # type: ignore[arg-type]
-
-
-def _layout(kind: type) -> tuple[int, ...]:
-    return tuple(descriptor.__get__(kind) for descriptor in _TYPE_LAYOUT)
-
-
-class _PlainReference:
-    """Layout of a Python class whose only instance state is its ``__dict__``."""
-
-
-class _ModelReference(BaseModel):
-    """Layout of a pydantic model subclass that adds no instance storage."""
-
-
-_PLAIN_LAYOUT = _layout(_PlainReference)
-_MODEL_LAYOUT = _layout(_ModelReference)
-_MODEL_NAMESPACE = _TYPE_NAMESPACE.__get__(BaseModel)
-_MODEL_SLOTS = frozenset(BaseModel.__slots__)
-_MODEL_SIDE_STATE = ("__pydantic_extra__", "__pydantic_private__")
-
-
-def _instance_state(value: Any, layout: tuple[int, ...], slots: frozenset[str]) -> Any:
-    """The instance ``__dict__`` when it is provably all of ``value``'s state, else ``None``.
-
-    The layout must match a reference class (no extra slots, no C-level storage), every
-    class in the MRO must be Python-defined with no slot descriptors beyond ``slots``,
-    and ``__dict__`` must resolve to the interpreter's own descriptor, which is then
-    called directly so a ``__dict__`` property cannot substitute a different mapping.
-    """
-    kind = type(value)
-    if _layout(kind) != layout:
-        return None
-    descriptor: Any = None
-    namespaces: list[Any] = []
-    for klass in _TYPE_MRO.__get__(kind):
-        if klass in _STATELESS_BASES:
-            continue
-        if not _TYPE_FLAGS.__get__(klass) & _HEAPTYPE:
-            return None
-        namespace = _TYPE_NAMESPACE.__get__(klass)
-        namespaces.append(namespace)
-        for name, member in namespace.items():
-            if type(member) is types.MemberDescriptorType and name not in slots:
-                return None
-        if descriptor is None and "__dict__" in namespace:
-            descriptor = namespace["__dict__"]
-    if type(descriptor) is not types.GetSetDescriptorType:
-        return None
-    state = descriptor.__get__(value, kind)
-    if type(state) is not dict:
-        return None
-    # A class-level descriptor (e.g. a property) under a state key decides what
-    # attribute access returns, so the stored value would not be what the callee reads.
-    for namespace in namespaces:
-        for name in state:
-            if name in namespace and hasattr(type(namespace[name]), "__get__"):
-                return None
-    return state
+# Governed values may only be exact built-in JSON-native values. Types are matched
+# exactly (``type(v) is ...``), never with ``isinstance``, so no subclass, Enum,
+# dataclass or model can supply behaviour that differs from its projected state, and
+# the projector never calls a method that the value's type could override. Anything
+# outside the contract denies, on input and on output alike. Use chained ``is``
+# checks only: ``kind in {str, ...}`` would consult a metaclass ``__eq__``/``__hash__``.
 
 
 class _Projector:
-    """Recursively project a governed value to JSON-safe content, failing closed.
+    """Recursively project a governed value to JSON text content, failing closed.
 
-    Only allowlisted types project; every other value, an undecodable or NUL-bearing
-    byte string, a reference cycle, nesting deeper than 32 levels and budget
+    Accepts ``None``, ``bool``, ``int``, finite ``float``, ``str``, strict-UTF-8
+    ``bytes``/``bytearray`` without NUL (projected as text), ``list``, ``tuple``
+    (projected as a list) and ``dict`` with ``str`` keys, all matched exactly. Every
+    other value, a reference cycle, nesting deeper than 32 levels and budget
     exhaustion raise :class:`GovernancePayloadError`. There is no skip mode.
     """
 
@@ -237,19 +155,6 @@ class _Projector:
         self.index = index
         self.budget = budget
         self.path: set[int] = set()
-
-    def scalar(self, value: Any) -> tuple[bool, Any]:
-        """Project allowlisted leaf types; ``(False, None)`` when ``value`` is not one."""
-        kind = type(value)
-        if value is None or kind in _PRIMITIVE_TYPES:
-            return True, value
-        if kind in _TEXT_TYPES:
-            return True, str(value)
-        if kind in _ISOFORMAT_TYPES:
-            return True, value.isoformat()
-        if kind is bytes or kind is bytearray:
-            return True, self._text(value)
-        return False, None
 
     def _text(self, value: bytes | bytearray) -> str:
         try:
@@ -268,12 +173,21 @@ class _Projector:
                 "levels and cannot be evaluated in full",
                 rule_id=_UNEVALUABLE_RULE_ID,
             )
-        if issubclass(type(value), Enum):
-            return self.project(object.__getattribute__(value, "_value_"), depth + 1)
-        known, projected = self.scalar(value)
-        if known:
-            self.budget.spend(len(projected) if isinstance(projected, str) else 1, self.index)
-            return projected
+        kind = type(value)
+        if value is None or kind is str or kind is int or kind is bool:
+            self.budget.spend(len(value) if kind is str else 1, self.index)
+            return value
+        if kind is float:
+            if not math.isfinite(value):
+                raise _unevaluable(value, self.index)
+            self.budget.spend(1, self.index)
+            return value
+        if kind is bytes or kind is bytearray:
+            text = self._text(value)
+            self.budget.spend(len(text), self.index)
+            return text
+        if kind is not dict and kind is not list and kind is not tuple:
+            raise _unevaluable(value, self.index)
         marker = id(value)
         if marker in self.path:
             raise GovernancePayloadError(
@@ -282,81 +196,20 @@ class _Projector:
             )
         self.path.add(marker)
         try:
-            return self._project_compound(value, depth)
+            self.budget.spend(2, self.index)
+            if kind is dict:
+                return self._mapping(value, depth)
+            return [self.project(item, depth + 1) for item in value]
         finally:
             self.path.discard(marker)
 
-    def _project_compound(self, value: Any, depth: int) -> Any:
-        kind = type(value)
-        self.budget.spend(2, self.index)
-        if kind is dict:
-            return self._mapping(value, depth)
-        if kind in _SEQUENCE_TYPES:
-            return [self.project(item, depth + 1) for item in value]
-        if kind in _SET_TYPES:
-            return sorted((self.project(item, depth + 1) for item in value), key=repr)
-        if issubclass(kind, BaseModel):
-            return self._mapping(self._model_state(value), depth)
-        if is_dataclass(kind):
-            return self._mapping(self._dataclass_state(value), depth)
-        raise _unevaluable(value, self.index)
-
-    def _dataclass_state(self, value: Any) -> dict[str, Any]:
-        state = _instance_state(value, _PLAIN_LAYOUT, frozenset())
-        names = {f.name for f in fields(type(value))}
-        if state is None or set(state) != names:
-            raise _unevaluable(value, self.index)
-        return dict(state)
-
-    def _model_state(self, value: Any) -> dict[str, Any]:
-        """Field, extra, private and computed values, read without any serializer."""
-        kind = type(value)
-        state = _instance_state(value, _MODEL_LAYOUT, _MODEL_SLOTS)
-        if state is None or set(state) != set(kind.model_fields):
-            raise _unevaluable(value, self.index)
-        values = dict(state)
-        for slot in _MODEL_SIDE_STATE:
-            try:
-                side = _MODEL_NAMESPACE[slot].__get__(value, kind)
-            except AttributeError:  # an unset slot (e.g. RootModel) holds nothing
-                continue
-            if side is None:
-                continue
-            if type(side) is not dict:
-                raise _unevaluable(value, self.index)
-            for key, item in side.items():
-                self._merge(values, key, item)
-        for name in list(kind.model_computed_fields):
-            self._merge(values, name, object.__getattribute__(value, name))
-        return values
-
-    def _merge(self, values: dict[Any, Any], key: Any, item: Any) -> None:
-        if key in values:
-            raise self._collision()
-        values[key] = item
-
-    def _collision(self) -> GovernancePayloadError:
-        return GovernancePayloadError(
-            f"governed value #{self.index} has keys that collide after projection",
-            rule_id=_UNEVALUABLE_RULE_ID,
-        )
-
-    def _key(self, key: Any) -> str:
-        if issubclass(type(key), Enum):
-            key = object.__getattribute__(key, "_value_")
-        known, key_value = self.scalar(key)
-        if not known:
-            raise _unevaluable(key, self.index)
-        return key_value if type(key_value) is str else json.dumps(key_value)
-
     def _mapping(self, mapping: dict[Any, Any], depth: int) -> dict[str, Any]:
         projected: dict[str, Any] = {}
-        for key, item in mapping.items():
-            name = self._key(key)
-            if name in projected:
-                raise self._collision()
-            self.budget.spend(len(name), self.index)
-            projected[name] = self.project(item, depth + 1)
+        for key in dict.keys(mapping):
+            if type(key) is not str:
+                raise _unevaluable(key, self.index)
+            self.budget.spend(len(key), self.index)
+            projected[key] = self.project(dict.__getitem__(mapping, key), depth + 1)
         return projected
 
 
@@ -372,16 +225,15 @@ def _enforcement_payload(value: Any, index: int, *, max_chars: int) -> str | Non
     except GovernancePayloadError:
         raise
     except Exception:
-        # A computed field that raises, a dict mutated during projection, ...: the
-        # value could not be read in full, so it denies like any other opaque value.
+        # A dict mutated during projection, ...: the value could not be read in
+        # full, so it denies like any other unevaluable value.
         raise _unevaluable(value, index) from None
-    if projected is None:
-        return None
     if type(projected) is str:
         return projected
     try:
-        return json.dumps(projected, ensure_ascii=False, sort_keys=True)
+        return json.dumps(projected, ensure_ascii=False, sort_keys=True, allow_nan=False)
     except (TypeError, ValueError):
+        # ValueError includes Python's int-to-str digit limit for huge integers.
         raise _unevaluable(value, index) from None
 
 
@@ -395,18 +247,18 @@ def governance_payloads_for_enforcement(
     payload longer than ``max_chars`` raises :class:`GovernancePayloadError`.
     ``None`` and ``""`` are skipped; other scalars are evaluated.
 
-    Projectable (closed allowlist, exact types only): ``str``/``int``/``float``/
-    ``bool``/``None``; ``datetime``/``date``/``time`` (``isoformat()``), ``UUID``,
-    paths and ``Decimal`` (``str``), ``Enum`` (its value); ``bytes``/``bytearray``
-    that decode as strict UTF-8 with no NUL; ``dict`` with scalar keys;
-    ``list``/``tuple``/``set``/``frozenset``; dataclass instances whose ``__dict__``
-    holds exactly their fields (no slots); pydantic v2 models (fields, extras,
-    private attributes and computed fields, read without serializers).
+    JSON-only contract (exact types, ``type(v) is T``; never ``isinstance``):
+    ``str``, ``int``, ``bool``, finite ``float``, ``None``; ``bytes``/``bytearray``
+    that decode as strict UTF-8 with no NUL (evaluated as text); ``list``;
+    ``tuple`` (evaluated as a list); ``dict`` whose keys are all exact ``str``.
 
-    Everything else denies with ``GOVERNANCE-PAYLOAD-UNEVALUABLE`` at any depth,
-    including subclasses of the container types, other ``Mapping``s, plain objects,
-    ``NamedTuple``, pydantic v1 models, generators, buffers and exceptions. A
-    reference cycle or nesting deeper than 32 levels also denies.
+    Everything else denies with ``GOVERNANCE-PAYLOAD-UNEVALUABLE`` at any depth:
+    ``Enum`` members, dataclasses, pydantic models, ``datetime``/``date``/``time``,
+    ``UUID``, paths, ``Decimal``, ``set``/``frozenset``, ``NamedTuple``, other
+    mappings and sequences, subclasses of any accepted type, non-``str`` dict keys,
+    NaN and infinities. A reference cycle or nesting deeper than 32 levels also
+    denies. Convert rich objects to JSON-native values before the governed call,
+    e.g. ``model.model_dump(mode="json")``, ``value.isoformat()``, ``str(uuid)``.
     """
     payloads: list[str] = []
     skipped = 0

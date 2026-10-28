@@ -195,7 +195,13 @@ class InProcessGrantLedger:
 
 
 def digest_output(value: Any) -> str | None:
-    """Digest the supported canonical value domain; reject opaque objects."""
+    """Digest a JSON-native output; ``None`` for anything outside that contract.
+
+    Admits the same values as the governance projector and the invocation binder
+    (see :func:`acgs_lite.legitimacy.invocation._canonical_json`), so an output that
+    can be evaluated can be digested and an Enum, dataclass, model or other rich
+    object cannot be stored for recovery replay.
+    """
     try:
         payload = _dumps(_canonical_json(value)).encode("utf-8")
     except Exception:

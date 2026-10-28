@@ -1,11 +1,12 @@
-"""Closed type allowlist for governance projection, enforced on input and output.
+"""JSON-only governance payloads, enforced on input and output.
 
 The projector never asks a value's own type what it contains (``items()``,
 ``model_dump()``, ``dict()``, ``__dict__``, ``__getattr__``). Only exact built-in
-scalars, exact ``dict``/``list``/``tuple``/``set``/``frozenset``, dataclasses and
-pydantic v2 models are projected; everything else denies with
+JSON-native values are projected: ``str``/``int``/finite ``float``/``bool``/``None``,
+strict-UTF-8 ``bytes``, ``list``/``tuple`` and ``dict`` with ``str`` keys. Everything
+else, dataclasses and pydantic models included, denies with
 ``GOVERNANCE-PAYLOAD-UNEVALUABLE`` before execution (input) and after it (output,
-attempt left ``PARTIAL``). Each attack row hides ``forbiddenword`` from the HEAD
+attempt left ``PARTIAL``). Each attack row hides ``forbiddenword`` from an earlier
 projector; the control rows prove the harness denies a plain payload by rule.
 """
 
@@ -14,13 +15,9 @@ from __future__ import annotations
 import array
 import asyncio
 import collections
-import datetime as dt
 import enum
-import uuid
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass, field
-from decimal import Decimal
-from pathlib import PurePosixPath
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, NamedTuple
 
@@ -284,6 +281,12 @@ _UNEVALUABLE_ROWS = [
     pytest.param(lambda: {"blob": bytearray(W.encode("utf-16-be"))}, id="nested-utf16be"),
     pytest.param(lambda: {PlainObject(): "x"}, id="opaque-key"),
     pytest.param(lambda: {("a", W): "x"}, id="tuple-key"),
+    # Dataclasses and pydantic models deny outright under the JSON-only contract.
+    pytest.param(lambda: Priv(), id="pydantic-private-attr"),
+    pytest.param(lambda: Comp(), id="pydantic-computed-field"),
+    pytest.param(lambda: Extra(body=W), id="pydantic-extra"),
+    pytest.param(lambda: Root([W]), id="pydantic-root-model"),
+    pytest.param(lambda: DC(W), id="dataclass-field"),
 ]
 
 
@@ -309,15 +312,10 @@ class Root(RootModel[list[str]]):
     pass
 
 
-# Allowlisted types whose hidden-by-serializer content must still reach the engine.
+# Plain JSON payloads carrying the keyword must deny by rule, not as unevaluable.
 _EVALUATED_ROWS = [
     pytest.param(lambda: {"x": W}, id="control-plain-dict"),
     pytest.param(lambda: [{"x": (W,)}], id="control-nested-list"),
-    pytest.param(Priv, id="pydantic-private-attr"),
-    pytest.param(Comp, id="pydantic-computed-field"),
-    pytest.param(lambda: Extra(body=W), id="pydantic-extra"),
-    pytest.param(lambda: Root([W]), id="pydantic-root-model"),
-    pytest.param(lambda: DC(W), id="dataclass-field"),
 ]
 
 
@@ -378,7 +376,7 @@ def test_unlisted_type_is_denied_on_input_and_output(make: Any) -> None:
 
 
 @pytest.mark.parametrize("make", _EVALUATED_ROWS)
-def test_allowlisted_hidden_content_is_evaluated_on_input_and_output(make: Any) -> None:
+def test_plain_keyword_content_is_denied_by_rule_on_input_and_output(make: Any) -> None:
     _check_input_and_output(make, BAD_WORD)
 
 
@@ -444,11 +442,13 @@ def test_unreadable_model_state_is_denied(make: Any) -> None:
     assert excinfo.value.rule_id == UNEVALUABLE
 
 
-def test_enum_with_none_value_is_skipped_like_none() -> None:
+def test_enum_with_none_value_is_denied_not_skipped() -> None:
     class Maybe(enum.Enum):
         NOTHING = None
 
-    assert governance_payloads_for_enforcement(Maybe.NOTHING, "x") == ["x"]
+    with pytest.raises(GovernancePayloadError) as excinfo:
+        governance_payloads_for_enforcement(Maybe.NOTHING, "x")
+    assert excinfo.value.rule_id == UNEVALUABLE
 
 
 def test_skip_opaque_is_no_longer_accepted() -> None:
@@ -456,69 +456,29 @@ def test_skip_opaque_is_no_longer_accepted() -> None:
         governance_payloads_for_enforcement({"k": "v"}, skip_opaque=True)  # type: ignore[call-arg]
 
 
-# --- benign allowlisted payloads still pass ---------------------------------------
-
-
-class Color(enum.Enum):
-    RED = "red"
-
-
-class Tag(str, enum.Enum):
-    A = "a"
-
-
-@dataclass
-class Inner:
-    label: str
-    tags: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class Frozen:
-    n: int
-
-
-class Rich(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    inner: Inner
-    count: int = 1
-    _token: str = PrivateAttr(default="private-ok")
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def doubled(self) -> int:
-        return self.count * 2
+# --- benign JSON-native payloads still pass ---------------------------------------
 
 
 def _benign() -> dict[str, Any]:
     return {
-        "items": [1, 2.5, True, None, "s", (3, 4), {5}, frozenset({"f"})],
-        "nested": {"dc": Inner("hi", ["a"]), "frozen": Frozen(1)},
-        "model": Rich(inner=Inner("in"), count=2, note="extra-ok"),
-        "root": Root(["r"]),
-        "color": Color.RED,
-        "tag": Tag.A,
+        "items": [1, 2.5, True, None, "s", (3, 4), [5], ["f"]],
+        "nested": {"dc": {"label": "hi", "tags": ["a"]}, "frozen": {"n": 1}},
         "raw": b"utf8",
         "buf": bytearray(b"ba"),
-        "ts": dt.datetime(2026, 1, 2, tzinfo=dt.timezone.utc),
-        "id": uuid.UUID(int=1),
-        "path": PurePosixPath("/srv"),
-        "amount": Decimal("1.5"),
+        "ts": "2026-01-02T00:00:00+00:00",
+        "id": "00000000-0000-0000-0000-000000000001",
+        "amount": "1.5",
     }
 
 
 def test_benign_allowlisted_payload_projects_every_field() -> None:
     [payload] = governance_payloads_for_enforcement(_benign())
     assert payload == (
-        '{"amount": "1.5", "buf": "ba", "color": "red", '
+        '{"amount": "1.5", "buf": "ba", '
         '"id": "00000000-0000-0000-0000-000000000001", '
         '"items": [1, 2.5, true, null, "s", [3, 4], [5], ["f"]], '
-        '"model": {"_token": "private-ok", "count": 2, "doubled": 4, '
-        '"inner": {"label": "in", "tags": []}, "note": "extra-ok"}, '
         '"nested": {"dc": {"label": "hi", "tags": ["a"]}, "frozen": {"n": 1}}, '
-        '"path": "/srv", "raw": "utf8", "root": {"root": ["r"]}, "tag": "a", '
-        '"ts": "2026-01-02T00:00:00+00:00"}'
+        '"raw": "utf8", "ts": "2026-01-02T00:00:00+00:00"}'
     )
 
 

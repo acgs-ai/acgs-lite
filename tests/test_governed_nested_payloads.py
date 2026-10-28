@@ -1,12 +1,14 @@
 """Dispatcher-level recursive projection of nested governed payloads.
 
-Nested values (dict values, list/tuple/set elements, dataclass fields including
-``repr=False``, pydantic models) are projected field by field and evaluated;
-nothing reaches the engine as ``repr()``/``__str__`` text. Values outside the
-closed allowlist (plain objects, non-dict mappings, ``dict()``/``model_dump()``
-duck types, opaque keys, undecodable bytes) deny with
-``GOVERNANCE-PAYLOAD-UNEVALUABLE`` wherever they are nested, on input and output. Every test calls the decorated function or ``issue_grant`` and asserts
-the wrapped side effect never ran on deny.
+Nested JSON-native values (dict values, list/tuple elements, UTF-8 bytes) are
+projected and evaluated; nothing reaches the engine as ``repr()``/``__str__`` text.
+Everything outside the JSON-only contract (dataclasses, pydantic models, Enum,
+datetime/UUID/Path/Decimal, sets, plain objects, non-dict mappings, non-``str``
+keys, undecodable bytes) denies with ``GOVERNANCE-PAYLOAD-UNEVALUABLE`` wherever it
+is nested, on input and output. Converting such values to JSON-native data before
+the call (``isoformat()``, ``str(uuid)``, ...) makes their content evaluable. Every
+test calls the decorated function or ``issue_grant`` and asserts the wrapped side
+effect never ran on deny.
 """
 
 from __future__ import annotations
@@ -110,7 +112,13 @@ def _assert_rule_denies(call: Any, rule_id: str) -> None:
     assert excinfo.value.rule_id == rule_id
 
 
-# --- [0] nested content is evaluated, never repr/__str__ ------------------------
+def _assert_unevaluable(call: Any) -> None:
+    with pytest.raises(GovernancePayloadError) as excinfo:
+        call()
+    assert excinfo.value.rule_id == UNEVALUABLE
+
+
+# --- [0] rich objects deny; their repr/__str__ never stands in for content -----
 
 
 @pytest.mark.parametrize(
@@ -121,7 +129,7 @@ def _assert_rule_denies(call: Any, rule_id: str) -> None:
         pytest.param(lambda: Model(body="rm forbiddenword"), id="pydantic"),
     ],
 )
-def test_keyword_object_fields_are_evaluated_at_issue_and_execute(make: Any) -> None:
+def test_keyword_objects_are_denied_at_issue_and_execute(make: Any) -> None:
     calls: list[object] = []
 
     @_guard()
@@ -129,14 +137,10 @@ def test_keyword_object_fields_are_evaluated_at_issue_and_execute(make: Any) -> 
         calls.append(email)
         return "sent"
 
-    _assert_rule_denies(lambda: send.issue_grant(email=make()), "BAD-WORD")
-    # Execute path: the invocation binder refuses objects it cannot digest, else the
-    # projected fields are evaluated; either way the side effect never runs.
-    with pytest.raises(ConstitutionalViolationError) as excinfo:
+    _assert_unevaluable(lambda: send.issue_grant(email=make()))
+    # Execute path: the invocation binder refuses the object before projection.
+    with pytest.raises(ArgumentNotDigestible):
         send(email=make(), decision_receipt=_receipt("send"))
-    if not isinstance(excinfo.value, ArgumentNotDigestible):
-        assert not isinstance(excinfo.value, GovernancePayloadError)
-        assert excinfo.value.rule_id == "BAD-WORD"
     assert calls == []
 
 
@@ -150,7 +154,7 @@ def test_keyword_object_fields_are_evaluated_at_issue_and_execute(make: Any) -> 
         pytest.param(lambda: frozenset({"forbiddenword"}), id="frozenset"),
     ],
 )
-def test_container_elements_are_evaluated(make: Any) -> None:
+def test_rich_container_elements_are_denied(make: Any) -> None:
     calls: list[object] = []
 
     @_guard()
@@ -158,26 +162,27 @@ def test_container_elements_are_evaluated(make: Any) -> None:
         calls.append(items)
         return "ok"
 
-    _assert_rule_denies(lambda: f.issue_grant(make()), "BAD-WORD")
-    _assert_rule_denies(lambda: f.issue_grant(items=make()), "BAD-WORD")
+    _assert_unevaluable(lambda: f.issue_grant(make()))
+    _assert_unevaluable(lambda: f.issue_grant(items=make()))
     with pytest.raises(ConstitutionalViolationError):
         f(make(), decision_receipt=_receipt("f"))
     assert calls == []
 
 
-def test_keyword_and_positional_object_yield_the_same_evaluated_content() -> None:
-    positional = governance_payloads_for_enforcement(Hidden("rm forbiddenword"))
-    keyword = governance_payloads_for_enforcement({"email": Hidden("rm forbiddenword")})
+def test_keyword_and_positional_object_deny_alike() -> None:
+    _assert_unevaluable(lambda: governance_payloads_for_enforcement(Hidden("rm forbiddenword")))
+    _assert_unevaluable(
+        lambda: governance_payloads_for_enforcement({"email": Hidden("rm forbiddenword")})
+    )
+    positional = governance_payloads_for_enforcement({"body": "rm forbiddenword"})
+    keyword = governance_payloads_for_enforcement({"email": {"body": "rm forbiddenword"}})
     assert positional == ['{"body": "rm forbiddenword"}']
     assert keyword == ['{"email": {"body": "rm forbiddenword"}}']
-    assert "object at 0x" not in keyword[0]
 
 
-def test_disguised_and_repr_false_fields_reach_the_engine() -> None:
-    [payload] = governance_payloads_for_enforcement({"x": Disguised("secret-body")})
-    assert "secret-body" in payload and "hello" not in payload
-    [payload] = governance_payloads_for_enforcement({"x": Hidden("secret-body")})
-    assert payload == '{"x": {"body": "secret-body"}}'
+def test_disguised_and_repr_false_objects_deny_instead_of_using_repr() -> None:
+    _assert_unevaluable(lambda: governance_payloads_for_enforcement({"x": Disguised("body")}))
+    _assert_unevaluable(lambda: governance_payloads_for_enforcement({"x": Hidden("body")}))
 
 
 def test_benign_nested_payload_still_mints_a_grant() -> None:
@@ -188,12 +193,9 @@ def test_benign_nested_payload_still_mints_a_grant() -> None:
         calls.append(email)
         return "sent"
 
-    # Evaluation passes; the invocation binder then refuses the undigestible object.
-    with pytest.raises(ArgumentNotDigestible):
-        send.issue_grant(email=Hidden("hello"))
-    # A plain object is not projectable at all, so it denies before binding.
-    with pytest.raises(GovernancePayloadError):
-        send.issue_grant(email=Email("hello"))
+    # Neither a dataclass nor a plain object is JSON-native: both deny before binding.
+    _assert_unevaluable(lambda: send.issue_grant(email=Hidden("hello")))
+    _assert_unevaluable(lambda: send.issue_grant(email=Email("hello")))
     assert send.issue_grant(email={"body": "hello", "to": ["a", "b"]}) is not None
     assert calls == []
 
@@ -301,44 +303,77 @@ def test_nested_output_content_is_evaluated() -> None:
     @_guard()
     def f(text: str) -> object:
         calls.append(text)
-        return [Disguised("leaks forbiddenword")]
+        return [{"body": "leaks forbiddenword"}]
 
     _assert_rule_denies(lambda: f("hello", decision_receipt=_receipt("f")), "BAD-WORD")
     assert calls == ["hello"]
 
 
-# --- [10] well-known value types are projected deterministically ------------------
+def test_nested_rich_output_is_denied() -> None:
+    calls: list[str] = []
+
+    @_guard()
+    def f(text: str) -> object:
+        calls.append(text)
+        return [Disguised("leaks forbiddenword")]
+
+    _assert_unevaluable(lambda: f("hello", decision_receipt=_receipt("f")))
+    assert calls == ["hello"]
 
 
-def test_well_known_value_types_are_projected() -> None:
+# --- [10] well-known value types deny; their JSON conversions are evaluated ---------
+
+
+_WELL_KNOWN = [
+    pytest.param(dt.datetime(2026, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc), id="datetime"),
+    pytest.param(dt.date(2026, 1, 2), id="date"),
+    pytest.param(dt.time(3, 4, 5), id="time"),
+    pytest.param(uuid.UUID(int=1), id="uuid"),
+    pytest.param(PurePosixPath("/srv/data"), id="pure-path"),
+    pytest.param(Decimal("1.50"), id="decimal"),
+    pytest.param(Color.BAD, id="enum"),
+]
+
+
+@pytest.mark.parametrize("value", _WELL_KNOWN)
+def test_well_known_value_types_are_denied(value: object) -> None:
+    _assert_unevaluable(lambda: governance_payloads_for_enforcement(value))
+    _assert_unevaluable(lambda: governance_payloads_for_enforcement({"v": [value]}))
+
+
+def test_well_known_values_converted_by_the_caller_are_projected() -> None:
     value = {
-        "ts": dt.datetime(2026, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc),
-        "day": dt.date(2026, 1, 2),
-        "at": dt.time(3, 4, 5),
-        "id": uuid.UUID(int=1),
-        "path": PurePosixPath("/srv/data"),
-        "amount": Decimal("1.50"),
-        "color": Color.BAD,
+        "ts": dt.datetime(2026, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc).isoformat(),
+        "day": dt.date(2026, 1, 2).isoformat(),
+        "id": str(uuid.UUID(int=1)),
+        "path": str(PurePosixPath("/srv/data")),
+        "amount": str(Decimal("1.50")),
+        "color": Color.BAD.value,
         "raw": b"utf8",
     }
     assert governance_payloads_for_enforcement(value) == [
-        '{"amount": "1.50", "at": "03:04:05", "color": "forbiddenword", '
-        '"day": "2026-01-02", "id": "00000000-0000-0000-0000-000000000001", '
-        '"path": "/srv/data", "raw": "utf8", "ts": "2026-01-02T03:04:05+00:00"}'
+        '{"amount": "1.50", "color": "forbiddenword", "day": "2026-01-02", '
+        '"id": "00000000-0000-0000-0000-000000000001", "path": "/srv/data", '
+        '"raw": "utf8", "ts": "2026-01-02T03:04:05+00:00"}'
     ]
-    assert governance_payloads_for_enforcement(dt.date(2026, 1, 2)) == ["2026-01-02"]
 
 
 @pytest.mark.parametrize(
-    ("value", "rule_id"),
+    ("value", "converted", "rule_id"),
     [
-        (dt.datetime(2666, 1, 1), "NUM-666"),
-        (Path("/x/forbiddenword"), "BAD-WORD"),
-        (uuid.UUID("00000000-0000-0000-0000-000000000666"), "NUM-666"),
-        (Decimal("666"), "NUM-666"),
+        (dt.datetime(2666, 1, 1), dt.datetime(2666, 1, 1).isoformat(), "NUM-666"),
+        (Path("/x/forbiddenword"), str(Path("/x/forbiddenword")), "BAD-WORD"),
+        (
+            uuid.UUID("00000000-0000-0000-0000-000000000666"),
+            "00000000-0000-0000-0000-000000000666",
+            "NUM-666",
+        ),
+        (Decimal("666"), "666", "NUM-666"),
     ],
 )
-def test_well_known_nested_values_are_evaluated_not_denied(value: object, rule_id: str) -> None:
+def test_well_known_nested_values_deny_and_conversions_are_evaluated(
+    value: object, converted: str, rule_id: str
+) -> None:
     calls: list[object] = []
 
     @_guard()
@@ -346,33 +381,37 @@ def test_well_known_nested_values_are_evaluated_not_denied(value: object, rule_i
         calls.append(meta)
         return "ok"
 
-    _assert_rule_denies(lambda: f.issue_grant({"v": value}), rule_id)
-    _assert_rule_denies(lambda: f.issue_grant(meta={"v": [value]}), rule_id)
+    _assert_unevaluable(lambda: f.issue_grant({"v": value}))
+    _assert_unevaluable(lambda: f.issue_grant(meta={"v": [value]}))
+    _assert_rule_denies(lambda: f.issue_grant({"v": converted}), rule_id)
+    _assert_rule_denies(lambda: f.issue_grant(meta={"v": [converted]}), rule_id)
     assert calls == []
 
 
-def test_benign_well_known_nested_values_mint() -> None:
+def test_benign_well_known_values_mint_only_after_conversion() -> None:
     @_guard()
     def f(meta: object) -> str:
         return "ok"
 
-    assert f.issue_grant({"ts": dt.datetime(2026, 1, 1), "n": Decimal("1.5")}) is not None
-    with pytest.raises(ArgumentNotDigestible):
-        f.issue_grant({"id": uuid.uuid4(), "path": Path("/srv")})
+    _assert_unevaluable(lambda: f.issue_grant({"ts": dt.datetime(2026, 1, 1)}))
+    _assert_unevaluable(lambda: f.issue_grant({"id": uuid.uuid4(), "path": Path("/srv")}))
+    assert f.issue_grant({"ts": dt.datetime(2026, 1, 1).isoformat(), "n": "1.5"}) is not None
 
 
-def test_enum_keys_project_while_legacy_dict_cycles_and_opaque_keys_deny() -> None:
+def test_enum_keys_legacy_dict_cycles_and_opaque_keys_deny() -> None:
     class Legacy:
         def dict(self) -> dict[str, Any]:
             return {"body": "forbiddenword"}
 
-    assert governance_payloads_for_enforcement({Color.BAD: Hidden("forbiddenword")}) == [
-        '{"forbiddenword": {"body": "forbiddenword"}}'
-    ]
     cyclic: list[object] = ["x"]
     cyclic.append(cyclic)
     # There is no output-only skip mode: every one of these denies on both sides.
-    for value in ({Color.BAD: Legacy()}, cyclic, {Opaque(): "kept", "k": "v"}):
+    for value in (
+        {Color.BAD: "x"},
+        {Color.BAD: Legacy()},
+        cyclic,
+        {Opaque(): "kept", "k": "v"},
+    ):
         with pytest.raises(GovernancePayloadError) as excinfo:
             governance_payloads_for_enforcement(value)
         assert excinfo.value.rule_id == UNEVALUABLE
@@ -460,7 +499,7 @@ def test_non_dict_mappings_are_denied() -> None:
         f.issue_grant(MappingProxyType({"body": "forbiddenword"}))
 
 
-# --- [13] pydantic models project field values, not their serialized form --------
+# --- [13] pydantic models deny; serializers cannot hide content from the engine --
 
 
 class ExcludedModel(BaseModel):
@@ -496,7 +535,7 @@ _REDACTING_MODELS = [
 
 
 @pytest.mark.parametrize("make", _REDACTING_MODELS)
-def test_redacted_model_output_content_is_evaluated(make: Any) -> None:
+def test_redacted_model_output_is_denied(make: Any) -> None:
     calls: list[str] = []
 
     @_guard()
@@ -504,12 +543,12 @@ def test_redacted_model_output_content_is_evaluated(make: Any) -> None:
         calls.append(text)
         return {"message": make()}
 
-    _assert_rule_denies(lambda: f("hello", decision_receipt=_receipt("f")), "BAD-WORD")
+    _assert_unevaluable(lambda: f("hello", decision_receipt=_receipt("f")))
     assert calls == ["hello"]
 
 
 @pytest.mark.parametrize("make", _REDACTING_MODELS)
-def test_redacted_model_input_content_is_evaluated(make: Any) -> None:
+def test_redacted_model_input_is_denied(make: Any) -> None:
     calls: list[object] = []
 
     @_guard()
@@ -517,12 +556,12 @@ def test_redacted_model_input_content_is_evaluated(make: Any) -> None:
         calls.append(meta)
         return "ok"
 
-    _assert_rule_denies(lambda: f.issue_grant(make()), "BAD-WORD")
-    _assert_rule_denies(lambda: f.issue_grant(meta={"m": make()}), "BAD-WORD")
+    _assert_unevaluable(lambda: f.issue_grant(make()))
+    _assert_unevaluable(lambda: f.issue_grant(meta={"m": make()}))
     assert calls == []
 
 
-def test_model_field_values_are_projected_recursively() -> None:
-    assert governance_payloads_for_enforcement(FieldRedactedModel(body="x")) == ['{"body": "x"}']
+def test_models_are_denied_with_or_without_opaque_fields() -> None:
+    _assert_unevaluable(lambda: governance_payloads_for_enforcement(FieldRedactedModel(body="x")))
     with pytest.raises(GovernancePayloadError):
         governance_payloads_for_enforcement(ExtraModel(handle=Opaque()))

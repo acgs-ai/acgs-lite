@@ -32,6 +32,7 @@ from acgs_lite.legitimacy import (
 )
 from acgs_lite.legitimacy.authorization import EngineDecision, build_issue_receipt
 from acgs_lite.legitimacy.invocation import (
+    ArgumentNotDigestible,
     InvocationBinding,
     PolicyBinding,
     bind_invocation,
@@ -764,7 +765,7 @@ def test_missing_required_argument_is_rejected_during_grant_issuance() -> None:
         transfer.issue_grant("acct-1")
 
 
-def test_distinct_enum_types_cannot_substitute_for_granted_argument() -> None:
+def test_enum_arguments_cannot_be_granted_or_substituted() -> None:
     trusted_mode = Enum("Mode", {"READ": "read"}, module="trusted_a")
     untrusted_mode = Enum("Mode", {"READ": "read"}, module="untrusted_b")
     calls: list[object] = []
@@ -775,8 +776,10 @@ def test_distinct_enum_types_cannot_substitute_for_granted_argument() -> None:
         calls.append(mode)
         return "ok"
 
-    grant = execute.issue_grant(trusted_mode.READ)
-    with pytest.raises(LegitimacyInvariantError, match="invocation binding mismatch"):
+    with pytest.raises(GovernancePayloadError):
+        execute.issue_grant(trusted_mode.READ)
+    grant = execute.issue_grant(trusted_mode.READ.value)
+    with pytest.raises(ArgumentNotDigestible):
         execute(untrusted_mode.READ, execution_grant=grant)
     assert calls == []
 
@@ -1055,7 +1058,7 @@ def test_mutated_completed_result_is_not_recovered_as_success() -> None:
 
 
 def test_custom_result_with_constant_repr_is_not_recovered_as_verified() -> None:
-    # A dataclass passes output governance, so this reaches the ledger's result digest.
+    # A dataclass is not JSON-native: output governance denies it before the digest.
     @dataclass
     class MutableOpaque:
         state: str = "original"
@@ -1072,7 +1075,7 @@ def test_custom_result_with_constant_repr_is_not_recovered_as_verified() -> None
         return MutableOpaque()
 
     grant = collect.issue_grant(1)
-    with pytest.raises(LegitimacyInvariantError, match="result is unknown"):
+    with pytest.raises(GovernancePayloadError):
         collect(1, execution_grant=grant, execution_attempt_id="opaque-result")
     assert guard._ledger._attempts["opaque-result"].status is AttemptStatus.PARTIAL
     with pytest.raises(LegitimacyInvariantError, match="already partial"):

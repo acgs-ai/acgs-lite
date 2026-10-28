@@ -262,7 +262,7 @@ def test_scalar_positional_arguments_are_evaluated(value: object, rule_id: str) 
     assert calls == []
 
 
-def test_decimal_and_enum_positional_arguments_are_evaluated() -> None:
+def test_decimal_and_enum_positional_arguments_deny_and_conversions_are_evaluated() -> None:
     class Code(enum.Enum):
         BAD = "forbiddenword"
 
@@ -273,11 +273,16 @@ def test_decimal_and_enum_positional_arguments_are_evaluated() -> None:
         calls.append(x)
         return "ok"
 
+    for rich in (Decimal("666"), Code.BAD):
+        with pytest.raises((GovernancePayloadError, ArgumentNotDigestible)):
+            f(rich, decision_receipt=_receipt("f"))
+        with pytest.raises(GovernancePayloadError):
+            f.issue_grant(rich)
     with pytest.raises(ConstitutionalViolationError) as excinfo:
-        f(Decimal("666"), decision_receipt=_receipt("f"))
+        f(str(Decimal("666")), decision_receipt=_receipt("f"))
     assert excinfo.value.rule_id == "NUM-666"
     with pytest.raises(ConstitutionalViolationError) as excinfo:
-        f(Code.BAD, decision_receipt=_receipt("f"))
+        f(Code.BAD.value, decision_receipt=_receipt("f"))
     assert excinfo.value.rule_id == "BAD-WORD"
     assert calls == []
 
@@ -338,8 +343,11 @@ def test_undecodable_bytes_denied() -> None:
         calls.append(x)
         return "ok"
 
-    with pytest.raises(GovernancePayloadError) as excinfo:
+    # The invocation binder applies the same strict-UTF-8 rule before projection.
+    with pytest.raises(ArgumentNotDigestible, match="strict UTF-8"):
         f(b"\xff\xfe", decision_receipt=_receipt("f"))
+    with pytest.raises(GovernancePayloadError) as excinfo:
+        f.issue_grant(b"\xff\xfe")
     assert excinfo.value.rule_id == "GOVERNANCE-PAYLOAD-UNEVALUABLE"
     assert calls == []
 
@@ -428,10 +436,9 @@ def test_enforcement_payload_helper_counts_every_value() -> None:
     ]
     with pytest.raises(GovernancePayloadError):
         governance_payloads_for_enforcement("x" * 11, max_chars=10)
-    # Mixed keys project to JSON object keys (no repr fallback) and are still evaluated.
-    assert governance_payloads_for_enforcement({1: "forbiddenword", "k": 2}) == [
-        '{"1": "forbiddenword", "k": 2}'
-    ]
+    # Only exact str keys are JSON-native; an int key denies instead of being coerced.
+    with pytest.raises(GovernancePayloadError):
+        governance_payloads_for_enforcement({1: "forbiddenword", "k": 2})
 
 
 # --- 1c: a discarded engine result can no longer allow --------------------------

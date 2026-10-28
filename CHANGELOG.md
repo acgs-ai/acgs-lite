@@ -51,41 +51,81 @@ This is a semver-major change (4.0.0): the production profile of the stable
   `trusted_execution_keys` does.
 - `receipt_signer`, `trusted_execution_keys` and `grant_ttl_seconds` are refused
   outside the production profile. The compatibility profile is unchanged.
-- Governance projection is a closed type allowlist, enforced identically on arguments
-  and return values in every profile (see Security). Values that earlier 4.0 work
-  projected through methods their own type controls (`__dict__`, `items()`,
-  `model_dump()`, `dict()`) now deny with `GOVERNANCE-PAYLOAD-UNEVALUABLE`: plain
-  objects, non-`dict` `Mapping`s (including `MappingProxyType`, `ChainMap`,
-  `OrderedDict`, `defaultdict`, `Counter`), subclasses of `dict`/`list`/`tuple`/`set`/
-  `str`/`int`, `NamedTuple`, pydantic v1 models, and dataclasses with extra instance
-  attributes or `__slots__`. Return values get no special treatment any more: an
-  opaque result (including a nested one, a value under an opaque dict key and a
-  reference cycle) denies after the call ran, the attempt is recorded `PARTIAL` and
-  the caller does not receive the result, exactly like oversize output. Bytes must be
-  strict UTF-8 without NUL on both sides, so undecodable or UTF-16/UTF-32 binary
-  output that 43ea299 evaluated with `errors="replace"` and returned now denies.
-  `governance_payloads_for_enforcement` drops its `skip_opaque` keyword. Tests whose
-  expectation changed (21): `test_execution_hardening.py::`
-  `test_opaque_result_never_records_completion[False]` and `[True]` (now
-  `GovernancePayloadError`), `test_custom_result_with_constant_repr_is_not_recovered_as_verified`
-  (result is now a dataclass so it still reaches the result digest);
-  `test_governed_payload_enforcement.py::test_opaque_output_keeps_existing_compatibility_behaviour`
-  and `test_undecodable_bytes_output_keeps_existing_compatibility_behaviour` (renamed
-  `..._is_denied_in_compatibility_profile`); `test_governed_nested_payloads.py::`
-  `test_keyword_object_fields_are_evaluated_at_issue_and_execute[plain-object]` (moved
-  to `test_nested_opaque_values_are_denied`), `[custom-str]` and
-  `test_container_elements_are_evaluated[list]`/`[tuple]` (fixtures are now
-  dataclasses), `test_keyword_and_positional_object_yield_the_same_evaluated_content`,
-  `test_disguised_and_repr_false_fields_reach_the_engine`,
-  `test_benign_nested_payload_still_mints_a_grant` (plain object now denies),
-  `test_nested_opaque_output_is_not_stringified` (now `..._is_denied_not_stringified`),
-  `test_nested_output_content_is_evaluated`,
-  `test_legacy_dict_method_enum_keys_and_output_edge_cases_are_projected` (now
-  `test_enum_keys_project_while_legacy_dict_cycles_and_opaque_keys_deny`), the four
-  `test_output_content_behind_opaque_keys_and_binary_is_evaluated` cases (now
-  `test_output_with_opaque_keys_or_binary_is_denied`),
-  `test_benign_output_with_opaque_keys_and_binary_still_returns` (now `..._is_denied`)
-  and `test_non_dict_mappings_are_projected_from_items` (now `..._are_denied`).
+- Governed payloads are JSON-only. The governance projector
+  (`governance_payloads_for_enforcement`), the invocation binder / argument digest
+  (`canonical_argument_digest`, `bind_invocation`) and the output digest
+  (`digest_output`) admit exactly the same values, matched with `type(v) is T`, never
+  `isinstance`: `dict` whose keys are all exact `str`, `list`, `tuple` (evaluated as a
+  list; the argument digest still distinguishes it from a list), `str`, `int`, `bool`,
+  finite `float`, `None`, and `bytes`/`bytearray` that decode as strict UTF-8 with no
+  NUL (evaluated as text). Nesting deeper than 32 levels, reference cycles and the
+  10,000-character budget still deny. Earlier 4.0 work projected rich objects, and
+  every round of that left a value whose runtime behaviour differed from its projected
+  state (an `Enum` with `str` mixin data or extra member attributes, a dataclass or
+  model overriding `__getattribute__`, a `@computed_field` that mutates or flips state,
+  a property shadowing a pydantic extra key); those are now denied outright.
+  **Denied** with `GOVERNANCE-PAYLOAD-UNEVALUABLE`, at any depth, on input and output
+  in every profile: `Enum`/`IntEnum`/`StrEnum` members, dataclasses, pydantic models
+  (v1 and v2, including `RootModel`), `datetime`/`date`/`time`, `UUID`, paths,
+  `Decimal`, `set`/`frozenset`, `NamedTuple`, every non-`dict` `Mapping` and
+  non-`list`/`tuple` sequence (`OrderedDict`, `defaultdict`, `Counter`, `ChainMap`,
+  `MappingProxyType`, `deque`, `array`, `memoryview`, generators), subclasses of any
+  accepted type (including `str`/`int`/`float`/`bytes` subclasses, and subclasses
+  whose metaclass makes them compare and hash equal to the base type), dict keys that
+  are not exact `str` (`int`, `bool`, `None`, `Enum`, `tuple` keys), NaN and
+  infinities, plain objects, exceptions and handles. The binder raises
+  `ArgumentNotDigestible` for the same values (and now also for undecodable or
+  NUL-bearing bytes, nesting deeper than 32 levels and integers beyond Python's
+  int-to-str limit), and computes the argument digest before it reads `scope` or
+  `subjects`, so it never calls `str()` on a caller-supplied object. Output that
+  is not JSON-native denies after the call ran: the attempt is recorded `PARTIAL`
+  and the caller does not receive the result; a recovery replay of that attempt is
+  refused. `governance_payloads_for_enforcement` has no `skip_opaque` keyword.
+  Argument digests of JSON-native values are unchanged.
+  Tests whose expectation changed (25 functions, 44 cases): in
+  `test_governance_projection_allowlist.py`, the five rich rows of
+  `test_allowlisted_hidden_content_is_evaluated_on_input_and_output` moved to
+  `test_unlisted_type_is_denied_on_input_and_output` (the control rows remain as
+  `test_plain_keyword_content_is_denied_by_rule_on_input_and_output`),
+  `test_benign_allowlisted_payload_projects_every_field` and
+  `test_benign_allowlisted_output_is_returned` (JSON-native fixture),
+  `test_enum_with_none_value_is_skipped_like_none` (now `..._is_denied_not_skipped`);
+  in `test_governed_nested_payloads.py`,
+  `test_keyword_object_fields_are_evaluated_at_issue_and_execute` (now
+  `test_keyword_objects_are_denied_at_issue_and_execute`),
+  `test_container_elements_are_evaluated` (now `test_rich_container_elements_are_denied`),
+  `test_keyword_and_positional_object_yield_the_same_evaluated_content` (now
+  `..._deny_alike`), `test_disguised_and_repr_false_fields_reach_the_engine` (now
+  `test_disguised_and_repr_false_objects_deny_instead_of_using_repr`),
+  `test_benign_nested_payload_still_mints_a_grant`, `test_nested_output_content_is_evaluated`
+  (plus the new `test_nested_rich_output_is_denied`), `test_well_known_value_types_are_projected`
+  (now `test_well_known_value_types_are_denied` and
+  `test_well_known_values_converted_by_the_caller_are_projected`),
+  `test_well_known_nested_values_are_evaluated_not_denied` (now
+  `..._deny_and_conversions_are_evaluated`), `test_benign_well_known_nested_values_mint`
+  (now `test_benign_well_known_values_mint_only_after_conversion`),
+  `test_enum_keys_project_while_legacy_dict_cycles_and_opaque_keys_deny` (now
+  `test_enum_keys_legacy_dict_cycles_and_opaque_keys_deny`),
+  `test_redacted_model_output_content_is_evaluated` and `..._input_...` (now
+  `test_redacted_model_output_is_denied` / `..._input_is_denied`),
+  `test_model_field_values_are_projected_recursively` (now
+  `test_models_are_denied_with_or_without_opaque_fields`); in
+  `test_governed_payload_enforcement.py`,
+  `test_decimal_and_enum_positional_arguments_are_evaluated` (now
+  `..._deny_and_conversions_are_evaluated`), `test_enforcement_payload_helper_counts_every_value`
+  (an `int` key denies), `test_undecodable_bytes_denied` (the binder denies first on
+  execute); in `test_invocation_binding.py`,
+  `test_int_and_str_mapping_keys_have_distinct_digests` (now
+  `test_only_str_mapping_keys_are_digestible`),
+  `test_enum_digest_includes_fully_qualified_type_identity` and
+  `test_enum_mixin_values_do_not_alias_their_primitives` (now
+  `test_enum_members_are_not_digestible` / `test_enum_mixin_members_are_not_digestible`);
+  in `test_execution_hardening.py`,
+  `test_custom_result_with_constant_repr_is_not_recovered_as_verified` (output
+  governance denies the dataclass before the digest) and
+  `test_distinct_enum_types_cannot_substitute_for_granted_argument` (now
+  `test_enum_arguments_cannot_be_granted_or_substituted`). Regression matrix:
+  `tests/test_governance_json_only.py`.
 
 ### Migration to 4.0
 
@@ -100,6 +140,13 @@ This is a semver-major change (4.0.0): the production profile of the stable
 - The ledger is still in-process: a signed receipt executes only on the instance
   that issued it. See `docs/api/legitimacy.md`.
 - Install `acgs-lite[crypto]` wherever the production profile runs.
+- Convert rich objects to JSON-native values before calling a governed function,
+  for arguments and for what it returns: `model.model_dump(mode="json")` for pydantic
+  models, `dataclasses.asdict(...)` (then convert its fields), `value.isoformat()` for
+  `datetime`/`date`/`time`, `str(uuid)`, `str(path)`, `str(decimal)`, `member.value`
+  for an `Enum`, `sorted(...)` for a set, and `str` keys for dicts. The governed
+  function receives exactly the value that was evaluated, so do the conversion at the
+  call site, not inside the governed function.
 
 ### Security
 
@@ -109,33 +156,22 @@ This is a semver-major change (4.0.0): the production profile of the stable
   truncated before evaluation, at issue and at execute. Oversize output is detected after
   the call ran: the attempt is recorded (`PARTIAL`) and the caller does not receive the
   result.
-- Top-level scalar arguments and return values (`int`, `float`, `bool`, `Decimal`,
-  `Enum`, UTF-8 `bytes`) are now evaluated instead of being skipped.
+- Top-level scalar arguments and return values (`int`, `float`, `bool`, UTF-8
+  `bytes`) are now evaluated instead of being skipped.
 - Governed arguments and return values are projected recursively for enforcement, at any
-  nesting depth and whether passed positionally or by keyword, through one closed type
-  allowlist matched on exact types. The projector never calls a method the value's own
-  type can override (`items()`, `model_dump()`, `dict()`, `__dict__`, `__getattr__`), so
-  a value cannot choose what it appears to contain. Projectable: `str`/`int`/`float`/
-  `bool`/`None`; `dict` with scalar keys; `list`/`tuple`/`set`/`frozenset`; dataclass
-  instances, read from the interpreter's own instance `__dict__`, which must hold exactly
-  their fields (including `repr=False`) on a plain layout with no `__slots__`; pydantic
-  v2 models, whose fields, extras, `PrivateAttr`s and `@computed_field`s are all read
-  without serializers (so `Field(exclude=True)` and custom serializers cannot hide
-  content). Well-known value types project deterministically (`datetime`/`date`/`time`
-  → `isoformat()`, `UUID` and paths → `str`, `Decimal` → `str`, `Enum` → its value,
-  `bytes`/`bytearray` → strict UTF-8 text). Previously a nested object reached the engine
-  as its `repr()`/`__str__` text, so its content was never evaluated. Nothing is
+  nesting depth and whether passed positionally or by keyword, under the JSON-only
+  contract above. The projector never calls a method the value's own type can override
+  (`items()`, `model_dump()`, `dict()`, `__dict__`, `__getattr__`, `__str__`), so a value
+  cannot choose what it appears to contain. Previously a nested object reached the
+  engine as its `repr()`/`__str__` text, so its content was never evaluated. Nothing is
   stringified with a `default=str` fallback any more.
 - Values that cannot be evaluated in full are denied in every profile with
   `rule_id="GOVERNANCE-PAYLOAD-UNEVALUABLE"`, at any depth, in arguments (before the
   call) and return values (after it, attempt `PARTIAL`, result withheld) alike: every
-  type outside the allowlist (plain objects, other `Mapping`s, container and scalar
-  subclasses, `NamedTuple`, pydantic v1 models, `deque`, generators, `memoryview`,
-  `array`, exceptions, file handles, `__slots__` and attrs classes), bytes that are not
-  strict UTF-8 or that decode to text containing NUL (UTF-16/UTF-32 smuggling),
-  non-scalar dict keys, keys that collide after projection, reference cycles, nesting
-  deeper than 32 levels, and a computed field that raises. Pass handles through a
-  closure or `functools.partial`, not as governed arguments.
+  type outside the JSON-only contract, bytes that are not strict UTF-8 or that decode
+  to text containing NUL (UTF-16/UTF-32 smuggling), non-`str` dict keys, NaN and
+  infinities, reference cycles and nesting deeper than 32 levels. Pass handles through
+  a closure or `functools.partial`, not as governed arguments.
 - `GovernedCallable(strict=False)` no longer turns enforcement into log-only: a blocking
   engine verdict (or a result without `valid is True`) denies at issue, execute input and
   execute output, raising with the primary violation's `rule_id`. The production profile

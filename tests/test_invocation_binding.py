@@ -53,13 +53,13 @@ def test_positional_and_keyword_defaults_match() -> None:
     assert a == b == c
 
 
-def test_int_and_str_mapping_keys_have_distinct_digests() -> None:
+def test_only_str_mapping_keys_are_digestible() -> None:
     def take(items: object) -> None:
         return None
 
-    int_key = canonical_argument_digest(take, ({1: "x"},), {})
-    str_key = canonical_argument_digest(take, ({"1": "x"},), {})
-    assert int_key != str_key
+    with pytest.raises(ArgumentNotDigestible, match="mapping key"):
+        canonical_argument_digest(take, ({1: "x"},), {})
+    assert canonical_argument_digest(take, ({"1": "x"},), {})
 
 
 def test_tuple_and_list_have_distinct_digests() -> None:
@@ -95,16 +95,13 @@ def test_bind_invocation_includes_method_and_digest() -> None:
     assert binding.subjects == ()
 
 
-def test_enum_digest_includes_fully_qualified_type_identity() -> None:
-    trusted_mode = Enum("Mode", {"READ": "read"}, module="trusted_a")
-    untrusted_mode = Enum("Mode", {"READ": "read"}, module="untrusted_b")
-
-    assert canonical_argument_digest(_add, (trusted_mode.READ,), {}) != canonical_argument_digest(
-        _add, (untrusted_mode.READ,), {}
-    )
+def test_enum_members_are_not_digestible() -> None:
+    mode = Enum("Mode", {"READ": "read"}, module="trusted_a")
+    with pytest.raises(ArgumentNotDigestible, match="unsupported argument type"):
+        canonical_argument_digest(_add, (mode.READ,), {})
 
 
-def test_enum_mixin_values_do_not_alias_their_primitives() -> None:
+def test_enum_mixin_members_are_not_digestible() -> None:
     class TextMode(str, Enum):
         READ = "read"
 
@@ -114,10 +111,10 @@ def test_enum_mixin_values_do_not_alias_their_primitives() -> None:
     def take(value: object) -> None:
         return None
 
-    assert canonical_argument_digest(take, (TextMode.READ,), {}) != canonical_argument_digest(
-        take, ("read",), {}
-    )
-    assert canonical_argument_digest(take, (NumericMode.READ,), {}) != canonical_argument_digest(
+    for member in (TextMode.READ, NumericMode.READ):
+        with pytest.raises(ArgumentNotDigestible, match="unsupported argument type"):
+            canonical_argument_digest(take, (member,), {})
+    assert canonical_argument_digest(take, ("read",), {}) != canonical_argument_digest(
         take, (1,), {}
     )
 

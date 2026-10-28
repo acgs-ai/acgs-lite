@@ -208,6 +208,18 @@ Expiry blocks new executions only. Retrying with the same grant and the
 ledger after expiry (the completed result, or the recorded status) and never
 runs the callable again; the signature, key pin and bindings are still checked.
 
+Governed arguments and return values must be JSON-native: exact `dict` with `str`
+keys, `list`, `tuple`, `str`, `int`, `bool`, finite `float`, `None`, and
+`bytes`/`bytearray` that decode as strict UTF-8 without NUL. The governance
+projector, the argument digest and the output digest admit exactly these values,
+matched by exact type. Anything else (`Enum` members, dataclasses, pydantic
+models, `datetime`, `UUID`, paths, `Decimal`, sets, subclasses of the accepted
+types, non-`str` keys, NaN and infinities) denies with
+`GOVERNANCE-PAYLOAD-UNEVALUABLE` or `ArgumentNotDigestible` before the call, and
+after the call for a return value (attempt `PARTIAL`, result withheld). Convert
+rich objects before the call, for example `model.model_dump(mode="json")`,
+`value.isoformat()` or `str(uuid)`.
+
 The grant binds the current policy
 digest, canonical arguments, method identifier, and exact callable object. It
 is single-use through the instance's in-process ledger. An attempt identifier
