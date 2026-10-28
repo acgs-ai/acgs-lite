@@ -148,6 +148,12 @@ class InProcessGrantLedger:
         with self._lock:
             return self._grant_attempt.get(grant_id)
 
+    def attempt_status_for_grant(self, grant_id: str) -> AttemptStatus | None:
+        """Status of the attempt that consumed this grant, or ``None`` if never consumed."""
+        with self._lock:
+            attempt_id = self._grant_attempt.get(grant_id)
+            return None if attempt_id is None else self._attempts[attempt_id].status
+
     def finalize(
         self,
         *,

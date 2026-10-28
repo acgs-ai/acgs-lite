@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime
 import json
 import uuid
+from collections.abc import Mapping
 from dataclasses import asdict, fields, is_dataclass
 from decimal import Decimal
 from enum import Enum
@@ -165,8 +166,12 @@ class _Projector:
             try:
                 return True, bytes(value).decode("utf-8")
             except UnicodeDecodeError:
-                self._opaque(value)
-                return True, None
+                if not self.skip_opaque:
+                    raise _unevaluable(value, self.index) from None
+            # Output only: the call already ran, so evaluate whatever text the bytes
+            # carry instead of skipping them. Large binary output is then denied as
+            # oversize, like any other oversize output.
+            return True, bytes(value).decode("utf-8", errors="replace")
         return False, None
 
     def project(self, value: Any, depth: int = 0) -> Any:
@@ -200,6 +205,12 @@ class _Projector:
         if is_dataclass(value) and not isinstance(value, type):
             self.budget.spend(2, self.index)
             return self._mapping({f.name: getattr(value, f.name) for f in fields(value)}, depth)
+        model_fields = getattr(type(value), "model_fields", None)
+        if isinstance(model_fields, dict) and callable(getattr(value, "model_dump", None)):
+            # Pydantic: read field values, not model_dump(), which honours
+            # Field(exclude=True) and custom serializers that can hide content.
+            self.budget.spend(2, self.index)
+            return self._mapping(self._call(self._model_values, value, model=value), depth)
         model_dump = getattr(value, "model_dump", None)
         if callable(model_dump):
             return self.project(self._call(model_dump, value, mode="json"), depth + 1)
@@ -210,6 +221,8 @@ class _Projector:
         self.budget.spend(2, self.index)
         if isinstance(value, dict):
             return self._mapping(value, depth)
+        if isinstance(value, Mapping):
+            return self._mapping(self._call(lambda: dict(value.items()), value), depth)
         if isinstance(value, (list, tuple)):
             return [self.project(item, depth + 1) for item in value]
         if isinstance(value, (set, frozenset)):
@@ -227,16 +240,30 @@ class _Projector:
         except Exception:
             raise _unevaluable(value, self.index) from None
 
-    def _mapping(self, mapping: dict[Any, Any], depth: int) -> dict[str, Any]:
+    @staticmethod
+    def _model_values(model: Any) -> dict[str, Any]:
+        values = {name: getattr(model, name) for name in type(model).model_fields}
+        extra = getattr(model, "__pydantic_extra__", None)
+        if isinstance(extra, dict):
+            values.update(extra)
+        return values
+
+    def _mapping(self, mapping: Mapping[Any, Any], depth: int) -> dict[str, Any]:
         projected: dict[str, Any] = {}
+        opaque_keys = 0
         for key, item in mapping.items():
             if isinstance(key, Enum):
                 key = key.value
             known, key_value = self.scalar(key)
-            if not known or (key_value is None and key is not None):
+            if not known:
                 self._opaque(key)
-                continue
-            name = key_value if isinstance(key_value, str) else json.dumps(key_value)
+                # Output only: keep the key's own content and the value it holds under
+                # a positional label, so nothing behind an opaque key is dropped.
+                name = f"<{type(key).__name__} key {opaque_keys}>"
+                opaque_keys += 1
+                item = {"key": key, "value": item}
+            else:
+                name = key_value if isinstance(key_value, str) else json.dumps(key_value)
             if name in projected:
                 raise GovernancePayloadError(
                     f"governed value #{self.index} has keys that collide after projection",
@@ -288,7 +315,9 @@ def governance_payloads_for_enforcement(
     paths, ``Decimal``, ``Enum`` and UTF-8 bytes project to strings. A value with
     no evaluable projection at any depth, a reference cycle, or nesting deeper
     than 32 levels raises unless ``skip_opaque`` is set, which only the
-    post-execution output check uses (opaque leaves then project to ``null``).
+    post-execution output check uses (opaque leaves then project to ``null``,
+    values under opaque keys are still evaluated, and undecodable bytes are
+    evaluated as their readable text).
     """
     payloads: list[str] = []
     skipped = 0

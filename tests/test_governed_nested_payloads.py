@@ -14,13 +14,16 @@ import datetime as dt
 import enum
 import io
 import uuid
+from collections import ChainMap
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_serializer
 
 from acgs_lite.constitution import Constitution
 from acgs_lite.constitution.rule import Rule
@@ -361,8 +364,157 @@ def test_legacy_dict_method_enum_keys_and_output_edge_cases_are_projected() -> N
     ]
     cyclic: list[object] = ["x"]
     cyclic.append(cyclic)
-    # Output check only: a cycle back-edge and an opaque key carry no extra content.
+    # Output check only: a cycle back-edge carries no extra content; the value under an
+    # opaque key is still evaluated, under a positional label.
     assert governance_payloads_for_enforcement(cyclic, skip_opaque=True) == ['["x", null]']
-    assert governance_payloads_for_enforcement(
-        {Opaque(): "dropped", "k": "v"}, skip_opaque=True
-    ) == ['{"k": "v"}']
+    assert governance_payloads_for_enforcement({Opaque(): "kept", "k": "v"}, skip_opaque=True) == [
+        '{"<Opaque key 0>": {"key": null, "value": "kept"}, "k": "v"}'
+    ]
+
+
+# --- [11] output projection never drops evaluable content -------------------------
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        pytest.param(lambda: {Opaque(): "leaks forbiddenword"}, id="value-under-opaque-key"),
+        pytest.param(lambda: {("forbiddenword",): "x"}, id="tuple-key-content"),
+        pytest.param(lambda: b"\xffleaks forbiddenword", id="undecodable-bytes"),
+        pytest.param(lambda: {"blob": b"\xfe forbiddenword \xff"}, id="nested-undecodable-bytes"),
+    ],
+)
+def test_output_content_behind_opaque_keys_and_binary_is_evaluated(result: Any) -> None:
+    calls: list[str] = []
+
+    @_guard()
+    def f(text: str) -> object:
+        calls.append(text)
+        return result()
+
+    _assert_rule_denies(lambda: f("hello", decision_receipt=_receipt("f")), "BAD-WORD")
+    assert calls == ["hello"]
+
+
+def test_benign_output_with_opaque_keys_and_binary_still_returns() -> None:
+    sentinel = Opaque()
+
+    @_guard()
+    def f(text: str) -> object:
+        return {sentinel: "fine", "blob": b"\xff\xfe"}
+
+    assert f("hello", decision_receipt=_receipt("f")) == {sentinel: "fine", "blob": b"\xff\xfe"}
+
+
+def test_opaque_keys_still_deny_on_the_input_side() -> None:
+    with pytest.raises(GovernancePayloadError) as excinfo:
+        governance_payloads_for_enforcement({Opaque(): "x"})
+    assert excinfo.value.rule_id == UNEVALUABLE
+    with pytest.raises(GovernancePayloadError):
+        governance_payloads_for_enforcement({"b": b"\xff"})
+
+
+# --- [12] non-dict mappings project their items, not their attributes ------------
+
+
+class Bag(Mapping[str, Any]):
+    def __init__(self, data: dict[str, Any]) -> None:
+        self._data = data
+        self.label = "internal"
+
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+
+def test_non_dict_mappings_are_projected_from_items() -> None:
+    assert governance_payloads_for_enforcement(MappingProxyType({"k": "v"})) == ['{"k": "v"}']
+    assert governance_payloads_for_enforcement({"m": Bag({"body": "x"})}) == [
+        '{"m": {"body": "x"}}'
+    ]
+    assert governance_payloads_for_enforcement({"m": ChainMap({"a": 1}, {"b": 2})}) == [
+        '{"m": {"a": 1, "b": 2}}'
+    ]
+    with pytest.raises(GovernancePayloadError):
+        governance_payloads_for_enforcement(Bag({"k": Opaque()}))
+
+    @_guard()
+    def f(meta: object) -> str:
+        return "ok"
+
+    _assert_rule_denies(
+        lambda: f.issue_grant(MappingProxyType({"body": "forbiddenword"})), "BAD-WORD"
+    )
+
+
+# --- [13] pydantic models project field values, not their serialized form --------
+
+
+class ExcludedModel(BaseModel):
+    body: str = Field(exclude=True)
+
+
+class FieldRedactedModel(BaseModel):
+    body: str
+
+    @field_serializer("body")
+    def _redact(self, value: str) -> str:
+        return "redacted"
+
+
+class ModelRedactedModel(BaseModel):
+    body: str
+
+    @model_serializer
+    def _redact(self) -> dict[str, str]:
+        return {"body": "redacted"}
+
+
+class ExtraModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+_REDACTING_MODELS = [
+    pytest.param(lambda: ExcludedModel(body="forbiddenword"), id="field-exclude"),
+    pytest.param(lambda: FieldRedactedModel(body="forbiddenword"), id="field-serializer"),
+    pytest.param(lambda: ModelRedactedModel(body="forbiddenword"), id="model-serializer"),
+    pytest.param(lambda: ExtraModel(body="forbiddenword"), id="extra-field"),
+]
+
+
+@pytest.mark.parametrize("make", _REDACTING_MODELS)
+def test_redacted_model_output_content_is_evaluated(make: Any) -> None:
+    calls: list[str] = []
+
+    @_guard()
+    def f(text: str) -> object:
+        calls.append(text)
+        return {"message": make()}
+
+    _assert_rule_denies(lambda: f("hello", decision_receipt=_receipt("f")), "BAD-WORD")
+    assert calls == ["hello"]
+
+
+@pytest.mark.parametrize("make", _REDACTING_MODELS)
+def test_redacted_model_input_content_is_evaluated(make: Any) -> None:
+    calls: list[object] = []
+
+    @_guard()
+    def f(meta: object) -> str:
+        calls.append(meta)
+        return "ok"
+
+    _assert_rule_denies(lambda: f.issue_grant(make()), "BAD-WORD")
+    _assert_rule_denies(lambda: f.issue_grant(meta={"m": make()}), "BAD-WORD")
+    assert calls == []
+
+
+def test_model_field_values_are_projected_recursively() -> None:
+    assert governance_payloads_for_enforcement(FieldRedactedModel(body="x")) == ['{"body": "x"}']
+    with pytest.raises(GovernancePayloadError):
+        governance_payloads_for_enforcement(ExtraModel(handle=Opaque()))

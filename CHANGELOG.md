@@ -39,6 +39,9 @@ This is a semver-major change (4.0.0): the production profile of the stable
   `execution_attempt_id` the ledger already recorded is still answered from the
   ledger after `grant_ttl_seconds` (completed result, or the recorded status),
   with no new side effect; signature, key pin and bindings are still verified.
+  The issuing instance keeps a consumed grant recoverable while its attempt runs and
+  for one further `grant_ttl_seconds` after expiry, then drops it so the registry
+  stays bounded; a later retry is refused, never re-executed.
   `ExecutionAuthority.verify`, `validate_receipt_for_execution` and `call_matches`
   gain a keyword-only `enforce_expiry=True` for this.
 - `signed_receipt=` is now executable in production when it is this instance's
@@ -76,7 +79,9 @@ This is a semver-major change (4.0.0): the production profile of the stable
 - Governed arguments and return values are projected recursively for enforcement, at any
   nesting depth and whether passed positionally or by keyword: dict values (and keys),
   list/tuple/set/frozenset elements, every dataclass field (including `repr=False`),
-  pydantic `model_dump(mode="json")`, and plain objects' `__dict__`. Well-known value types
+  every pydantic model field and extra (read from the model, so `Field(exclude=True)` and
+  custom serializers cannot hide content), other `Mapping`s via `items()`, and plain
+  objects' `__dict__`. Well-known value types
   project deterministically (`datetime`/`date`/`time` → `isoformat()`, `UUID` and paths →
   `str`, `Decimal` → `str`, `Enum` → its value, UTF-8 `bytes` → text). Previously a nested
   object reached the engine as its `repr()`/`__str__` text, so its content was never
@@ -88,8 +93,11 @@ This is a semver-major change (4.0.0): the production profile of the stable
   `__slots__` objects), undecodable bytes, non-scalar dict keys, keys that collide after
   projection, reference cycles, nesting deeper than 32 levels, and a `model_dump`/`dict()`
   that raises. Pass handles through a closure or `functools.partial`, not as governed
-  arguments. Opaque or binary return values keep their existing handling; opaque values
-  nested inside a return value are evaluated as `null` rather than as their `repr()`.
+  arguments. Opaque return values keep their existing handling; opaque values nested
+  inside a return value are evaluated as `null` rather than as their `repr()`, the value
+  under an opaque dict key is still evaluated, and undecodable return bytes are evaluated
+  as their readable text (`errors="replace"`), so large binary output is denied as
+  oversize.
 - `GovernedCallable(strict=False)` no longer turns enforcement into log-only: a blocking
   engine verdict (or a result without `valid is True`) denies at issue, execute input and
   execute output, raising with the primary violation's `rule_id`. The production profile

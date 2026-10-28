@@ -113,6 +113,17 @@ class _IssuedSignedGrant:
     public_key: str
 
 
+def _carrier_grant_id(carrier: object) -> str | None:
+    """The grant id an execution grant or signed receipt names, if it is a string."""
+    if isinstance(carrier, ExecutionGrant):
+        grant_id: object = carrier.grant_id
+    elif isinstance(carrier, SignedReceipt):
+        grant_id = getattr(carrier.receipt, "grant_id", None)
+    else:
+        return None
+    return grant_id if isinstance(grant_id, str) else None
+
+
 def _deny_unless_valid(result: object, *, action: str) -> None:
     """Fail closed on any engine result that is not explicitly ``valid is True``.
 
@@ -837,6 +848,8 @@ class GovernedCallable:
         # the ledger: a signed receipt executes only on the instance that issued it.
         # Weak callable refs, so the issuer never keeps an abandoned grant's target alive.
         self._signed_grants: dict[str, _IssuedSignedGrant] = {}
+        # Grant ids between registry verification and ledger consume; never pruned.
+        self._signed_grants_reserved: dict[str, int] = {}
         self._signed_grants_lock = threading.Lock()
         self._authority = ExecutionAuthority()
         self._ledger = InProcessGrantLedger()
@@ -1014,16 +1027,44 @@ class GovernedCallable:
     def _register_signed_grant(self, grant_id: str, issued: _IssuedSignedGrant) -> None:
         now = time.monotonic()
         with self._signed_grants_lock:
-            # An expired, never-consumed grant can never execute again: drop it to bound
-            # the registry. A consumed one stays so its recorded attempt can be recovered
-            # after expiry; it is retained exactly as long as its ledger record.
             for stale in [
                 gid
                 for gid, entry in self._signed_grants.items()
-                if entry.deadline < now and self._ledger.attempt_for_grant(gid) is None
+                if gid not in self._signed_grants_reserved and self._prunable(entry, gid, now)
             ]:
                 del self._signed_grants[stale]
             self._signed_grants[grant_id] = issued
+
+    def _prunable(self, entry: _IssuedSignedGrant, grant_id: str, now: float) -> bool:
+        """Whether a registry entry can be dropped without losing anything executable.
+
+        Never-consumed: once expired it can never execute. Consumed: kept while the
+        attempt runs, then for one more ``grant_ttl_seconds`` after expiry so its
+        recorded attempt stays recoverable. Dropping it only refuses recovery; the
+        ledger still refuses any reuse, so no replay window opens.
+        """
+        if entry.deadline >= now:
+            return False
+        status = self._ledger.attempt_status_for_grant(grant_id)
+        if status is None:
+            return True
+        if status is AttemptStatus.STARTED:
+            return False
+        return entry.deadline + self.grant_ttl_seconds < now
+
+    def _reserve_signed_grant(self, grant_id: str) -> None:
+        with self._signed_grants_lock:
+            self._signed_grants_reserved[grant_id] = (
+                self._signed_grants_reserved.get(grant_id, 0) + 1
+            )
+
+    def _release_signed_grant(self, grant_id: str) -> None:
+        with self._signed_grants_lock:
+            remaining = self._signed_grants_reserved.get(grant_id, 0) - 1
+            if remaining > 0:
+                self._signed_grants_reserved[grant_id] = remaining
+            else:
+                self._signed_grants_reserved.pop(grant_id, None)
 
     def _is_recorded_attempt(self, carrier: object, attempt_id: object) -> bool:
         """True only for a retry of the attempt the ledger already bound to this grant.
@@ -1031,13 +1072,8 @@ class GovernedCallable:
         Such a retry performs no new side effect, so grant expiry does not block it;
         every other check still runs.
         """
-        if isinstance(carrier, ExecutionGrant):
-            grant_id: object = carrier.grant_id
-        elif isinstance(carrier, SignedReceipt):
-            grant_id = getattr(carrier.receipt, "grant_id", None)
-        else:
-            return False
-        if not isinstance(grant_id, str) or not isinstance(attempt_id, str) or not attempt_id:
+        grant_id = _carrier_grant_id(carrier)
+        if grant_id is None or not isinstance(attempt_id, str) or not attempt_id:
             return False
         return self._ledger.attempt_for_grant(grant_id) == attempt_id
 
@@ -1136,52 +1172,61 @@ class GovernedCallable:
             enforce_expiry = not self._is_recorded_attempt(
                 grant if grant is not None else signed, attempt_id
             )
-            if grant is not None:
-                if not isinstance(grant, ExecutionGrant):
-                    raise LegitimacyInvariantError("Invalid execution grant type")
-                self._authority.verify(
-                    grant,
+            # Reserve before verification reads the registry, so a concurrent issue
+            # cannot prune the entry between the deadline check and the ledger consume.
+            reserved_id = _carrier_grant_id(grant if grant is not None else signed)
+            if reserved_id is not None:
+                self._reserve_signed_grant(reserved_id)
+            try:
+                if grant is not None:
+                    if not isinstance(grant, ExecutionGrant):
+                        raise LegitimacyInvariantError("Invalid execution grant type")
+                    self._authority.verify(
+                        grant,
+                        invocation=invocation,
+                        policy=policy,
+                        context_digest=context_digest,
+                        enforce_expiry=enforce_expiry,
+                    )
+                    if grant.callable_target is not func:
+                        raise LegitimacyInvariantError("grant callable identity mismatch")
+                    if not grant.single_use:
+                        raise LegitimacyInvariantError(
+                            "production execution requires a single-use grant"
+                        )
+                    if grant.signed_receipt is None:
+                        raise LegitimacyInvariantError(
+                            "production grant carries no execution signature"
+                        )
+                    if not isinstance(grant.signed_receipt, SignedReceipt) or (
+                        grant.signed_receipt.receipt.receipt_hash != grant.receipt.receipt_hash
+                    ):
+                        raise LegitimacyInvariantError(
+                            "grant execution signature does not sign the grant receipt"
+                        )
+                    signed = grant.signed_receipt
+                verified_receipt = self._verify_signed_production(
+                    signed, invocation, policy, context_digest, func, enforce_expiry
+                )
+                self._enforce_receipt(
+                    verified_receipt,
+                    func=func,
+                    args=args,
+                    kwargs=kwargs,
+                    human_approval=None,
+                    trust_kwargs=False,
+                    enforce_expiry=enforce_expiry,
+                )
+                return self._consume_and_audit(
+                    verified_receipt,
+                    attempt_id=attempt_id,
                     invocation=invocation,
                     policy=policy,
                     context_digest=context_digest,
-                    enforce_expiry=enforce_expiry,
                 )
-                if grant.callable_target is not func:
-                    raise LegitimacyInvariantError("grant callable identity mismatch")
-                if not grant.single_use:
-                    raise LegitimacyInvariantError(
-                        "production execution requires a single-use grant"
-                    )
-                if grant.signed_receipt is None:
-                    raise LegitimacyInvariantError(
-                        "production grant carries no execution signature"
-                    )
-                if not isinstance(grant.signed_receipt, SignedReceipt) or (
-                    grant.signed_receipt.receipt.receipt_hash != grant.receipt.receipt_hash
-                ):
-                    raise LegitimacyInvariantError(
-                        "grant execution signature does not sign the grant receipt"
-                    )
-                signed = grant.signed_receipt
-            verified_receipt = self._verify_signed_production(
-                signed, invocation, policy, context_digest, func, enforce_expiry
-            )
-            self._enforce_receipt(
-                verified_receipt,
-                func=func,
-                args=args,
-                kwargs=kwargs,
-                human_approval=None,
-                trust_kwargs=False,
-                enforce_expiry=enforce_expiry,
-            )
-            return self._consume_and_audit(
-                verified_receipt,
-                attempt_id=attempt_id,
-                invocation=invocation,
-                policy=policy,
-                context_digest=context_digest,
-            )
+            finally:
+                if reserved_id is not None:
+                    self._release_signed_grant(reserved_id)
 
         if grant is not None:
             if not isinstance(grant, ExecutionGrant):

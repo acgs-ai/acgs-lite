@@ -692,6 +692,71 @@ def test_issue_prunes_expired_unconsumed_grants_and_keeps_live_ones() -> None:
     assert live.grant_id in guard._signed_grants
 
 
+def test_prune_keeps_a_verified_grant_whose_consume_is_in_flight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    guard = _guard(grant_ttl_seconds=0.5)
+    _func, wrapped = _protected(guard, calls)
+    grant = wrapped.issue_grant("acct-1")
+    original = guard._consume_and_audit
+
+    def slow_consume(*args: Any, **kwargs: Any) -> Any:
+        # Verification passed; the deadline lapses and another issue prunes before consume.
+        time.sleep(0.6)
+        wrapped.issue_grant("acct-2")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(guard, "_consume_and_audit", slow_consume)
+    assert wrapped("acct-1", execution_grant=grant, execution_attempt_id="att-1") == "sent:acct-1"
+    monkeypatch.setattr(guard, "_consume_and_audit", original)
+    assert grant.grant_id in guard._signed_grants
+    # The legitimately started attempt is still recoverable after expiry.
+    assert wrapped("acct-1", execution_grant=grant, execution_attempt_id="att-1") == "sent:acct-1"
+    assert calls == ["acct-1"]
+
+
+def test_prune_keeps_a_grant_whose_attempt_is_still_running() -> None:
+    calls: list[str] = []
+    guard = _guard(grant_ttl_seconds=0.05)
+    seen: dict[str, bool] = {}
+
+    def transfer(account_id: str) -> str:
+        calls.append(account_id)
+        time.sleep(0.15)
+        wrapped.issue_grant("acct-2")
+        seen["kept"] = grant.grant_id in guard._signed_grants
+        return f"sent:{account_id}"
+
+    wrapped = guard(transfer)
+    grant = wrapped.issue_grant("acct-1")
+    assert wrapped("acct-1", execution_grant=grant, execution_attempt_id="att-1") == "sent:acct-1"
+    assert seen == {"kept": True}
+
+
+def test_settled_consumed_grants_are_pruned_and_stay_single_use() -> None:
+    calls: list[str] = []
+    guard = _guard(grant_ttl_seconds=0.05)
+    _func, wrapped = _protected(guard, calls)
+    grants = [wrapped.issue_grant("acct-1") for _ in range(3)]
+    for index, grant in enumerate(grants):
+        assert wrapped("acct-1", execution_grant=grant, execution_attempt_id=f"att-{index}")
+    time.sleep(0.15)
+    live = wrapped.issue_grant("acct-2")
+    # Consumed and settled past the recovery window: dropped, so the registry is bounded.
+    assert set(guard._signed_grants) == {live.grant_id}
+    grant = grants[0]
+    for kwargs in (
+        {"execution_grant": grant, "execution_attempt_id": "att-0"},
+        {"execution_grant": grant, "execution_attempt_id": "att-new"},
+        {"signed_receipt": grant.signed_receipt, "execution_attempt_id": "att-0"},
+        {"signed_receipt": grant.signed_receipt},
+    ):
+        with pytest.raises(LegitimacyInvariantError):
+            wrapped("acct-1", **kwargs)
+    assert calls == ["acct-1"] * 3
+
+
 # --- the grant branch's own signature-side expiry checks -----------------------
 
 
