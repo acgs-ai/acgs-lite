@@ -76,17 +76,25 @@ def _forge(
     signer: Any = SIGNER,
     policy_constitution: Constitution | None = None,
     v2: bool = True,
+    receipt_invocation: dict[str, Any] | None = None,
+    receipt_policy_constitution: Constitution | None = None,
+    receipt_context_digest: str | None = None,
 ) -> SignedReceipt:
-    """Sign, with ``signer``, a receipt and envelope for the live call, then apply overrides."""
+    """Sign, with ``signer``, a receipt and envelope for the live call, then apply overrides.
+
+    ``receipt_*`` overrides change only the receipt's bindings; the envelope still
+    matches the live call, isolating the receipt-side half of each binding check.
+    """
     invocation = bind_invocation(func, args, {}, include_receiver=True, strict_context=True)
     policy = bind_policy(policy_constitution or guard.constitution)
     expires_at = _expiry() if receipt_expires_at == "default" else receipt_expires_at
     receipt = build_issue_receipt(
         func=func,
-        invocation=invocation,
-        policy=policy,
+        invocation=replace(invocation, **(receipt_invocation or {})),
+        policy=bind_policy(receipt_policy_constitution) if receipt_policy_constitution else policy,
         decision=decision,
         grant_id=grant_id if v2 else None,
+        context_digest=receipt_context_digest,
         expires_at=expires_at,
     )
     payload = parse_authorization_envelope(
@@ -508,7 +516,7 @@ def test_same_qualname_different_function_denies() -> None:
     protected = guard(original)
     impostor = guard(alternate)
     grant = protected.issue_grant("acct-1")
-    with pytest.raises(LegitimacyInvariantError):
+    with pytest.raises(LegitimacyInvariantError, match="^grant callable identity mismatch$"):
         impostor("acct-1", signed_receipt=grant.signed_receipt)
     assert calls == []
 
@@ -567,3 +575,214 @@ def test_authority_refuses_signature_over_a_different_receipt() -> None:
             grant_id=grant_id,
             signed_receipt=grant.signed_receipt,
         )
+
+
+# --- issued-receipt binding: grant id alone never authorizes ------------------
+
+TWO_PINS = {"pinned": SIGNER.public_key_hex(), "other": OTHER.public_key_hex()}
+
+
+def test_second_pinned_key_cannot_reuse_a_live_grant_id() -> None:
+    calls: list[str] = []
+    guard = _guard(trusted_execution_keys=TWO_PINS)
+    func, wrapped = _protected(guard, calls)
+    grant = wrapped.issue_grant("benign")
+    live_gid = grant.grant_id
+    forged = _forge(guard, func, "evil", grant_id=live_gid, signer=OTHER)
+    _deny(
+        wrapped,
+        calls,
+        "^signed receipt key did not issue this grant$",
+        "evil",
+        signed_receipt=forged,
+    )
+    # The issued receipt re-signed by the other pinned key: same receipt hash, wrong key.
+    resigned = sign_execution_authorization(
+        grant.receipt, OTHER, authorization_json=grant.signed_receipt.authorization_json or ""
+    )
+    _deny(
+        wrapped,
+        calls,
+        "^signed receipt key did not issue this grant$",
+        "benign",
+        signed_receipt=resigned,
+    )
+    # Even the issuing key cannot mint a different receipt under a live grant id.
+    rebound = _forge(guard, func, "evil", grant_id=live_gid, signer=SIGNER)
+    _deny(
+        wrapped,
+        calls,
+        "^signed receipt is not the receipt issued for this grant$",
+        "evil",
+        signed_receipt=rebound,
+    )
+    # The forgeries never reached the ledger: the legitimate grant still executes once.
+    assert wrapped("benign", execution_grant=grant) == "sent:benign"
+    assert calls == ["benign"]
+
+
+def test_from_private_bytes_key_is_accepted_as_documented() -> None:
+    # "Ephemeral" is detectable only for generate(); a loaded key is trusted to be
+    # provisioned out of band. Pin that documented behaviour.
+    loaded = Ed25519ReceiptSigner.from_private_bytes(bytes(range(2, 34)), key_id="loaded")
+    assert loaded.ephemeral is False
+    calls: list[str] = []
+    guard = _guard(
+        receipt_signer=loaded, trusted_execution_keys={"loaded": loaded.public_key_hex()}
+    )
+    _func, wrapped = _protected(guard, calls)
+    assert wrapped("acct-1", execution_grant=wrapped.issue_grant("acct-1")) == "sent:acct-1"
+
+
+# --- expiry blocks new executions, never recovery of a recorded attempt --------
+
+
+def test_expired_grant_denies_a_new_attempt() -> None:
+    calls: list[str] = []
+    _func, wrapped = _protected(_guard(grant_ttl_seconds=0.01), calls)
+    grant = wrapped.issue_grant("acct-1")
+    time.sleep(0.05)
+    _deny(wrapped, calls, "expired", "acct-1", execution_grant=grant, execution_attempt_id="att-1")
+    _deny(
+        wrapped,
+        calls,
+        "expired",
+        "acct-1",
+        signed_receipt=grant.signed_receipt,
+        execution_attempt_id="att-1",
+    )
+
+
+def test_expired_grant_recovers_a_completed_attempt_without_a_new_call() -> None:
+    calls: list[str] = []
+    guard = _guard(grant_ttl_seconds=0.2)
+    _func, wrapped = _protected(guard, calls)
+    grant = wrapped.issue_grant("acct-1")
+    assert wrapped("acct-1", execution_grant=grant, execution_attempt_id="att-1") == "sent:acct-1"
+    time.sleep(0.3)
+    # A later issue prunes expired registry entries; a consumed one must survive it.
+    wrapped.issue_grant("acct-2")
+    assert grant.grant_id in guard._signed_grants
+    assert wrapped("acct-1", execution_grant=grant, execution_attempt_id="att-1") == "sent:acct-1"
+    assert (
+        wrapped("acct-1", signed_receipt=grant.signed_receipt, execution_attempt_id="att-1")
+        == "sent:acct-1"
+    )
+    assert calls == ["acct-1"]
+    # Recovery still verifies everything except the clock.
+    sig = grant.signed_receipt.signature
+    tampered = replace(grant.signed_receipt, signature=("0" if sig[0] != "0" else "1") + sig[1:])
+    with pytest.raises(LegitimacyInvariantError, match="authenticity"):
+        wrapped("acct-1", signed_receipt=tampered, execution_attempt_id="att-1")
+    with pytest.raises(LegitimacyInvariantError, match="invocation binding mismatch"):
+        wrapped("acct-2", signed_receipt=grant.signed_receipt, execution_attempt_id="att-1")
+    # A different attempt id is a new execution, and expiry blocks it.
+    with pytest.raises(LegitimacyInvariantError, match="expired"):
+        wrapped("acct-1", execution_grant=grant, execution_attempt_id="att-2")
+    assert calls == ["acct-1"]
+
+
+def test_issue_prunes_expired_unconsumed_grants_and_keeps_live_ones() -> None:
+    guard = _guard(grant_ttl_seconds=0.05)
+    _func, wrapped = _protected(guard, [])
+    stale = wrapped.issue_grant("acct-1")
+    time.sleep(0.1)
+    live = wrapped.issue_grant("acct-2")
+    assert stale.grant_id not in guard._signed_grants
+    assert live.grant_id in guard._signed_grants
+
+
+# --- the grant branch's own signature-side expiry checks -----------------------
+
+
+def _authority_without_expiry(monkeypatch: pytest.MonkeyPatch, guard: GovernedCallable) -> None:
+    original = guard._authority.verify
+
+    def verify(grant: Any, **kwargs: Any) -> None:
+        original(grant, **{**kwargs, "enforce_expiry": False})
+
+    monkeypatch.setattr(guard._authority, "verify", verify)
+
+
+def test_grant_branch_wall_clock_signature_expiry_is_enforced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    guard = _guard(grant_ttl_seconds=0.01)
+    _func, wrapped = _protected(guard, calls)
+    _authority_without_expiry(monkeypatch, guard)
+    grant = wrapped.issue_grant("acct-1")
+    time.sleep(0.05)
+    _deny(wrapped, calls, "^execution signature has expired$", "acct-1", execution_grant=grant)
+
+
+def test_grant_branch_monotonic_deadline_is_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    guard = _guard()
+    _func, wrapped = _protected(guard, calls)
+    grant = wrapped.issue_grant("acct-1")
+    real = time.monotonic
+    monkeypatch.setattr(time, "monotonic", lambda: real() + 3_600)
+    match = "^execution signature monotonic deadline has expired$"
+    _deny(wrapped, calls, match, "acct-1", execution_grant=grant)
+    _deny(wrapped, calls, match, "acct-1", signed_receipt=grant.signed_receipt)
+
+
+# --- decision types and receipt-side binding halves ----------------------------
+
+
+def test_allow_with_controls_executes(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    guard = _guard()
+    _func, wrapped = _protected(guard, calls)
+    decision = EngineDecision(
+        "ALLOW_WITH_CONTROLS", (BASELINE_CONSTRAINT_MARKER,), ("LOG_REVIEW",), None, 1
+    )
+    monkeypatch.setattr(guard, "_evaluate_invocation", lambda _args, _kwargs: decision)
+    grant = wrapped.issue_grant("acct-1")
+    assert grant.receipt.decision_type == "ALLOW_WITH_CONTROLS"
+    assert wrapped("acct-1", execution_grant=grant) == "sent:acct-1"
+    assert calls == ["acct-1"]
+
+
+def test_unknown_decision_type_is_not_allow(monkeypatch: pytest.MonkeyPatch) -> None:
+    import acgs_lite.governed as governed_module
+
+    calls: list[str] = []
+    _func, wrapped = _protected(_guard(), calls)
+    grant = wrapped.issue_grant("acct-1")
+
+    def unknown(_value: object) -> str:
+        raise ValueError("unknown decision")
+
+    monkeypatch.setattr(governed_module, "canonicalize_decision_state", unknown)
+    _deny(wrapped, calls, "^Unknown decision type is not allow$", "acct-1", execution_grant=grant)
+
+
+@pytest.mark.parametrize(
+    ("receipt_override", "match"),
+    [
+        ({"receipt_invocation": {"method_id": "other:method"}}, "method identity mismatch"),
+        ({"receipt_invocation": {"argument_digest": "0" * 64}}, "invocation binding mismatch"),
+        ({"receipt_invocation": {"scope": "tenant-b"}}, "scope mismatch"),
+        ({"receipt_invocation": {"subjects": ("acct-9",)}}, "subjects mismatch"),
+        ({"receipt_context_digest": "c" * 64}, "trusted execution context binding mismatch"),
+        (
+            {
+                "receipt_policy_constitution": Constitution.from_yaml_str(
+                    "rules:\n  - {id: r, text: r, keywords: [zzz]}"
+                )
+            },
+            "policy binding mismatch",
+        ),
+    ],
+)
+def test_receipt_side_binding_mismatch_denies(receipt_override: dict[str, Any], match: str) -> None:
+    calls: list[str] = []
+    guard = _guard()
+    func, wrapped = _protected(guard, calls)
+    forged = _forge(guard, func, "acct-1", **receipt_override)
+    envelope = parse_authorization_envelope(forged.authorization_json or "")
+    live = bind_invocation(func, ("acct-1",), {}, include_receiver=True, strict_context=True)
+    assert envelope["argument_digest"] == live.argument_digest
+    _deny(wrapped, calls, match, "acct-1", signed_receipt=forged)

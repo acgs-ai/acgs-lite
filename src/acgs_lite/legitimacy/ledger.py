@@ -139,6 +139,15 @@ class InProcessGrantLedger:
                 )
             return ConsumeDecision(mode="recover", record=record, result=None)
 
+    def attempt_for_grant(self, grant_id: str) -> str | None:
+        """The attempt id this grant was consumed by, or ``None`` if never consumed.
+
+        Once a grant has an attempt, :meth:`consume` never returns ``proceed`` for it
+        again, so a caller that sees a match here can only recover or be refused.
+        """
+        with self._lock:
+            return self._grant_attempt.get(grant_id)
+
     def finalize(
         self,
         *,

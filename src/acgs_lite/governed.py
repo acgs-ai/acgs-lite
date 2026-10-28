@@ -26,6 +26,7 @@ import uuid
 import warnings
 import weakref
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol, TypeVar, cast, runtime_checkable
 
@@ -94,6 +95,22 @@ T = TypeVar("T")
 _PROCEED = object()
 
 DEFAULT_SIGNED_GRANT_TTL_SECONDS = 300.0
+
+
+@dataclass(slots=True, frozen=True)
+class _IssuedSignedGrant:
+    """What this instance signed for one production grant id.
+
+    A grant id is not secret, so the registry binds the exact issued receipt and
+    the issuing key: a receipt signed by any other pinned key, or a different
+    receipt reusing a live grant id, is refused before the ledger consume.
+    """
+
+    deadline: float
+    func_ref: weakref.ref[Callable[..., Any]]
+    receipt_hash: str
+    key_id: str
+    public_key: str
 
 
 def _deny_unless_valid(result: object, *, action: str) -> None:
@@ -787,12 +804,16 @@ class GovernedCallable:
         """Construct the governed-callable decorator.
 
         The production profile requires ``receipt_signer``: a non-ephemeral Ed25519
-        signer whose public key is pinned, from outside the signer, in
-        ``trusted_execution_keys`` (``key_id -> public key hex``). Only keys pinned
-        there authorize execution; ``trusted_issuer_keys`` never does. Every
-        production grant is signed with execution scope and expires after
-        ``grant_ttl_seconds`` (default 300). The signing arguments are refused
-        outside the production profile.
+        signer whose public key is pinned in ``trusted_execution_keys``
+        (``key_id -> public key hex``). "Non-ephemeral" is detected only for
+        ``Ed25519ReceiptSigner.generate()`` keys; that the key and its pin are
+        provisioned out of band is the operator's responsibility and is not
+        verified. A pinned key authorizes execution only of the exact receipt this
+        instance issued and signed with it; ``trusted_issuer_keys`` never does.
+        Every production grant is signed with execution scope and expires after
+        ``grant_ttl_seconds`` (default 300); expiry blocks new attempts, not
+        recovery of an attempt already recorded for the grant. The signing
+        arguments are refused outside the production profile.
         """
         self.constitution = constitution or Constitution.default()
         self.agent_id = agent_id
@@ -812,10 +833,10 @@ class GovernedCallable:
         self.grant_ttl_seconds = (
             DEFAULT_SIGNED_GRANT_TTL_SECONDS if grant_ttl_seconds is None else grant_ttl_seconds
         )
-        # Production grant id -> (monotonic deadline, weak ref to the executed callable).
-        # Process-local, like the ledger: a signed receipt executes only on the instance
-        # that issued it. Weak, so the issuer never keeps an abandoned grant's target alive.
-        self._signed_grants: dict[str, tuple[float, weakref.ref[Callable[..., Any]]]] = {}
+        # Production grant id -> what was issued and signed for it. Process-local, like
+        # the ledger: a signed receipt executes only on the instance that issued it.
+        # Weak callable refs, so the issuer never keeps an abandoned grant's target alive.
+        self._signed_grants: dict[str, _IssuedSignedGrant] = {}
         self._signed_grants_lock = threading.Lock()
         self._authority = ExecutionAuthority()
         self._ledger = InProcessGrantLedger()
@@ -977,19 +998,48 @@ class GovernedCallable:
         finally:
             # No-op once issued; otherwise the allocation never outlives this call.
             self._authority.release_grant_id(grant_id)
-        if deadline is not None:
-            self._register_signed_grant(grant_id, deadline, func)
+        if deadline is not None and signer is not None:
+            self._register_signed_grant(
+                grant_id,
+                _IssuedSignedGrant(
+                    deadline=deadline,
+                    func_ref=weakref.ref(func),
+                    receipt_hash=receipt.receipt_hash,
+                    key_id=signer.key_id,
+                    public_key=signer.public_key_hex(),
+                ),
+            )
         return grant
 
-    def _register_signed_grant(
-        self, grant_id: str, deadline: float, func: Callable[..., Any]
-    ) -> None:
+    def _register_signed_grant(self, grant_id: str, issued: _IssuedSignedGrant) -> None:
         now = time.monotonic()
         with self._signed_grants_lock:
-            # Expired entries can never verify again; drop them to bound the registry.
-            for stale in [gid for gid, (due, _f) in self._signed_grants.items() if due < now]:
+            # An expired, never-consumed grant can never execute again: drop it to bound
+            # the registry. A consumed one stays so its recorded attempt can be recovered
+            # after expiry; it is retained exactly as long as its ledger record.
+            for stale in [
+                gid
+                for gid, entry in self._signed_grants.items()
+                if entry.deadline < now and self._ledger.attempt_for_grant(gid) is None
+            ]:
                 del self._signed_grants[stale]
-            self._signed_grants[grant_id] = (deadline, weakref.ref(func))
+            self._signed_grants[grant_id] = issued
+
+    def _is_recorded_attempt(self, carrier: object, attempt_id: object) -> bool:
+        """True only for a retry of the attempt the ledger already bound to this grant.
+
+        Such a retry performs no new side effect, so grant expiry does not block it;
+        every other check still runs.
+        """
+        if isinstance(carrier, ExecutionGrant):
+            grant_id: object = carrier.grant_id
+        elif isinstance(carrier, SignedReceipt):
+            grant_id = getattr(carrier.receipt, "grant_id", None)
+        else:
+            return False
+        if not isinstance(grant_id, str) or not isinstance(attempt_id, str) or not attempt_id:
+            return False
+        return self._ledger.attempt_for_grant(grant_id) == attempt_id
 
     def _trusted_context_digest(self, invocation: InvocationBinding) -> str | None:
         context = self.trusted_execution_context
@@ -1080,6 +1130,12 @@ class GovernedCallable:
                 raise LegitimacyInvariantError("unsigned receipt is not executable")
             if tokens.get("human_approval") is not None:
                 raise LegitimacyInvariantError("raw human_approval is not executable in production")
+            attempt_id = tokens.get("execution_attempt_id")
+            # Expiry blocks new executions only. Recovering the attempt already recorded
+            # for this grant runs no side effect, so it is allowed after expiry.
+            enforce_expiry = not self._is_recorded_attempt(
+                grant if grant is not None else signed, attempt_id
+            )
             if grant is not None:
                 if not isinstance(grant, ExecutionGrant):
                     raise LegitimacyInvariantError("Invalid execution grant type")
@@ -1088,6 +1144,7 @@ class GovernedCallable:
                     invocation=invocation,
                     policy=policy,
                     context_digest=context_digest,
+                    enforce_expiry=enforce_expiry,
                 )
                 if grant.callable_target is not func:
                     raise LegitimacyInvariantError("grant callable identity mismatch")
@@ -1107,7 +1164,7 @@ class GovernedCallable:
                     )
                 signed = grant.signed_receipt
             verified_receipt = self._verify_signed_production(
-                signed, invocation, policy, context_digest, func
+                signed, invocation, policy, context_digest, func, enforce_expiry
             )
             self._enforce_receipt(
                 verified_receipt,
@@ -1116,10 +1173,11 @@ class GovernedCallable:
                 kwargs=kwargs,
                 human_approval=None,
                 trust_kwargs=False,
+                enforce_expiry=enforce_expiry,
             )
             return self._consume_and_audit(
                 verified_receipt,
-                attempt_id=tokens.get("execution_attempt_id"),
+                attempt_id=attempt_id,
                 invocation=invocation,
                 policy=policy,
                 context_digest=context_digest,
@@ -1157,6 +1215,7 @@ class GovernedCallable:
         kwargs: dict[str, Any],
         human_approval: dict[str, Any] | None,
         trust_kwargs: bool,
+        enforce_expiry: bool = True,
     ) -> None:
         actual_call = normalize_actual_call(
             fallback_method=func.__name__,
@@ -1171,6 +1230,7 @@ class GovernedCallable:
             actual_call=actual_call,
             human_approval=human_approval,
             audit_log=self.audit_log,
+            enforce_expiry=enforce_expiry,
         )
 
     def _recovered_result(self, outcome: ConsumeDecision | None) -> Any:
@@ -1322,13 +1382,17 @@ class GovernedCallable:
         policy: PolicyBinding,
         context_digest: str | None,
         func: Callable[..., Any],
+        enforce_expiry: bool = True,
     ) -> DecisionReceipt:
         """Verify an execution-scope Ed25519 signature against the live invocation.
 
         Every production execution passes through here (grant and ``signed_receipt``
         branches alike). Each failure raises; the caller then consumes the ledger,
-        which makes the receipt single use. Only this instance's issued grants
-        execute, so the in-process ledger's single-use guarantee covers them.
+        which makes the receipt single use. Only the exact receipt this instance
+        issued, signed by the key that issued it, executes, so the in-process
+        ledger's single-use guarantee covers it. ``enforce_expiry=False`` (recovery
+        of an already-recorded attempt only) skips the two clock comparisons and
+        nothing else.
         """
         if not isinstance(signed, SignedReceipt):
             raise LegitimacyInvariantError("Invalid signed receipt type")
@@ -1374,7 +1438,7 @@ class GovernedCallable:
             raise LegitimacyInvariantError("execution signature expiry is not parseable") from exc
         if expires.tzinfo is None:
             raise LegitimacyInvariantError("execution signature expiry must carry a timezone")
-        if datetime.now(timezone.utc) > expires:
+        if enforce_expiry and datetime.now(timezone.utc) > expires:
             raise LegitimacyInvariantError("execution signature has expired")
         if (
             envelope.get("context_digest") != context_digest
@@ -1396,9 +1460,12 @@ class GovernedCallable:
             raise LegitimacyInvariantError("invocation binding mismatch")
         if envelope.get("policy_digest") != policy.digest or receipt.policy_digest != policy.digest:
             raise LegitimacyInvariantError("policy binding mismatch")
-        if envelope.get("scope") != invocation.scope:
+        boundary = receipt.execution_boundary
+        if envelope.get("scope") != invocation.scope or boundary.allowed_scope != invocation.scope:
             raise LegitimacyInvariantError("invocation scope mismatch")
-        if envelope.get("subjects") != list(invocation.subjects):
+        if envelope.get("subjects") != list(invocation.subjects) or tuple(
+            boundary.allowed_subjects
+        ) != tuple(invocation.subjects):
             raise LegitimacyInvariantError("invocation subjects mismatch")
         with self._signed_grants_lock:
             issued = self._signed_grants.get(grant_id)
@@ -1406,12 +1473,17 @@ class GovernedCallable:
             raise LegitimacyInvariantError(
                 "signed receipt was not issued by this governed callable"
             )
-        deadline, issued_ref = issued
         # Monotonic deadline: a wall-clock rollback cannot extend the grant lifetime.
-        if time.monotonic() > deadline:
-            raise LegitimacyInvariantError("execution signature has expired")
-        if issued_ref() is not func:
+        if enforce_expiry and time.monotonic() > issued.deadline:
+            raise LegitimacyInvariantError("execution signature monotonic deadline has expired")
+        if issued.func_ref() is not func:
             raise LegitimacyInvariantError("grant callable identity mismatch")
+        if signed.key_id != issued.key_id or pinned != issued.public_key:
+            raise LegitimacyInvariantError("signed receipt key did not issue this grant")
+        if receipt.receipt_hash != issued.receipt_hash:
+            raise LegitimacyInvariantError(
+                "signed receipt is not the receipt issued for this grant"
+            )
         return receipt
 
     def __call__(self, func: Callable[..., T]) -> Callable[..., T]:

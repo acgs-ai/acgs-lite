@@ -18,6 +18,9 @@ This is a semver-major change (4.0.0): the production profile of the stable
   key with execution scope. A missing, ephemeral (`Ed25519ReceiptSigner.generate()`),
   unpinned or non-Ed25519 signer raises `LegitimacyInvariantError` at
   construction. The production profile therefore needs the `crypto` extra.
+  Ephemeral detection covers only `generate()`: a key built with the constructor,
+  `from_seed()` or `from_private_bytes()` is accepted however its bytes were made,
+  so provisioning the key and its pin out of band is the operator's job.
 - Every production grant is signed with execution scope over a v2 receipt and an
   envelope that commits the method, argument, policy and trusted-context digests,
   scope, subjects, grant id and expiry (`ExecutionGrant.signed_receipt`). Grants
@@ -28,7 +31,16 @@ This is a semver-major change (4.0.0): the production profile of the stable
   is denied for a receipt-scope signature, an unpinned key, a v1 receipt, a
   decision other than `ALLOW`/`ALLOW_WITH_CONTROLS`, an expired, tampered or
   mismatched envelope, a grant id that differs from the receipt, a signature not
-  issued by this instance for this callable, and a second use.
+  issued by this instance for this callable, and a second use. Each issued grant
+  id is bound to the exact receipt hash and the signing key id and public key: a
+  receipt signed by another pinned key, or a different receipt reusing a live grant
+  id, is refused before the ledger consume and cannot lock out the real grant.
+- Expiry blocks new executions only. A retry with the grant and the
+  `execution_attempt_id` the ledger already recorded is still answered from the
+  ledger after `grant_ttl_seconds` (completed result, or the recorded status),
+  with no new side effect; signature, key pin and bindings are still verified.
+  `ExecutionAuthority.verify`, `validate_receipt_for_execution` and `call_matches`
+  gain a keyword-only `enforce_expiry=True` for this.
 - `signed_receipt=` is now executable in production when it is this instance's
   execution signature. It shares the grant's single-use ledger entry, so a grant
   and its signed receipt together execute once.

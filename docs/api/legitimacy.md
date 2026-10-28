@@ -182,7 +182,7 @@ construction (`crypto` extra) and an `ExecutionGrant` issued by that exact
 
 | Constructor argument | Meaning |
 |---|---|
-| `receipt_signer` | Required. A non-ephemeral Ed25519 `ReceiptSigner`. Keys from `Ed25519ReceiptSigner.generate()` are refused; load a persistent key with `from_private_bytes()` (or `from_seed()` for fixtures), or back the protocol with a KMS/HSM. |
+| `receipt_signer` | Required. A non-ephemeral Ed25519 `ReceiptSigner`. Keys from `Ed25519ReceiptSigner.generate()` are refused; load a persistent key with `from_private_bytes()` (or `from_seed()` for fixtures), or back the protocol with a KMS/HSM. Only `generate()` is detected as ephemeral: a key object cannot prove where its bytes came from, so provisioning the key and its pin out of band is the operator's responsibility. |
 | `trusted_execution_keys` | Required. `key_id -> public key hex` pinned with execution scope, supplied from outside the signer. The signer's key must be pinned here. `trusted_issuer_keys` never authorizes execution. |
 | `grant_ttl_seconds` | Signed grant lifetime, default 300. Must be positive and finite. |
 
@@ -196,9 +196,17 @@ expiry. Before the ledger consume, both the `execution_grant=` and the
 pinned in `trusted_execution_keys`, the signature valid, the receipt v2 with an
 `ALLOW` or `ALLOW_WITH_CONTROLS` decision, unexpired on both the wall clock and a
 monotonic deadline, issued by this instance for this exact callable, and every
-envelope and receipt binding equal to the call. A receipt-scope signature, an
-unpinned key, a denied decision, an expired or mismatched envelope, and a second
-use all deny before the callable runs.
+envelope and receipt binding equal to the call. The grant id is not a secret:
+each issued grant id is bound to the exact receipt hash and the key that signed
+it, so a receipt signed by another pinned key, or a different receipt reusing a
+live grant id, is refused and never consumes the real grant. A receipt-scope
+signature, an unpinned key, a denied decision, an expired or mismatched
+envelope, and a second use all deny before the callable runs.
+
+Expiry blocks new executions only. Retrying with the same grant and the
+`execution_attempt_id` the ledger already recorded for it is answered from the
+ledger after expiry (the completed result, or the recorded status) and never
+runs the callable again; the signature, key pin and bindings are still checked.
 
 The grant binds the current policy
 digest, canonical arguments, method identifier, and exact callable object. It

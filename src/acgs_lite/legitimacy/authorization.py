@@ -290,7 +290,14 @@ class ExecutionAuthority:
         invocation: InvocationBinding,
         policy: PolicyBinding,
         context_digest: str | None = None,
+        enforce_expiry: bool = True,
     ) -> None:
+        """Fail closed unless ``grant`` is this authority's, intact, and bound to the call.
+
+        ``enforce_expiry=False`` skips only the clock comparison. Callers use it for
+        recovery of an attempt already recorded for this grant, which runs no new
+        side effect; the expiry string must still parse.
+        """
         if grant.issuer_id != self.issuer_id:
             raise LegitimacyInvariantError("grant issuer does not match this authority")
         expected = self._mac(
@@ -331,7 +338,7 @@ class ExecutionAuthority:
                 raise LegitimacyInvariantError("grant expiry is not parseable") from exc
             if expires.tzinfo is None:
                 expires = expires.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) > expires:
+            if enforce_expiry and datetime.now(timezone.utc) > expires:
                 raise LegitimacyInvariantError("grant has expired")
 
     def _mac(

@@ -101,6 +101,10 @@ class Ed25519ReceiptSigner:
 
     ``ephemeral`` is true only for :meth:`generate` keys. A per-process key cannot be
     pinned by an independent verifier, so the production execution profile refuses it.
+    This is the only detection: a key object cannot prove where its bytes came from,
+    so keys built by ``__init__``, :meth:`from_seed` or :meth:`from_private_bytes`
+    (even from ``os.urandom``) are accepted. Operators must provision the key and
+    its pin out of band.
     """
 
     algorithm = SIGNATURE_ALGORITHM
