@@ -1,10 +1,11 @@
 """Dispatcher-level recursive projection of nested governed payloads.
 
 Nested values (dict values, list/tuple/set elements, dataclass fields including
-``repr=False``, pydantic models, plain objects) are projected field by field and
-evaluated; nothing reaches the engine as ``repr()``/``__str__`` text. Values with
-no evaluable projection deny with ``GOVERNANCE-PAYLOAD-UNEVALUABLE`` wherever they
-are nested. Every test calls the decorated function or ``issue_grant`` and asserts
+``repr=False``, pydantic models) are projected field by field and evaluated;
+nothing reaches the engine as ``repr()``/``__str__`` text. Values outside the
+closed allowlist (plain objects, non-dict mappings, ``dict()``/``model_dump()``
+duck types, opaque keys, undecodable bytes) deny with
+``GOVERNANCE-PAYLOAD-UNEVALUABLE`` wherever they are nested, on input and output. Every test calls the decorated function or ``issue_grant`` and asserts
 the wrapped side effect never ran on deny.
 """
 
@@ -73,11 +74,11 @@ class Email:
         self.body = body
 
 
+@dataclass
 class Disguised:
     """Custom ``__str__``/``__repr__`` must never stand in for field content."""
 
-    def __init__(self, body: str) -> None:
-        self.body = body
+    body: str
 
     def __str__(self) -> str:
         return "hello"
@@ -115,7 +116,6 @@ def _assert_rule_denies(call: Any, rule_id: str) -> None:
 @pytest.mark.parametrize(
     "make",
     [
-        pytest.param(lambda: Email("rm forbiddenword"), id="plain-object"),
         pytest.param(lambda: Disguised("rm forbiddenword"), id="custom-str"),
         pytest.param(lambda: Hidden("rm forbiddenword"), id="dataclass-repr-false"),
         pytest.param(lambda: Model(body="rm forbiddenword"), id="pydantic"),
@@ -143,7 +143,7 @@ def test_keyword_object_fields_are_evaluated_at_issue_and_execute(make: Any) -> 
 @pytest.mark.parametrize(
     "make",
     [
-        pytest.param(lambda: [Email("forbiddenword")], id="list"),
+        pytest.param(lambda: [Hidden("forbiddenword")], id="list"),
         pytest.param(lambda: (Disguised("forbiddenword"),), id="tuple"),
         pytest.param(lambda: {"a": {"b": [Hidden("forbiddenword")]}}, id="nested-dict"),
         pytest.param(lambda: {Color.BAD}, id="set-of-enum"),
@@ -166,8 +166,8 @@ def test_container_elements_are_evaluated(make: Any) -> None:
 
 
 def test_keyword_and_positional_object_yield_the_same_evaluated_content() -> None:
-    positional = governance_payloads_for_enforcement(Email("rm forbiddenword"))
-    keyword = governance_payloads_for_enforcement({"email": Email("rm forbiddenword")})
+    positional = governance_payloads_for_enforcement(Hidden("rm forbiddenword"))
+    keyword = governance_payloads_for_enforcement({"email": Hidden("rm forbiddenword")})
     assert positional == ['{"body": "rm forbiddenword"}']
     assert keyword == ['{"email": {"body": "rm forbiddenword"}}']
     assert "object at 0x" not in keyword[0]
@@ -190,6 +190,9 @@ def test_benign_nested_payload_still_mints_a_grant() -> None:
 
     # Evaluation passes; the invocation binder then refuses the undigestible object.
     with pytest.raises(ArgumentNotDigestible):
+        send.issue_grant(email=Hidden("hello"))
+    # A plain object is not projectable at all, so it denies before binding.
+    with pytest.raises(GovernancePayloadError):
         send.issue_grant(email=Email("hello"))
     assert send.issue_grant(email={"body": "hello", "to": ["a", "b"]}) is not None
     assert calls == []
@@ -205,7 +208,8 @@ def test_benign_nested_payload_still_mints_a_grant() -> None:
         pytest.param(lambda: [Opaque()], id="top-level-list-of-opaque"),
         pytest.param(lambda: (1, Opaque()), id="tuple"),
         pytest.param(lambda: {"a": {"b": (x for x in ["forbiddenword"])}}, id="nested-gen"),
-        pytest.param(lambda: Email(Opaque()), id="object-field"),  # type: ignore[arg-type]
+        pytest.param(lambda: Email("forbiddenword"), id="plain-object"),
+        pytest.param(lambda: Hidden(Opaque()), id="object-field"),  # type: ignore[arg-type]
         pytest.param(lambda: {"a": [b"\xff\xfe"]}, id="nested-undecodable-bytes"),
         pytest.param(lambda: {Opaque(): "x"}, id="opaque-key"),
     ],
@@ -274,18 +278,21 @@ def test_failing_model_dump_is_denied() -> None:
     assert excinfo.value.rule_id == UNEVALUABLE
 
 
-def test_nested_opaque_output_is_not_stringified() -> None:
+def test_nested_opaque_output_is_denied_not_stringified() -> None:
     sentinel = Opaque()
+    calls: list[str] = []
 
     @_guard()
     def f(text: str) -> object:
+        calls.append(text)
         return {"handle": sentinel, "note": "fine"}
 
-    assert f("hello", decision_receipt=_receipt("f")) == {"handle": sentinel, "note": "fine"}
-    projected = governance_payloads_for_enforcement(
-        {"h": Disguised("x"), "o": sentinel}, skip_opaque=True
-    )
-    assert projected == ['{"h": {"body": "x"}, "o": null}']
+    with pytest.raises(GovernancePayloadError) as excinfo:
+        f("hello", decision_receipt=_receipt("f"))
+    assert excinfo.value.rule_id == UNEVALUABLE
+    assert calls == ["hello"]
+    with pytest.raises(GovernancePayloadError):
+        governance_payloads_for_enforcement({"h": Disguised("x"), "o": sentinel})
 
 
 def test_nested_output_content_is_evaluated() -> None:
@@ -354,25 +361,24 @@ def test_benign_well_known_nested_values_mint() -> None:
         f.issue_grant({"id": uuid.uuid4(), "path": Path("/srv")})
 
 
-def test_legacy_dict_method_enum_keys_and_output_edge_cases_are_projected() -> None:
+def test_enum_keys_project_while_legacy_dict_cycles_and_opaque_keys_deny() -> None:
     class Legacy:
         def dict(self) -> dict[str, Any]:
             return {"body": "forbiddenword"}
 
-    assert governance_payloads_for_enforcement({Color.BAD: Legacy()}) == [
+    assert governance_payloads_for_enforcement({Color.BAD: Hidden("forbiddenword")}) == [
         '{"forbiddenword": {"body": "forbiddenword"}}'
     ]
     cyclic: list[object] = ["x"]
     cyclic.append(cyclic)
-    # Output check only: a cycle back-edge carries no extra content; the value under an
-    # opaque key is still evaluated, under a positional label.
-    assert governance_payloads_for_enforcement(cyclic, skip_opaque=True) == ['["x", null]']
-    assert governance_payloads_for_enforcement({Opaque(): "kept", "k": "v"}, skip_opaque=True) == [
-        '{"<Opaque key 0>": {"key": null, "value": "kept"}, "k": "v"}'
-    ]
+    # There is no output-only skip mode: every one of these denies on both sides.
+    for value in ({Color.BAD: Legacy()}, cyclic, {Opaque(): "kept", "k": "v"}):
+        with pytest.raises(GovernancePayloadError) as excinfo:
+            governance_payloads_for_enforcement(value)
+        assert excinfo.value.rule_id == UNEVALUABLE
 
 
-# --- [11] output projection never drops evaluable content -------------------------
+# --- [11] output with opaque keys or binary denies, it is never partially read ----
 
 
 @pytest.mark.parametrize(
@@ -384,7 +390,7 @@ def test_legacy_dict_method_enum_keys_and_output_edge_cases_are_projected() -> N
         pytest.param(lambda: {"blob": b"\xfe forbiddenword \xff"}, id="nested-undecodable-bytes"),
     ],
 )
-def test_output_content_behind_opaque_keys_and_binary_is_evaluated(result: Any) -> None:
+def test_output_with_opaque_keys_or_binary_is_denied(result: Any) -> None:
     calls: list[str] = []
 
     @_guard()
@@ -392,18 +398,21 @@ def test_output_content_behind_opaque_keys_and_binary_is_evaluated(result: Any) 
         calls.append(text)
         return result()
 
-    _assert_rule_denies(lambda: f("hello", decision_receipt=_receipt("f")), "BAD-WORD")
+    with pytest.raises(GovernancePayloadError) as excinfo:
+        f("hello", decision_receipt=_receipt("f"))
+    assert excinfo.value.rule_id == UNEVALUABLE
     assert calls == ["hello"]
 
 
-def test_benign_output_with_opaque_keys_and_binary_still_returns() -> None:
+def test_benign_output_with_opaque_keys_or_binary_is_denied() -> None:
     sentinel = Opaque()
 
     @_guard()
     def f(text: str) -> object:
         return {sentinel: "fine", "blob": b"\xff\xfe"}
 
-    assert f("hello", decision_receipt=_receipt("f")) == {sentinel: "fine", "blob": b"\xff\xfe"}
+    with pytest.raises(GovernancePayloadError):
+        f("hello", decision_receipt=_receipt("f"))
 
 
 def test_opaque_keys_still_deny_on_the_input_side() -> None:
@@ -414,7 +423,7 @@ def test_opaque_keys_still_deny_on_the_input_side() -> None:
         governance_payloads_for_enforcement({"b": b"\xff"})
 
 
-# --- [12] non-dict mappings project their items, not their attributes ------------
+# --- [12] non-dict mappings deny: their items() is the type's own claim ----------
 
 
 class Bag(Mapping[str, Any]):
@@ -432,24 +441,23 @@ class Bag(Mapping[str, Any]):
         return len(self._data)
 
 
-def test_non_dict_mappings_are_projected_from_items() -> None:
-    assert governance_payloads_for_enforcement(MappingProxyType({"k": "v"})) == ['{"k": "v"}']
-    assert governance_payloads_for_enforcement({"m": Bag({"body": "x"})}) == [
-        '{"m": {"body": "x"}}'
-    ]
-    assert governance_payloads_for_enforcement({"m": ChainMap({"a": 1}, {"b": 2})}) == [
-        '{"m": {"a": 1, "b": 2}}'
-    ]
-    with pytest.raises(GovernancePayloadError):
-        governance_payloads_for_enforcement(Bag({"k": Opaque()}))
+def test_non_dict_mappings_are_denied() -> None:
+    for value in (
+        MappingProxyType({"k": "v"}),
+        {"m": Bag({"body": "x"})},
+        {"m": ChainMap({"a": 1}, {"b": 2})},
+        Bag({"k": Opaque()}),
+    ):
+        with pytest.raises(GovernancePayloadError) as excinfo:
+            governance_payloads_for_enforcement(value)
+        assert excinfo.value.rule_id == UNEVALUABLE
 
     @_guard()
     def f(meta: object) -> str:
         return "ok"
 
-    _assert_rule_denies(
-        lambda: f.issue_grant(MappingProxyType({"body": "forbiddenword"})), "BAD-WORD"
-    )
+    with pytest.raises(GovernancePayloadError):
+        f.issue_grant(MappingProxyType({"body": "forbiddenword"}))
 
 
 # --- [13] pydantic models project field values, not their serialized form --------

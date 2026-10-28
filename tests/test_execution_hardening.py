@@ -9,7 +9,7 @@ import os
 import stat
 import threading
 import weakref
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
@@ -39,6 +39,7 @@ from acgs_lite.legitimacy.invocation import (
 )
 from acgs_lite.legitimacy.ledger import AttemptStatus, InProcessGrantLedger
 from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner
+from acgs_lite.serialization import GovernancePayloadError
 from acgs_lite.z3_verify import VerificationStatus, Z3VerifyResult
 
 
@@ -616,7 +617,8 @@ def test_opaque_result_never_records_completion(tmp_path: Path, asynchronous: bo
     protected = guard(async_operation if asynchronous else operation)
     grant = protected.issue_grant()
     kwargs = {"execution_grant": grant, "execution_attempt_id": "opaque"}
-    with pytest.raises(LegitimacyInvariantError, match="unknown"):
+    # Output governance denies the opaque result before the ledger tries to digest it.
+    with pytest.raises(GovernancePayloadError):
         if asynchronous:
             asyncio.run(protected(**kwargs))
         else:
@@ -1053,9 +1055,10 @@ def test_mutated_completed_result_is_not_recovered_as_success() -> None:
 
 
 def test_custom_result_with_constant_repr_is_not_recovered_as_verified() -> None:
+    # A dataclass passes output governance, so this reaches the ledger's result digest.
+    @dataclass
     class MutableOpaque:
-        def __init__(self) -> None:
-            self.state = "original"
+        state: str = "original"
 
         def __repr__(self) -> str:
             return "<opaque>"

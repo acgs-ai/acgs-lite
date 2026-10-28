@@ -380,23 +380,30 @@ def test_none_and_empty_arguments_are_skipped() -> None:
     assert calls == [(None, "")]
 
 
-def test_opaque_output_keeps_existing_compatibility_behaviour() -> None:
-    """Owner decision covers opaque *arguments* only; opaque output is unchanged."""
+def test_opaque_output_is_denied_in_compatibility_profile() -> None:
+    """Output uses the same closed allowlist as input: an opaque result denies."""
     sentinel = Opaque()
+    calls: list[str] = []
 
     @_compat()
     def f(text: str) -> object:
+        calls.append(text)
         return sentinel
 
-    assert f("hello", decision_receipt=_receipt("f")) is sentinel
+    with pytest.raises(GovernancePayloadError) as excinfo:
+        f("hello", decision_receipt=_receipt("f"))
+    assert excinfo.value.rule_id == "GOVERNANCE-PAYLOAD-UNEVALUABLE"
+    assert calls == ["hello"]
 
 
-def test_undecodable_bytes_output_keeps_existing_compatibility_behaviour() -> None:
+def test_undecodable_bytes_output_is_denied_in_compatibility_profile() -> None:
     @_compat()
     def f(text: str) -> bytes:
         return b"\xff\xfe"
 
-    assert f("hello", decision_receipt=_receipt("f")) == b"\xff\xfe"
+    with pytest.raises(GovernancePayloadError) as excinfo:
+        f("hello", decision_receipt=_receipt("f"))
+    assert excinfo.value.rule_id == "GOVERNANCE-PAYLOAD-UNEVALUABLE"
 
 
 def test_scalar_output_is_evaluated() -> None:

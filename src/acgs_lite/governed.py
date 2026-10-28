@@ -1050,6 +1050,8 @@ class GovernedCallable:
             return True
         if status is AttemptStatus.STARTED:
             return False
+        # No replay after prune only because InProcessGrantLedger never prunes consumed
+        # attempts; if ledger pruning is ever added, revisit this.
         return entry.deadline + self.grant_ttl_seconds < now
 
     def _reserve_signed_grant(self, grant_id: str) -> None:
@@ -1612,9 +1614,7 @@ class GovernedCallable:
                         )
                     execution_started = True
                     result = await func(*args, **kwargs)
-                    for output_payload in governance_payloads_for_enforcement(
-                        result, skip_opaque=True
-                    ):
+                    for output_payload in governance_payloads_for_enforcement(result):
                         _deny_unless_valid(
                             engine.validate(output_payload, agent_id=f"{agent_id}:output"),
                             action=output_payload,
@@ -1672,9 +1672,7 @@ class GovernedCallable:
                         )
                     execution_started = True
                     result = func(*args, **kwargs)
-                    for output_payload in governance_payloads_for_enforcement(
-                        result, skip_opaque=True
-                    ):
+                    for output_payload in governance_payloads_for_enforcement(result):
                         _deny_unless_valid(
                             engine.validate(output_payload, agent_id=f"{agent_id}:output"),
                             action=output_payload,
