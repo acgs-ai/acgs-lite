@@ -226,6 +226,14 @@ This is a semver-major change (4.0.0): the production profile of the stable
   started, else `FAILED`, with `error_code="interrupted"`, and the exception still
   propagates. A retry with the same `execution_attempt_id` now reports that status
   instead of "already in flight" forever.
+- The same holds for an interrupt raised after the callable returned, while the
+  completed result is being committed (waiting for the completion lock, writing the
+  ledger record, or writing the durable `execution_completed` audit entry). The attempt
+  is recorded `PARTIAL` with `error_code="interrupted"` and the exception propagates. A
+  `COMPLETED` ledger record whose durable audit entry was not yet written (under
+  `require_durable_audit=True`) is replaced with `PARTIAL`. Without durable audit a
+  `COMPLETED` record the ledger already wrote is the commit and is kept, so recovery
+  returns it. If the attempt cannot be settled, execution is disabled on the instance.
 - Parameter defaults the call relies on are now evaluated, not only digested. The
   argument digest has always bound defaults, but `GovernedCallable` evaluated only the
   raw call arguments, so a default such as `note: str = "<forbidden keyword>"` was

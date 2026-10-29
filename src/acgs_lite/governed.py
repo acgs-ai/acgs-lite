@@ -1365,15 +1365,29 @@ class GovernedCallable:
 
     def _finalize_completed(self, outcome: ConsumeDecision | None, result: Any) -> None:
         """Commit success, exposing unknown outcome if terminal evidence cannot be stored."""
-        with self._completion_lock:
-            self._commit_completed(outcome, result)
+        try:
+            with self._completion_lock:
+                self._commit_completed(outcome, result)
+        except Exception:
+            raise
+        except BaseException:
+            # KeyboardInterrupt, SystemExit or GeneratorExit while committing: the side
+            # effect ran, so an attempt still STARTED is settled PARTIAL. The ledger's
+            # first terminal write wins, so this is a no-op once the attempt settled.
+            try:
+                self._finalize_attempt(outcome, AttemptStatus.PARTIAL, error_code="interrupted")
+            except Exception:
+                self._execution_disabled = True
+            raise
 
     def _commit_completed(self, outcome: ConsumeDecision | None, result: Any) -> None:
         """Keep replay excluded until both terminal confirmations have succeeded."""
+        ledger_write_started = False
         try:
             output_digest = digest_output(result)
             if outcome is not None and output_digest is None:
                 raise LegitimacyInvariantError("side-effect result cannot be digested")
+            ledger_write_started = True
             self._finalize_attempt(
                 outcome, AttemptStatus.COMPLETED, result=result, output_sha256=output_digest
             )
@@ -1406,6 +1420,19 @@ class GovernedCallable:
             raise LegitimacyInvariantError(
                 "side effect may have completed but terminal result is unknown"
             ) from exc
+        except BaseException:
+            # Interrupted once the ledger write began but before the durable audit
+            # entry confirmed it: replay must not trust a COMPLETED record, so it is
+            # replaced with PARTIAL. Without durable audit the ledger write is the
+            # commit; an attempt still STARTED is settled by _finalize_completed.
+            if ledger_write_started and self.require_durable_audit and outcome is not None:
+                try:
+                    self._ledger.mark_unknown(
+                        attempt_id=outcome.record.attempt_id, error_code="interrupted"
+                    )
+                except Exception:
+                    self._execution_disabled = True
+            raise
 
     def _consume_and_audit(
         self,

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from pathlib import Path
 
 import pytest
 
+from acgs_lite.audit import AuditEntry, AuditLog, JSONLAuditBackend
 from acgs_lite.constitution import Constitution
 from acgs_lite.governed import GovernedCallable
 from acgs_lite.legitimacy import AuthorizationProfile, ExecutionGrant, LegitimacyInvariantError
@@ -313,4 +315,185 @@ async def test_closed_coroutine_propagates_in_compat_profile() -> None:
     coro = transfer("acct-1", 10, execution_grant=grant)
     coro.send(None)
     coro.close()
+    assert calls == ["acct-1:10"]
+
+
+# --- interrupts while committing the completed result -------------------------
+
+
+def _interrupt_ledger_completion(
+    guard: GovernedCallable, monkeypatch: pytest.MonkeyPatch, *, after_write: bool
+) -> None:
+    """Raise KeyboardInterrupt from the COMPLETED ledger write only.
+
+    Other statuses pass through, so the interrupt handler's own PARTIAL write is
+    not intercepted by the same patch.
+    """
+    original = guard._ledger.finalize
+
+    def finalize(**kwargs: object) -> object:
+        if kwargs.get("status") is not AttemptStatus.COMPLETED:
+            return original(**kwargs)  # type: ignore[arg-type]
+        if after_write:
+            original(**kwargs)  # type: ignore[arg-type]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(guard._ledger, "finalize", finalize)
+
+
+def _attempt(guard: GovernedCallable, attempt_id: str = "att-1") -> object:
+    return guard._ledger._attempts[attempt_id]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_interrupt_before_completed_write_settles_partial(
+    monkeypatch: pytest.MonkeyPatch, asynchronous: bool
+) -> None:
+    calls: list[str] = []
+    guard = _production_guard()
+
+    def body(account_id: str, amount: int) -> str:
+        calls.append(f"{account_id}:{amount}")
+        return "sent"
+
+    if asynchronous:
+
+        async def transfer(account_id: str, amount: int) -> str:
+            return body(account_id, amount)
+
+    else:
+
+        def transfer(account_id: str, amount: int) -> str:  # type: ignore[misc]
+            return body(account_id, amount)
+
+    governed = guard(transfer)
+    grant = governed.issue_grant("acct-1", 10)
+    _interrupt_ledger_completion(guard, monkeypatch, after_write=False)
+
+    def call() -> object:
+        result = governed("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
+        return asyncio.run(result) if asynchronous else result  # type: ignore[arg-type]
+
+    with pytest.raises(KeyboardInterrupt):
+        call()
+    record = _attempt(guard)
+    assert record.status is AttemptStatus.PARTIAL  # type: ignore[attr-defined]
+    assert record.error_code == "interrupted"  # type: ignore[attr-defined]
+    with pytest.raises(LegitimacyInvariantError, match="already partial"):
+        call()
+    assert calls == ["acct-1:10"]
+
+
+def test_interrupt_after_ledger_commit_without_durable_audit_keeps_completed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Without durable audit the ledger write is the commit: it is not downgraded.
+    calls: list[str] = []
+    guard = _production_guard()
+
+    @guard
+    def transfer(account_id: str, amount: int) -> str:
+        calls.append(f"{account_id}:{amount}")
+        return "sent"
+
+    grant = transfer.issue_grant("acct-1", 10)
+    _interrupt_ledger_completion(guard, monkeypatch, after_write=True)
+    with pytest.raises(KeyboardInterrupt):
+        transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
+    assert _attempt(guard).status is AttemptStatus.COMPLETED  # type: ignore[attr-defined]
+    assert transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1") == "sent"
+    assert calls == ["acct-1:10"]
+
+
+def test_interrupt_before_durable_completion_audit_downgrades_to_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    audit = AuditLog(backend=JSONLAuditBackend(tmp_path / "audit.jsonl"))
+    guard = GovernedCallable(
+        Constitution.default(),
+        authorization_profile=AuthorizationProfile.PRODUCTION,
+        audit_log=audit,
+        require_durable_audit=True,
+        **_production_signing(),
+    )
+
+    @guard
+    def transfer(account_id: str, amount: int) -> str:
+        calls.append(f"{account_id}:{amount}")
+        return "sent"
+
+    grant = transfer.issue_grant("acct-1", 10)
+    original = audit.record_durable
+
+    def record_durable(entry: AuditEntry) -> object:
+        if entry.type == "execution_completed":
+            raise SystemExit(1)
+        return original(entry)
+
+    monkeypatch.setattr(audit, "record_durable", record_durable)
+    with pytest.raises(SystemExit):
+        transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
+    record = _attempt(guard)
+    assert record.status is AttemptStatus.PARTIAL  # type: ignore[attr-defined]
+    assert record.error_code == "interrupted"  # type: ignore[attr-defined]
+    with pytest.raises(LegitimacyInvariantError, match="already partial"):
+        transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
+    assert calls == ["acct-1:10"]
+
+
+def test_interrupt_acquiring_completion_lock_settles_partial() -> None:
+    calls: list[str] = []
+    guard = _production_guard()
+
+    @guard
+    def transfer(account_id: str, amount: int) -> str:
+        calls.append(f"{account_id}:{amount}")
+        return "sent"
+
+    real_lock = guard._completion_lock
+
+    class _InterruptingLock:
+        """The real lock, except that acquiring it after the side effect ran interrupts."""
+
+        def __enter__(self) -> object:
+            if calls:
+                raise KeyboardInterrupt
+            return real_lock.__enter__()
+
+        def __exit__(self, *exc: object) -> None:
+            real_lock.__exit__(*exc)  # type: ignore[arg-type]
+
+    grant = transfer.issue_grant("acct-1", 10)
+    guard._completion_lock = _InterruptingLock()  # type: ignore[assignment]
+    with pytest.raises(KeyboardInterrupt):
+        transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
+    record = _attempt(guard)
+    assert record.status is AttemptStatus.PARTIAL  # type: ignore[attr-defined]
+    assert record.error_code == "interrupted"  # type: ignore[attr-defined]
+    assert calls == ["acct-1:10"]
+
+
+def test_interrupt_with_unsettleable_attempt_disables_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    guard = _production_guard()
+
+    @guard
+    def transfer(account_id: str, amount: int) -> str:
+        calls.append(f"{account_id}:{amount}")
+        return "sent"
+
+    grant = transfer.issue_grant("acct-1", 10)
+
+    def finalize(**kwargs: object) -> object:
+        if kwargs.get("status") is AttemptStatus.COMPLETED:
+            raise KeyboardInterrupt
+        raise OSError("ledger unavailable")
+
+    monkeypatch.setattr(guard._ledger, "finalize", finalize)
+    with pytest.raises(KeyboardInterrupt):
+        transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
+    assert guard._execution_disabled is True
     assert calls == ["acct-1:10"]
