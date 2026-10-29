@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 This is a semver-major change (4.0.0): the production profile of the stable
 `GovernedCallable` now requires Ed25519 execution signatures.
 
+> **Upgrading `GovernedAgent`: conditional deny rules can stop firing without an
+> error.** `run()`/`arun()` keyword arguments no longer reach the engine context.
+> A caller that still passes `env="production"` (or `domain=`, `human_approval=`,
+> a timestamp, or any key a rule condition reads) per call gets no error, but a
+> rule conditioned on that key no longer matches, so the action it used to deny
+> is allowed. Move those values into `GovernedAgent(..., governance_context={...})`
+> before upgrading, or give the condition `"missing": "match"`. See the
+> `GovernedAgent` migration note below.
+
 ### BREAKING
 
 - `GovernedCallable(authorization_profile=PRODUCTION)` now requires
