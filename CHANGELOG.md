@@ -127,6 +127,32 @@ This is a semver-major change (4.0.0): the production profile of the stable
   `test_distinct_enum_types_cannot_substitute_for_granted_argument` (now
   `test_enum_arguments_cannot_be_granted_or_substituted`). Regression matrix:
   `tests/test_governance_json_only.py`.
+- `GovernedAgent.run()` and `.arun()` enforce the same fail-closed payload contract
+  as `GovernedCallable`. The input string, the caller's keyword arguments and the
+  agent's output are projected with `governance_payloads_for_enforcement` instead of
+  the truncating preview serializer, so content past 10,000 characters and content
+  inside opaque values is no longer skipped: an oversize value denies with
+  `GOVERNANCE-PAYLOAD-OVERSIZE` and a non-JSON value with
+  `GOVERNANCE-PAYLOAD-UNEVALUABLE` (`GovernancePayloadError`). This includes an input
+  string over 10,000 characters, framework objects (callbacks, clients) passed as
+  `run()` keyword arguments, and an agent that returns a framework message or
+  response object. Every engine result must be `valid is True`: `strict=False` no
+  longer lets a blocking input or kwargs violation run the agent, or a blocking
+  output violation return the output. Non-blocking (warning) violations still pass
+  in both modes. A caller-supplied `response_format` is now governed like any other
+  kwarg; the structured-output request `GovernedAgent` injects from the constitution
+  is not evaluated as caller content. Output rule violations still drive the
+  `max_retries` remediation loop and deny once it is exhausted; an oversize or
+  non-JSON output denies at once without re-invoking the agent.
+  `validate_output=False` remains the explicit opt-out for output enforcement (it also
+  disables structured-output injection). Integration adapters keep their existing
+  preview-based, observational checks. Tests whose expectation changed: in
+  `test_core.py`, `TestIntegration::test_full_governance_pipeline` (the violating
+  `strict=False` run now raises `SAFE-001` and the agent is not called); in
+  `test_examples_smoke.py`, `test_example_runs_successfully[quickstart.py]` and
+  `[quickstart_content_mod.py]` (the examples now catch and print the denial of the
+  violating `strict=False` runs). Regression matrix:
+  `tests/test_governed_agent_payload_enforcement.py`.
 
 ### Migration to 4.0
 
@@ -148,6 +174,13 @@ This is a semver-major change (4.0.0): the production profile of the stable
   for an `Enum`, `sorted(...)` for a set, and `str` keys for dicts. The governed
   function receives exactly the value that was evaluated, so do the conversion at the
   call site, not inside the governed function.
+- `GovernedAgent`: do not rely on `strict=False` to let a violating run proceed; catch
+  `ConstitutionalViolationError` where the old code read the result. Return a
+  JSON-native value from the wrapped agent (for example `message.content` or
+  `response.model_dump(mode="json")`), or pass `validate_output=False` to skip output
+  enforcement deliberately. Pass handles such as callbacks and clients through a
+  closure or the agent's constructor rather than as `run()` keyword arguments, and keep
+  each input, kwargs mapping and output within 10,000 characters.
 
 ### Security
 

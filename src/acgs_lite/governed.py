@@ -91,7 +91,7 @@ from acgs_lite.provider_capabilities import (
     RequestShape,
     get_capability_registry,
 )
-from acgs_lite.serialization import governance_payloads_for_enforcement, serialize_for_governance
+from acgs_lite.serialization import GovernancePayloadError, governance_payloads_for_enforcement
 
 T = TypeVar("T")
 _PROCEED = object()
@@ -172,8 +172,16 @@ class CapabilityProfileProtocol(Protocol):
 class GovernedAgent:
     """Wrap any agent in constitutional governance.
 
-    Validates inputs and outputs against the constitution. Structured outputs
-    and keyword arguments are normalized before validation. Produces full audit
+    Validates inputs, keyword arguments and outputs against the constitution
+    with the same fail-closed contract as :class:`GovernedCallable`: each value
+    must be JSON-native and is evaluated in full, never truncated; an oversize
+    (over 10,000 characters) or non-JSON value denies with
+    :class:`~acgs_lite.serialization.GovernancePayloadError`, and any engine
+    result that is not ``valid is True`` denies. ``strict`` does not change the
+    decision: a blocking violation denies under ``strict=False`` too, while
+    non-blocking (warning) violations pass in both modes. ``validate_output=False``
+    is the explicit opt-out for output enforcement (it also disables the
+    structured-output request injection). Produces full audit
     trails. MACI role checks are enforced by default: callers must provide an
     explicit ``maci_role`` when constructing the wrapper and a permitted
     ``governance_action`` on every execution. Passing ``enforce_maci=False`` is
@@ -385,6 +393,10 @@ class GovernedAgent:
                 CapabilityProfileProtocol | None,
                 execution_kwargs.pop("provider_capability_profile", None),
             )
+        # Every caller-supplied kwarg the agent receives is governed. The request
+        # shape attach_response_format injects is generated from the constitution
+        # itself (its schema names the rules' own terms), so it is not caller content.
+        governance_kwargs = dict(execution_kwargs)
 
         if self.validate_output:
             capability_profile = self._resolve_capability_profile(explicit_profile)
@@ -393,38 +405,57 @@ class GovernedAgent:
                 self.constitution,
                 capability_profile,
             )
-
-        governance_kwargs = {
-            key: value for key, value in execution_kwargs.items() if key != "response_format"
-        }
         return execution_kwargs, governance_kwargs
+
+    def _enforce_payloads(
+        self, *values: Any, agent_id: str, context: dict[str, Any] | None = None
+    ) -> None:
+        """Deny unless every value projects in full and the engine returns ``valid is True``.
+
+        Same contract as GovernedCallable: JSON-native values only, never truncated
+        (oversize and non-JSON values raise :class:`GovernancePayloadError`), and a
+        blocking verdict denies whatever ``strict`` is set to.
+        """
+        for payload in governance_payloads_for_enforcement(*values):
+            _deny_unless_valid(
+                self.engine.validate(payload, agent_id=agent_id, context=context),
+                action=payload,
+            )
+
+    def _validate_invocation(
+        self, input: str, governance_kwargs: dict[str, Any], context: dict[str, Any]
+    ) -> None:
+        """Validate the input and the caller's kwargs before the agent runs."""
+        self._enforce_payloads(input, agent_id=self.agent_id, context=context)
+        if governance_kwargs:
+            self._enforce_payloads(governance_kwargs, agent_id=f"{self.agent_id}:kwargs")
 
     def _validate_output(self, result: Any) -> None:
         """Validate agent output against constitution. Raises on violation."""
         if not self.validate_output:
             return
-        output_payload = serialize_for_governance(result)
-        if output_payload:
-            self.engine.validate(
-                output_payload,
-                agent_id=f"{self.agent_id}:output",
-                context={"source": "agent_output"},
-            )
+        self._enforce_payloads(
+            result, agent_id=f"{self.agent_id}:output", context={"source": "agent_output"}
+        )
 
     def run(self, input: str, *, governance_action: str | None = None, **kwargs: Any) -> Any:
         """Run the wrapped agent with governance.
 
         1. Enforce MACI role boundaries by default
-        2. Validate the primary input and serialized keyword arguments
+        2. Validate the primary input and the caller's keyword arguments
         3. Execute the agent
-        4. Validate serialized output (if enabled)
-        5. On output violation with ``max_retries > 0``, re-invoke the agent
-           with a remediation prompt (up to ``max_retries`` times)
+        4. Validate the output (if enabled)
+        5. On an output rule violation with ``max_retries > 0``, re-invoke the
+           agent with a remediation prompt (up to ``max_retries`` times); an
+           oversize or non-JSON output denies without a retry
         6. Return result with audit trail
 
         Raises:
             ConstitutionalViolationError: If input/output violates rules
-                after all retries are exhausted.
+                after all retries are exhausted, whatever ``strict`` is set to.
+            GovernancePayloadError: If the input, a keyword argument or the
+                output is oversize or not JSON-native (a
+                ``ConstitutionalViolationError`` subclass).
             GovernanceHaltError: If the circuit breaker is tripped.
         """
         # Step 0: Check circuit breaker (Article 14 kill-switch)
@@ -439,10 +470,7 @@ class GovernedAgent:
         context = dict(governance_kwargs)
         if governance_action is not None:
             context["governance_action"] = governance_action
-        self.engine.validate(input, agent_id=self.agent_id, context=context)
-        kwargs_payload = serialize_for_governance(governance_kwargs)
-        if kwargs_payload:
-            self.engine.validate(kwargs_payload, agent_id=f"{self.agent_id}:kwargs")
+        self._validate_invocation(input, governance_kwargs, context)
 
         # Step 3: Execute agent
         result = self._execute_agent(input, **execution_kwargs)
@@ -457,7 +485,9 @@ class GovernedAgent:
             except ConstitutionalViolationError as exc:
                 last_error = exc
                 retries_remaining = self.max_retries - attempt + 1
-                if retries_remaining <= 0:
+                # Oversize or non-JSON output is a shape error a re-prompt cannot be
+                # relied on to fix, so it denies without re-invoking the agent.
+                if retries_remaining <= 0 or isinstance(exc, GovernancePayloadError):
                     self._emit_cdp(
                         input,
                         verdict="deny",
@@ -637,10 +667,7 @@ class GovernedAgent:
         context = dict(governance_kwargs)
         if governance_action is not None:
             context["governance_action"] = governance_action
-        self.engine.validate(input, agent_id=self.agent_id, context=context)
-        kwargs_payload = serialize_for_governance(governance_kwargs)
-        if kwargs_payload:
-            self.engine.validate(kwargs_payload, agent_id=f"{self.agent_id}:kwargs")
+        self._validate_invocation(input, governance_kwargs, context)
 
         # Step 3: Execute agent
         result = await self._aexecute_agent(input, **execution_kwargs)
@@ -654,7 +681,9 @@ class GovernedAgent:
             except ConstitutionalViolationError as exc:
                 last_error = exc
                 retries_remaining = self.max_retries - attempt + 1
-                if retries_remaining <= 0:
+                # Oversize or non-JSON output is a shape error a re-prompt cannot be
+                # relied on to fix, so it denies without re-invoking the agent.
+                if retries_remaining <= 0 or isinstance(exc, GovernancePayloadError):
                     raise
                 self.audit_log.record(
                     AuditEntry(
