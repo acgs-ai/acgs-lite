@@ -212,6 +212,17 @@ This is a semver-major change (4.0.0): the production profile of the stable
   `LegitimacyInvariantError("invocation binding mismatch: ...")`, the callable does
   not run, and a production attempt is recorded `FAILED`. Arguments are not copied;
   the callable still receives the caller's objects.
+- `GovernanceEngine.validate` now matches rule keywords and patterns against the
+  Unicode-normalized action as well as the original. Matching used `action.lower()`
+  only, so a fullwidth keyword (`ｄｅｌｅｔｅ`) or one with a zero-width space, zero-width
+  joiner or soft hyphen spliced in evaded a rule blocking `delete`. Non-ASCII text is
+  now also matched after NFKC folding with format characters (category `Cf`) removed,
+  for the action and the `action_detail`/`action_description` context values, in the
+  hot path and the runtime-rule-filtering path. Findings from both passes are unioned,
+  so normalization can only add a denial. Receipts, audit entries, `ValidationResult.action`
+  and `Violation.matched_content` keep the original text. Such input skips the Rust fast
+  path and runs on the Python matcher; ASCII input is unchanged and pays one
+  `isascii()` check. New helper: `acgs_lite.engine.core.normalize_for_matching`.
 
 ### Added
 
