@@ -22,7 +22,9 @@ from acgs_lite.errors import ConstitutionalViolationError
 
 MODES = pytest.mark.parametrize("mode", ["run", "arun"])
 STRICTNESS = pytest.mark.parametrize("strict", [True, False])
-CLOCK_KEYS = pytest.mark.parametrize("clock_key", ["timestamp", "evaluation_time", "valid_at", "at"])
+CLOCK_KEYS = pytest.mark.parametrize(
+    "clock_key", ["timestamp", "evaluation_time", "valid_at", "at"]
+)
 
 
 class StubAgent:
@@ -194,6 +196,121 @@ def test_custom_validator_sees_only_trusted_context(mode: str) -> None:
     assert seen
     assert all("approved" not in ctx for ctx in seen)
     assert seen[0] == {"tenant": "acme", "governance_action": "execute"}
+
+    # The output check receives the same trusted context, marked as agent output.
+    seen.clear()
+    stub = _stub(mode)
+    governed = _governed(
+        stub, _time_bounded(), governance_context={"tenant": "acme", "approved": True}
+    )
+    governed.engine.add_validator(validator)
+
+    assert _invoke(mode, governed, "summarise the report", approved=False) == "done"
+    assert len(stub.calls) == 1
+    assert all(ctx.get("approved") is True for ctx in seen)
+    assert seen[-1] == {
+        "source": "agent_output",
+        "tenant": "acme",
+        "approved": True,
+        "governance_action": "execute",
+    }
+
+
+class OutputStubAgent(StubAgent):
+    """Returns queued outputs in order, one per call."""
+
+    def __init__(self, *outputs: str) -> None:
+        super().__init__()
+        self.outputs = list(outputs)
+
+    def run(self, input: str, **kwargs: Any) -> Any:
+        super().run(input, **kwargs)
+        return self.outputs.pop(0)
+
+    async def arun(self, input: str, **kwargs: Any) -> Any:
+        return self.run(input, **kwargs)
+
+
+def _env_conditioned() -> Rule:
+    return Rule(
+        id="C-3",
+        text="no secrets in production",
+        severity=Severity.CRITICAL,
+        keywords=["secret token"],
+        condition={"env": "production"},
+    )
+
+
+def _future_bounded() -> Rule:
+    return Rule(
+        id="F-1",
+        text="no launch codes",
+        severity=Severity.CRITICAL,
+        keywords=["launch codes"],
+        valid_from="2030-01-01T00:00:00",
+    )
+
+
+@MODES
+def test_output_evaluated_under_governance_context_condition(mode: str) -> None:
+    stub = OutputStubAgent("here is the secret token")
+    governed = _governed(stub, _env_conditioned(), governance_context={"env": "production"})
+
+    with pytest.raises(ConstitutionalViolationError) as exc_info:
+        _invoke(mode, governed, "hello")
+
+    assert exc_info.value.rule_id == "C-3"
+    assert len(stub.calls) == 1
+
+
+@MODES
+def test_output_evaluated_under_governance_context_clock(mode: str) -> None:
+    stub = OutputStubAgent("the launch codes are 1234")
+    governed = _governed(
+        stub, _future_bounded(), governance_context={"timestamp": "2031-01-01T00:00:00"}
+    )
+
+    with pytest.raises(ConstitutionalViolationError) as exc_info:
+        _invoke(mode, governed, "hello")
+
+    assert exc_info.value.rule_id == "F-1"
+    assert len(stub.calls) == 1
+
+
+@MODES
+def test_output_conditional_rule_inactive_without_governance_context(mode: str) -> None:
+    stub = OutputStubAgent("here is the secret token")
+    governed = _governed(stub, _env_conditioned())
+
+    assert _invoke(mode, governed, "hello") == "here is the secret token"
+    assert len(stub.calls) == 1
+
+
+@MODES
+def test_output_retry_evaluated_under_governance_context(mode: str) -> None:
+    # The first output is denied, and the retried output is checked under the same
+    # trusted context: it still violates, so the call denies after the retry.
+    stub = OutputStubAgent("the secret token is x", "the secret token is still x")
+    governed = _governed(
+        stub, _env_conditioned(), governance_context={"env": "production"}, max_retries=1
+    )
+
+    with pytest.raises(ConstitutionalViolationError) as exc_info:
+        _invoke(mode, governed, "hello")
+
+    assert exc_info.value.rule_id == "C-3"
+    assert len(stub.calls) == 2
+
+
+@MODES
+def test_output_retry_returns_compliant_output_under_governance_context(mode: str) -> None:
+    stub = OutputStubAgent("the secret token is x", "nothing to share")
+    governed = _governed(
+        stub, _env_conditioned(), governance_context={"env": "production"}, max_retries=1
+    )
+
+    assert _invoke(mode, governed, "hello") == "nothing to share"
+    assert len(stub.calls) == 2
 
 
 def test_governance_context_must_be_a_mapping() -> None:

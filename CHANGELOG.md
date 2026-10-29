@@ -161,11 +161,14 @@ This is a semver-major change (4.0.0): the production profile of the stable
   with a later `valid_from`, or a condition key such as `env=` to switch a
   conditional rule off. The context is now built only from the new constructor
   argument `governance_context=` (a mapping, copied at construction and never
-  merged with per-call kwargs) plus the call's `governance_action`. Caller kwargs
-  are still evaluated in full as payload content, now under the same trusted
-  context as the input. `action_detail`/`action_description` passed as `run()`
-  kwargs are no longer matched as context values, but their text is still matched
-  as kwargs payload. The CDP record's `human_approval` and `domain` obligations
+  merged with per-call kwargs) plus the call's `governance_action`, and every
+  check of the call uses it: the input, the caller's kwargs, and the agent's
+  output, including each remediation retry's output. The output check adds
+  `"source": "agent_output"` unless `governance_context` sets `source` itself.
+  Caller kwargs are still evaluated in full as payload content.
+  `action_detail`/`action_description` passed as `run()` kwargs are no longer
+  matched as context values, but their text is still matched as kwargs
+  payload. The CDP record's `human_approval` and `domain` obligations
   inputs are likewise read from `governance_context`, not from caller kwargs.
   Regression tests: `tests/test_governed_agent_trusted_context.py`.
 
@@ -200,9 +203,11 @@ This is a semver-major change (4.0.0): the production profile of the stable
   arguments (`env=`, `environment=`, `domain=`, `human_approval=`, an evaluation
   timestamp, or keys your rule conditions or custom validators read) into
   `GovernedAgent(..., governance_context={...})` from deployment configuration.
-  A conditional rule whose key is absent from that mapping is inactive unless its
-  condition uses `"missing": "match"`, so review conditional rules when migrating.
-  Build a separate `GovernedAgent` per distinct trusted context.
+  That context governs the agent's output as well as its input, so a rule
+  conditioned on it (or bounded by its clock) now also applies to what the agent
+  returns. A conditional rule whose key is absent from that mapping is inactive
+  unless its condition uses `"missing": "match"`, so review conditional rules
+  when migrating. Build a separate `GovernedAgent` per distinct trusted context.
 
 ### Security
 

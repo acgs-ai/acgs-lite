@@ -190,7 +190,8 @@ class GovernedAgent:
     The engine evaluation context (the clock for time-bounded rules and the
     inputs to rule ``condition`` predicates and custom validators) comes only
     from the operator: the constructor's ``governance_context`` plus the call's
-    ``governance_action``. Caller keyword arguments never enter it; they are
+    ``governance_action``. It applies to the input, the caller's kwargs and the
+    output (each retry's too). Caller keyword arguments never enter it; they are
     evaluated as payload content only, so a caller cannot pass ``timestamp=``
     (or ``evaluation_time``/``valid_at``/``at``) to deactivate a rule, or a
     condition key to select which rules apply.
@@ -458,12 +459,21 @@ class GovernedAgent:
                 governance_kwargs, agent_id=f"{self.agent_id}:kwargs", context=context
             )
 
-    def _validate_output(self, result: Any) -> None:
-        """Validate agent output against constitution. Raises on violation."""
+    def _validate_output(self, result: Any, context: dict[str, Any]) -> None:
+        """Validate agent output against constitution. Raises on violation.
+
+        The output is evaluated under the call's trusted engine context, so
+        conditional and time-bounded rules apply to it exactly as to the input.
+        ``source`` marks the payload as agent output; an operator-supplied
+        ``source`` in ``governance_context`` takes precedence so a condition on
+        it holds identically for input and output.
+        """
         if not self.validate_output:
             return
         self._enforce_payloads(
-            result, agent_id=f"{self.agent_id}:output", context={"source": "agent_output"}
+            result,
+            agent_id=f"{self.agent_id}:output",
+            context={"source": "agent_output", **context},
         )
 
     def _admit_invocation(
@@ -515,7 +525,7 @@ class GovernedAgent:
         last_error: ConstitutionalViolationError | None = None
         for attempt in range(1, self.max_retries + 2):  # 1-indexed, includes original
             try:
-                self._validate_output(result)
+                self._validate_output(result, context)
                 self._emit_cdp(input, verdict="allow", context=context)
                 return result
             except ConstitutionalViolationError as exc:
@@ -704,7 +714,7 @@ class GovernedAgent:
         last_error: ConstitutionalViolationError | None = None
         for attempt in range(1, self.max_retries + 2):
             try:
-                self._validate_output(result)
+                self._validate_output(result, context)
                 self._emit_cdp(input, verdict="allow", context=context)
                 return result
             except ConstitutionalViolationError as exc:
