@@ -178,9 +178,7 @@ def test_opaque_default_denies_in_both_profiles(guard: Any) -> None:
 
 
 def test_defaulted_values_skip_supplied_variadic_and_receiver() -> None:
-    def f(
-        self: object, a: int, b: str = "b", *rest: int, c: str = "c", **extra: int
-    ) -> None:
+    def f(self: object, a: int, b: str = "b", *rest: int, c: str = "c", **extra: int) -> None:
         return None
 
     assert defaulted_argument_values(f, (object(), 1), {}) == ("b", "c")
@@ -243,6 +241,7 @@ def test_defaulted_values_fail_closed_on_bad_binding() -> None:
 
     with pytest.raises(ArgumentNotDigestible):
         defaulted_argument_values(f, (), {"b": 1})
+
     def g() -> None:
         return None
 
