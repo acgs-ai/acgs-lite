@@ -1039,9 +1039,10 @@ class GovernedCallable:
         """Whether a registry entry can be dropped without losing anything executable.
 
         Never-consumed: once expired it can never execute. Consumed: kept while the
-        attempt runs, then for one more ``grant_ttl_seconds`` after expiry so its
-        recorded attempt stays recoverable. Dropping it only refuses recovery; the
-        ledger still refuses any reuse, so no replay window opens.
+        attempt runs, then for one more ``grant_ttl_seconds`` after the later of
+        expiry and settlement, so a slow attempt's recorded result stays
+        recoverable. Dropping it only refuses recovery; the ledger still refuses any
+        reuse, so no replay window opens.
         """
         if entry.deadline >= now:
             return False
@@ -1050,9 +1051,11 @@ class GovernedCallable:
             return True
         if status is AttemptStatus.STARTED:
             return False
+        settled_at = self._ledger.settled_at_for_grant(grant_id)
+        retained_from = entry.deadline if settled_at is None else max(entry.deadline, settled_at)
         # No replay after prune only because InProcessGrantLedger never prunes consumed
         # attempts; if ledger pruning is ever added, revisit this.
-        return entry.deadline + self.grant_ttl_seconds < now
+        return retained_from + self.grant_ttl_seconds < now
 
     def _reserve_signed_grant(self, grant_id: str) -> None:
         with self._signed_grants_lock:

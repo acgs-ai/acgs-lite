@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -71,6 +72,8 @@ class InProcessGrantLedger:
             tuple[str, str, str, str, str | None, tuple[str, ...], str | None],
         ] = {}
         self._receipt_grant: dict[str, str] = {}
+        # Attempt id -> monotonic time its terminal status was last written.
+        self._settled_at: dict[str, float] = {}
 
     def consume(
         self,
@@ -154,6 +157,12 @@ class InProcessGrantLedger:
             attempt_id = self._grant_attempt.get(grant_id)
             return None if attempt_id is None else self._attempts[attempt_id].status
 
+    def settled_at_for_grant(self, grant_id: str) -> float | None:
+        """Monotonic time this grant's attempt last settled, or ``None`` if not settled."""
+        with self._lock:
+            attempt_id = self._grant_attempt.get(grant_id)
+            return None if attempt_id is None else self._settled_at.get(attempt_id)
+
     def finalize(
         self,
         *,
@@ -176,6 +185,7 @@ class InProcessGrantLedger:
             record.error_code = error_code
             record.output_sha256 = output_sha256
             record.finished_at = datetime.now(timezone.utc).isoformat()
+            self._settled_at[attempt_id] = time.monotonic()
             if status is AttemptStatus.COMPLETED:
                 self._results[attempt_id] = result
             return record
@@ -190,6 +200,7 @@ class InProcessGrantLedger:
             record.error_code = error_code
             record.output_sha256 = None
             record.finished_at = datetime.now(timezone.utc).isoformat()
+            self._settled_at[attempt_id] = time.monotonic()
             self._results.pop(attempt_id, None)
             return record
 

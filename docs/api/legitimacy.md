@@ -233,8 +233,9 @@ by the MAC. Arbitrary `functools.wraps` layers are not removed for authorization
 The issuer's signed-grant registry is pruned whenever a new production grant is
 issued: a never-consumed grant is dropped once it expires, and a consumed grant
 whose attempt has settled is dropped once one further `grant_ttl_seconds` has
-passed after its deadline. A grant whose attempt is still running is never
-dropped. After a consumed grant is pruned, a recovery retry with it is refused,
+passed after the later of its deadline and the attempt's settlement (monotonic
+clock), so an attempt that outlives its grant stays recoverable for a full TTL
+after it finishes. A grant whose attempt is still running is never dropped. After a consumed grant is pruned, a recovery retry with it is refused,
 never re-executed. Consumed attempt records and recovery results in the instance
 ledger are never pruned, which is what keeps every reuse refused; the ledger is
 not an automatically bounded or durable history store.

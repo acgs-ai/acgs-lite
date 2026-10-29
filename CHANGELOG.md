@@ -40,8 +40,9 @@ This is a semver-major change (4.0.0): the production profile of the stable
   ledger after `grant_ttl_seconds` (completed result, or the recorded status),
   with no new side effect; signature, key pin and bindings are still verified.
   The issuing instance keeps a consumed grant recoverable while its attempt runs and
-  for one further `grant_ttl_seconds` after expiry, then drops it so the registry
-  stays bounded; a later retry is refused, never re-executed.
+  for one further `grant_ttl_seconds` after the later of expiry and the attempt's
+  settlement, so a slow attempt is still recoverable after it finishes, then drops
+  it so the registry stays bounded; a later retry is refused, never re-executed.
   `ExecutionAuthority.verify`, `validate_receipt_for_execution` and `call_matches`
   gain a keyword-only `enforce_expiry=True` for this.
 - `signed_receipt=` is now executable in production when it is this instance's

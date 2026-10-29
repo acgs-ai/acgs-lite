@@ -757,6 +757,50 @@ def test_settled_consumed_grants_are_pruned_and_stay_single_use() -> None:
     assert calls == ["acct-1"] * 3
 
 
+def test_slow_attempt_stays_recoverable_for_ttl_after_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [1_000.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    calls: list[str] = []
+    guard = _guard(grant_ttl_seconds=10.0)
+
+    def transfer(account_id: str) -> str:
+        calls.append(account_id)
+        clock[0] += 25.0  # runs for more than 2x the TTL
+        return f"sent:{account_id}"
+
+    wrapped = guard(transfer)
+    grant = wrapped.issue_grant("acct-1")
+    assert wrapped("acct-1", execution_grant=grant, execution_attempt_id="att-1") == "sent:acct-1"
+    # Completed at t=1025, past deadline (1010) + TTL: retention runs from completion.
+    wrapped.issue_grant("acct-2")
+    assert grant.grant_id in guard._signed_grants
+    clock[0] = 1_034.0
+    wrapped.issue_grant("acct-3")
+    assert grant.grant_id in guard._signed_grants
+    assert wrapped("acct-1", execution_grant=grant, execution_attempt_id="att-1") == "sent:acct-1"
+    assert (
+        wrapped("acct-1", signed_receipt=grant.signed_receipt, execution_attempt_id="att-1")
+        == "sent:acct-1"
+    )
+    assert calls == ["acct-1"]
+    # Past max(deadline, completed_at) + TTL: pruned, and still single use.
+    clock[0] = 1_036.0
+    live = wrapped.issue_grant("acct-4")
+    assert grant.grant_id not in guard._signed_grants
+    assert live.grant_id in guard._signed_grants
+    for kwargs in (
+        {"execution_grant": grant, "execution_attempt_id": "att-1"},
+        {"execution_grant": grant, "execution_attempt_id": "att-new"},
+        {"signed_receipt": grant.signed_receipt, "execution_attempt_id": "att-1"},
+        {"signed_receipt": grant.signed_receipt},
+    ):
+        with pytest.raises(LegitimacyInvariantError):
+            wrapped("acct-1", **kwargs)
+    assert calls == ["acct-1"]
+
+
 # --- the grant branch's own signature-side expiry checks -----------------------
 
 
