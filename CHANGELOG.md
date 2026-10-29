@@ -296,6 +296,14 @@ This is a semver-major change (4.0.0): the production profile of the stable
   and `Violation.matched_content` keep the original text. Such input skips the Rust fast
   path and runs on the Python matcher; ASCII input is unchanged and pays one
   `isascii()` check. New helper: `acgs_lite.engine.core.normalize_for_matching`.
+- The normalized match text now also drops every Unicode Default_Ignorable_Code_Point
+  (Unicode 16.0.0 `DerivedCoreProperties.txt`), not only category `Cf`. Invisible code
+  points of other categories survived NFKC and still split a keyword: the combining
+  grapheme joiner U+034F, variation selectors U+FE00–FE0F and U+E0100–E01EF, Khmer
+  inherent vowels U+17B4–17B5 (all `Mn`), Hangul fillers U+115F–1160, U+3164 and
+  U+FFA0 (`Lo`), and the reserved ignorable ranges (`Cn`). Other combining marks are
+  kept, so accented text is not folded; text with an emoji presentation selector
+  (U+FE0F) and no keyword stays valid. Homoglyphs (confusables) are still not folded.
 
 ### Added
 

@@ -36,6 +36,24 @@ OBFUSCATED_DELETE = [
     pytest.param(f"please ｄｅ{ZWSP}ｌｅ{SHY}ｔｅ the records", id="mixed"),
 ]
 
+# Default_Ignorable_Code_Point values outside category Cf, which NFKC keeps.
+INVISIBLE_NON_CF = [
+    pytest.param(0x034F, id="U+034F-combining-grapheme-joiner-Mn"),
+    pytest.param(0xFE00, id="U+FE00-variation-selector-1-Mn"),
+    pytest.param(0xFE0F, id="U+FE0F-variation-selector-16-Mn"),
+    pytest.param(0xE0100, id="U+E0100-variation-selector-17-Mn"),
+    pytest.param(0xE01EF, id="U+E01EF-variation-selector-256-Mn"),
+    pytest.param(0x17B4, id="U+17B4-khmer-inherent-aq-Mn"),
+    pytest.param(0x17B5, id="U+17B5-khmer-inherent-aa-Mn"),
+    pytest.param(0x115F, id="U+115F-hangul-choseong-filler-Lo"),
+    pytest.param(0x1160, id="U+1160-hangul-jungseong-filler-Lo"),
+    pytest.param(0x3164, id="U+3164-hangul-filler-Lo"),
+    pytest.param(0xFFA0, id="U+FFA0-halfwidth-hangul-filler-Lo"),
+    pytest.param(0x2065, id="U+2065-reserved-Cn"),
+    pytest.param(0xFFF0, id="U+FFF0-reserved-Cn"),
+    pytest.param(0xE0FFF, id="U+E0FFF-reserved-Cn"),
+]
+
 
 def _rules() -> list[Rule]:
     return [
@@ -114,6 +132,14 @@ class TestNormalizeForMatching:
     def test_benign_text_kept(self) -> None:
         assert normalize_for_matching("café 你好") == "café 你好"
 
+    @pytest.mark.parametrize("code_point", INVISIBLE_NON_CF)
+    def test_default_ignorable_non_cf_dropped(self, code_point: int) -> None:
+        assert normalize_for_matching(f"de{chr(code_point)}lete") == "delete"
+
+    def test_combining_marks_outside_default_ignorable_kept(self) -> None:
+        # U+0332 COMBINING LOW LINE (Mn) has no precomposed form and is not ignorable.
+        assert normalize_for_matching("x\u0332y") == "x\u0332y"
+
 
 @pytest.mark.constitutional
 class TestEngineValidate:
@@ -134,6 +160,34 @@ class TestEngineValidate:
     def test_obfuscated_keyword_denied_runtime_filtered(self, backend: str, action: str) -> None:
         result = _engine(strict=False, runtime_filtered=True).validate(action)
         assert [v.rule_id for v in result.violations] == ["NO-DELETE"]
+
+    @pytest.mark.parametrize("code_point", INVISIBLE_NON_CF)
+    @pytest.mark.parametrize("runtime_filtered", [False, True])
+    def test_default_ignorable_spliced_keyword_denied(
+        self, backend: str, code_point: int, runtime_filtered: bool
+    ) -> None:
+        action = f"please del{chr(code_point)}ete the records"
+        result = _engine(strict=False, runtime_filtered=runtime_filtered).validate(action)
+        assert result.valid is False
+        assert [v.rule_id for v in result.violations] == ["NO-DELETE"]
+        assert result.violations[0].matched_content == action
+        with pytest.raises(ConstitutionalViolationError) as exc_info:
+            _engine(strict=True, runtime_filtered=runtime_filtered).validate(action)
+        assert exc_info.value.rule_id == "NO-DELETE"
+
+    @pytest.mark.parametrize(
+        "action",
+        [
+            "great work \u2764\ufe0f thanks",
+            "summarise the report \u263a\ufe0f",
+            "\u5bb6\u65cf \U0001f44d\ufe0f \u5831\u544a",
+        ],
+    )
+    def test_benign_emoji_presentation_selector_still_valid(
+        self, backend: str, action: str
+    ) -> None:
+        assert "\ufe0f" in action
+        assert _engine(strict=True).validate(action).valid is True
 
     def test_obfuscated_context_value_denied(self, backend: str) -> None:
         detail = "then ｅｘｆｉｌｔｒａｔｅ everything"

@@ -34,19 +34,52 @@ from .enforcement import EnforcementResolution, resolve_enforcement
 from .matcher import _HAS_AHO, _HAS_RUST, _RUST_ALLOW, GovernanceMatcherMixin, _ac, _rust
 from .models import CustomValidator, ValidationResult, Violation, _dedup_violations
 
+# Default_Ignorable_Code_Point, from Unicode 16.0.0 DerivedCoreProperties.txt.
+# ``unicodedata`` does not expose the property. Besides format characters it covers
+# invisible code points of other categories that NFKC keeps: the combining grapheme
+# joiner and variation selectors (Mn), Hangul fillers (Lo), Khmer inherent vowels
+# (Mn), and unassigned reserved ranges (Cn).
+_DEFAULT_IGNORABLE_RANGES: tuple[tuple[int, int], ...] = (
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+_DEFAULT_IGNORABLE: frozenset[int] = frozenset(
+    cp for low, high in _DEFAULT_IGNORABLE_RANGES for cp in range(low, high + 1)
+)
+
 
 def normalize_for_matching(text: str) -> str:
     """Fold *text* to the form rule keywords and patterns are matched against.
 
     Applies NFKC (fullwidth and other compatibility forms become their plain
     equivalents) and then drops every format character (Unicode category ``Cf``:
-    zero-width space/joiners, soft hyphen, bidi controls), which NFKC keeps.
-    ASCII text is returned unchanged: it is NFKC-stable and has no ``Cf`` chars.
+    zero-width space/joiners, soft hyphen, bidi controls) and every
+    Default_Ignorable_Code_Point (variation selectors, the combining grapheme
+    joiner, Hangul fillers), all of which NFKC keeps and none of which render.
+    Other combining marks are kept, so accented text is not folded.
+    ASCII text is returned unchanged: it is NFKC-stable and has neither.
     """
     if text.isascii():
         return text
     folded = unicodedata.normalize("NFKC", text)
-    return "".join(c for c in folded if unicodedata.category(c) != "Cf")
+    return "".join(
+        c for c in folded if ord(c) not in _DEFAULT_IGNORABLE and unicodedata.category(c) != "Cf"
+    )
 
 
 def _match_variants(text: str) -> tuple[str, ...]:
