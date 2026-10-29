@@ -11,7 +11,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import threading
+import unicodedata
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 
@@ -54,6 +58,8 @@ class ProviderContract:
 
     def __post_init__(self) -> None:
         _nonempty(self.provider_id, "provider_id")
+        if unicodedata.normalize("NFC", self.provider_id) != self.provider_id:
+            raise ValueError("provider_id must be NFC-normalized Unicode")
         _nonempty(self.version, "version")
         if not isinstance(self.contract_class, ProviderContractClass):
             raise ValueError("contract_class must be a ProviderContractClass")
@@ -154,6 +160,12 @@ class ContractedEffectStore:
     effect record both bind a registered FENCEABLE contract. Reconcile is gated
     too, because query-and-fence is assumption A2. The registry is process-local,
     so after a restart contracts must be registered again before reconciling.
+
+    The first gated ``send`` or ``reconcile`` of an effect durably binds its key
+    to the contract digest, in a side table of the same SQLite file, before any
+    provider I/O. Later calls and :meth:`contract_for` refuse a different digest,
+    so an effect dispatched under one contract version cannot be reconciled or
+    receipted under another; after a restart, register the same contract again.
     """
 
     def __init__(self, store: EffectStore, registry: ProviderContractRegistry) -> None:
@@ -163,21 +175,59 @@ class ContractedEffectStore:
             raise TypeError("registry must be a ProviderContractRegistry")
         self.store = store
         self.registry = registry
+        with self._transaction() as db:
+            db.execute("""CREATE TABLE IF NOT EXISTS effect_contract_bindings (
+                key TEXT PRIMARY KEY, contract_digest TEXT NOT NULL)""")
 
-    def contract_for(self, key: str, provider: EffectProvider) -> ProviderContract:
-        """Return the dispatchable contract that binds this effect and provider."""
+    @contextmanager
+    def _transaction(self) -> Iterator[sqlite3.Connection]:
+        db = sqlite3.connect(self.store.path, timeout=30, isolation_level=None)
+        try:
+            db.execute("PRAGMA synchronous=FULL")
+            db.execute("BEGIN IMMEDIATE")
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def _bound_digest(self, key: str, bind: ProviderContract | None) -> str | None:
+        with self._transaction() as db:
+            if bind is not None:
+                db.execute(
+                    "INSERT OR IGNORE INTO effect_contract_bindings VALUES (?,?)",
+                    (key, bind.digest),
+                )
+            row = db.execute(
+                "SELECT contract_digest FROM effect_contract_bindings WHERE key=?", (key,)
+            ).fetchone()
+            return None if row is None else row[0]
+
+    def _checked(self, key: str, provider: EffectProvider, *, bind: bool) -> ProviderContract:
         contract = self.registry.require_dispatchable(provider.provider_id)
         record = self.store.get(key)
         if record.request.provider_id != contract.provider_id:
             raise ProviderNotDispatchable("effect record is bound to a different provider")
+        bound = self._bound_digest(key, contract if bind else None)
+        if bound is not None and bound != contract.digest:
+            raise ProviderNotDispatchable("effect was dispatched under a different contract")
         return contract
 
+    def contract_for(self, key: str, provider: EffectProvider) -> ProviderContract:
+        """Return the dispatchable contract that binds this effect and provider.
+
+        Refuses when the effect is durably bound to a different contract digest.
+        """
+        return self._checked(key, provider, bind=False)
+
     def send(self, key: str, provider: EffectProvider) -> EffectRecord:
-        self.contract_for(key, provider)
+        self._checked(key, provider, bind=True)
         return self.store.send(key, provider)
 
     def reconcile(self, key: str, provider: EffectProvider) -> EffectRecord:
-        self.contract_for(key, provider)
+        self._checked(key, provider, bind=True)
         return self.store.reconcile(key, provider)
 
 
