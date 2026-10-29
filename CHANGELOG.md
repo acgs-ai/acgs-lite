@@ -204,6 +204,14 @@ This is a semver-major change (4.0.0): the production profile of the stable
   through the binder (`ArgumentNotDigestible`); at issue it is now refused first with
   `GOVERNANCE-PAYLOAD-UNEVALUABLE`. New helper:
   `acgs_lite.legitimacy.invocation.defaulted_argument_values`.
+- `GovernedCallable` now detects arguments mutated between authorization and the
+  call. The argument digest bound at the gate is recomputed, with the same binding
+  options, after the Z3 gate and payload validation and immediately before the
+  function runs, in every profile. If a list or dict argument changed in between
+  (another thread, or a hook running inside validation), the call is denied with
+  `LegitimacyInvariantError("invocation binding mismatch: ...")`, the callable does
+  not run, and a production attempt is recorded `FAILED`. Arguments are not copied;
+  the callable still receives the caller's objects.
 
 ### Added
 

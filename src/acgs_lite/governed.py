@@ -66,6 +66,7 @@ from acgs_lite.legitimacy.invocation import (
     _bound_arguments,
     bind_invocation,
     bind_policy,
+    canonical_argument_digest,
     defaulted_argument_values,
     reject_method_spoof_kwargs,
 )
@@ -1151,7 +1152,8 @@ class GovernedCallable:
 
     def _gate(
         self, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> ConsumeDecision | None:
+    ) -> tuple[ConsumeDecision | None, str]:
+        """Authorize the call; return the ledger outcome and the bound argument digest."""
         if self.require_durable_audit:
             self.audit_log.validate_durable_state()
         tokens = extract_authorization_kwargs(kwargs)
@@ -1229,12 +1231,15 @@ class GovernedCallable:
                     trust_kwargs=False,
                     enforce_expiry=enforce_expiry,
                 )
-                return self._consume_and_audit(
-                    verified_receipt,
-                    attempt_id=attempt_id,
-                    invocation=invocation,
-                    policy=policy,
-                    context_digest=context_digest,
+                return (
+                    self._consume_and_audit(
+                        verified_receipt,
+                        attempt_id=attempt_id,
+                        invocation=invocation,
+                        policy=policy,
+                        context_digest=context_digest,
+                    ),
+                    invocation.argument_digest,
                 )
             finally:
                 if reserved_id is not None:
@@ -1252,7 +1257,7 @@ class GovernedCallable:
                 human_approval=tokens.get("human_approval"),
                 trust_kwargs=False,
             )
-            return None
+            return None, invocation.argument_digest
         self._enforce_receipt(
             receipt,
             func=func,
@@ -1261,7 +1266,7 @@ class GovernedCallable:
             human_approval=tokens.get("human_approval"),
             trust_kwargs=True,
         )
-        return None
+        return None, invocation.argument_digest
 
     def _enforce_receipt(
         self,
@@ -1556,6 +1561,8 @@ class GovernedCallable:
         )
 
         audit_log = self.audit_log
+        # Same binding option _gate passes to bind_invocation.
+        include_receiver = self.authorization_profile is AuthorizationProfile.PRODUCTION
 
         # Extracted unconditionally, NOT gated on Z3_AVAILABLE. If the constitution
         # carries policies, the fact that no solver is installed to check them must
@@ -1596,7 +1603,7 @@ class GovernedCallable:
 
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                outcome = self._gate(func, args, kwargs)
+                outcome, bound_digest = self._gate(func, args, kwargs)
                 recovered = self._recovered_result(outcome)
                 if recovered is not _PROCEED:
                     return recovered
@@ -1628,6 +1635,18 @@ class GovernedCallable:
                     ):
                         _deny_unless_valid(
                             engine.validate(payload, agent_id=agent_id), action=payload
+                        )
+                    # The checks above ran on the arguments as bound at the gate. A
+                    # list/dict argument mutated since then (another thread, a hook
+                    # inside validation) would run unchecked content, so re-digest.
+                    if (
+                        canonical_argument_digest(
+                            func, args, kwargs, include_receiver=include_receiver
+                        )
+                        != bound_digest
+                    ):
+                        raise LegitimacyInvariantError(
+                            "invocation binding mismatch: arguments changed after authorization"
                         )
                     execution_started = True
                     result = await func(*args, **kwargs)
@@ -1667,7 +1686,7 @@ class GovernedCallable:
 
             @functools.wraps(func)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-                outcome = self._gate(func, args, kwargs)
+                outcome, bound_digest = self._gate(func, args, kwargs)
                 recovered = self._recovered_result(outcome)
                 if recovered is not _PROCEED:
                     return recovered
@@ -1699,6 +1718,18 @@ class GovernedCallable:
                     ):
                         _deny_unless_valid(
                             engine.validate(payload, agent_id=agent_id), action=payload
+                        )
+                    # The checks above ran on the arguments as bound at the gate. A
+                    # list/dict argument mutated since then (another thread, a hook
+                    # inside validation) would run unchecked content, so re-digest.
+                    if (
+                        canonical_argument_digest(
+                            func, args, kwargs, include_receiver=include_receiver
+                        )
+                        != bound_digest
+                    ):
+                        raise LegitimacyInvariantError(
+                            "invocation binding mismatch: arguments changed after authorization"
                         )
                     execution_started = True
                     result = func(*args, **kwargs)
