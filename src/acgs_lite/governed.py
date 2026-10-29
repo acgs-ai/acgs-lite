@@ -466,6 +466,26 @@ class GovernedAgent:
             result, agent_id=f"{self.agent_id}:output", context={"source": "agent_output"}
         )
 
+    def _admit_invocation(
+        self, input: str, governance_action: str | None, kwargs: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Shared ``run``/``arun`` preamble; every check runs before the agent is invoked.
+
+        Returns the kwargs to execute the agent with and the trusted engine context.
+        """
+        # Step 0: Check circuit breaker (Article 14 kill-switch)
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.check()
+
+        # Step 1: Enforce MACI boundary before any wrapped side effect
+        self._check_maci(governance_action)
+        execution_kwargs, governance_kwargs = self._prepare_execution_kwargs(kwargs)
+
+        # Step 2: Validate input (no retries for input violations)
+        context = self._engine_context(governance_action)
+        self._validate_invocation(input, governance_kwargs, context)
+        return execution_kwargs, context
+
     def run(self, input: str, *, governance_action: str | None = None, **kwargs: Any) -> Any:
         """Run the wrapped agent with governance.
 
@@ -486,17 +506,7 @@ class GovernedAgent:
                 ``ConstitutionalViolationError`` subclass).
             GovernanceHaltError: If the circuit breaker is tripped.
         """
-        # Step 0: Check circuit breaker (Article 14 kill-switch)
-        if self._circuit_breaker is not None:
-            self._circuit_breaker.check()
-
-        # Step 1: Enforce MACI boundary before any wrapped side effect
-        self._check_maci(governance_action)
-        execution_kwargs, governance_kwargs = self._prepare_execution_kwargs(kwargs)
-
-        # Step 2: Validate input (no retries for input violations)
-        context = self._engine_context(governance_action)
-        self._validate_invocation(input, governance_kwargs, context)
+        execution_kwargs, context = self._admit_invocation(input, governance_action, kwargs)
 
         # Step 3: Execute agent
         result = self._execute_agent(input, **execution_kwargs)
@@ -684,14 +694,8 @@ class GovernedAgent:
         governance_action: str | None = None,
         **kwargs: Any,
     ) -> Any:
-        """Async version of run() with output-violation retry support."""
-        # Step 1: Enforce MACI boundary before any wrapped side effect
-        self._check_maci(governance_action)
-        execution_kwargs, governance_kwargs = self._prepare_execution_kwargs(kwargs)
-
-        # Step 2: Validate input (no retries for input violations)
-        context = self._engine_context(governance_action)
-        self._validate_invocation(input, governance_kwargs, context)
+        """Async version of run(): same checks, circuit breaker, retries and CDP records."""
+        execution_kwargs, context = self._admit_invocation(input, governance_action, kwargs)
 
         # Step 3: Execute agent
         result = await self._aexecute_agent(input, **execution_kwargs)
@@ -701,6 +705,7 @@ class GovernedAgent:
         for attempt in range(1, self.max_retries + 2):
             try:
                 self._validate_output(result)
+                self._emit_cdp(input, verdict="allow", context=context)
                 return result
             except ConstitutionalViolationError as exc:
                 last_error = exc
@@ -708,6 +713,13 @@ class GovernedAgent:
                 # Oversize or non-JSON output is a shape error a re-prompt cannot be
                 # relied on to fix, so it denies without re-invoking the agent.
                 if retries_remaining <= 0 or isinstance(exc, GovernancePayloadError):
+                    self._emit_cdp(
+                        input,
+                        verdict="deny",
+                        context=context,
+                        violated_rules=[exc.rule_id or "UNKNOWN"],
+                        risk_score=1.0,
+                    )
                     raise
                 self.audit_log.record(
                     AuditEntry(

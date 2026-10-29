@@ -304,6 +304,14 @@ This is a semver-major change (4.0.0): the production profile of the stable
   U+FFA0 (`Lo`), and the reserved ignorable ranges (`Cn`). Other combining marks are
   kept, so accented text is not folded; text with an emoji presentation selector
   (U+FE0F) and no keyword stays valid. Homoglyphs (confusables) are still not folded.
+- `GovernedAgent.arun()` now checks the circuit breaker. Only `run()` did, so a tripped
+  Article 14 kill-switch (`GovernanceCircuitBreaker.trip()`, or the cross-process
+  signal file) did not stop async runs. Both entry points share one preamble that
+  raises `GovernanceHaltError` before the MACI check, kwargs handling, input
+  validation or the agent call. `arun()` also emits CDP records as `run()` does: an
+  `allow` record when the output passes and a `deny` record when the output is finally
+  denied, and a `GovernanceHaltError` from the configured intervention engine reaches
+  the caller. Regression tests: `tests/test_governed_agent_arun_parity.py`.
 
 ### Added
 
