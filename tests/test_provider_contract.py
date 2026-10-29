@@ -40,6 +40,11 @@ class SpyProvider:
             )
 
 
+class TimeoutProvider(SpyProvider):
+    def send(self, request):
+        raise TimeoutError
+
+
 def fenceable(provider_id="payments", **changes):
     args = dict(
         provider_id=provider_id,
@@ -162,10 +167,13 @@ def test_first_send_binds_contract_digest_before_provider_io(store):
     with pytest.raises(ProviderNotDispatchable, match="different contract"):
         swapped.send(effect.key, provider)
     pending = reserve(store, grant="grant2")
-    store._claim(pending.key, "payments")
-    assert swapped.reconcile(pending.key, provider).state is EffectState.NOT_DONE
+    timing_out = TimeoutProvider()
+    with pytest.raises(TimeoutError):
+        swapped.send(pending.key, timing_out)
+    assert store.get(pending.key).state is EffectState.UNKNOWN
     with pytest.raises(ProviderNotDispatchable, match="different contract"):
         contracted.reconcile(pending.key, provider)
+    assert swapped.reconcile(pending.key, provider).state is EffectState.NOT_DONE
     assert len(provider.sends) == 1 and len(provider.queries) == 1
 
 
@@ -239,13 +247,60 @@ def test_fenceable_dispatch_and_reconcile(store):
     contracted = ContractedEffectStore(store, registry)
     provider = SpyProvider()
     effect = reserve(store)
-    assert contracted.contract_for(effect.key, provider) == contract
     assert contracted.send(effect.key, provider).state is EffectState.DONE
+    assert contracted.contract_for(effect.key, provider) == contract
     assert len(provider.sends) == 1
     second = reserve(store, grant="grant2")
-    store._claim(second.key, "payments")
+    with pytest.raises(TimeoutError):
+        contracted.send(second.key, TimeoutProvider())
     assert contracted.reconcile(second.key, provider).state is EffectState.NOT_DONE
     assert len(provider.queries) == 1
+
+
+def test_unbound_effects_are_refused(tmp_path):
+    store = EffectStore(tmp_path / "effects.sqlite")
+    store.create_budget("budget", 12)
+    registry = ProviderContractRegistry()
+    registry.register(fenceable())
+    contracted = ContractedEffectStore(store, registry)
+    provider = SpyProvider()
+    reserved = reserve(store)
+    with pytest.raises(ProviderNotDispatchable, match="no durable contract binding"):
+        contracted.contract_for(reserved.key, provider)
+    raw = reserve(store, grant="grant2")
+    assert store.send(raw.key, provider).state is EffectState.DONE
+    with pytest.raises(ProviderNotDispatchable, match="no durable contract binding"):
+        contracted.contract_for(raw.key, provider)
+    # A no-op send on an already-terminal record must not bind after the fact.
+    with pytest.raises(ProviderNotDispatchable, match="no durable contract binding"):
+        contracted.send(raw.key, provider)
+    with pytest.raises(ProviderNotDispatchable, match="no durable contract binding"):
+        contracted.contract_for(raw.key, provider)
+    claimed = reserve(store, grant="grant3")
+    store._claim(claimed.key, "payments")
+    with pytest.raises(ProviderNotDispatchable, match="no durable contract binding"):
+        contracted.reconcile(claimed.key, provider)
+    assert len(provider.sends) == 1 and provider.queries == []
+
+
+def test_restart_reconciles_unknown_effect_under_same_contract(tmp_path):
+    path = tmp_path / "effects.sqlite"
+    store = EffectStore(path)
+    store.create_budget("budget", 10)
+    registry = ProviderContractRegistry()
+    registry.register(fenceable())
+    effect = reserve(store)
+    with pytest.raises(TimeoutError):
+        ContractedEffectStore(store, registry).send(effect.key, TimeoutProvider())
+    assert store.get(effect.key).state is EffectState.UNKNOWN
+    same = ProviderContractRegistry()
+    contract = same.register(fenceable())
+    restarted = ContractedEffectStore(EffectStore(path), same)
+    provider = SpyProvider()
+    assert restarted.contract_for(effect.key, provider) == contract
+    assert restarted.reconcile(effect.key, provider).state is EffectState.NOT_DONE
+    assert restarted.contract_for(effect.key, provider) == contract
+    assert provider.sends == [] and len(provider.queries) == 1
 
 
 def test_constructor_type_checks(store):

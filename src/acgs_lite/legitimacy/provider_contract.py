@@ -19,7 +19,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 
-from acgs_lite.legitimacy.effects import EffectProvider, EffectRecord, EffectStore
+from acgs_lite.legitimacy.effects import (
+    EffectProvider,
+    EffectRecord,
+    EffectState,
+    EffectStore,
+)
 
 _CONTRACT_DOMAIN = b"acgs-provider-contract-v1\x00"
 PROVIDER_CONTRACT_SCHEMA = "acgs-provider-contract-v1"
@@ -161,11 +166,14 @@ class ContractedEffectStore:
     too, because query-and-fence is assumption A2. The registry is process-local,
     so after a restart contracts must be registered again before reconciling.
 
-    The first gated ``send`` or ``reconcile`` of an effect durably binds its key
-    to the contract digest, in a side table of the same SQLite file, before any
-    provider I/O. Later calls and :meth:`contract_for` refuse a different digest,
-    so an effect dispatched under one contract version cannot be reconciled or
-    receipted under another; after a restart, register the same contract again.
+    The first gated ``send`` of a RESERVED effect durably binds its key to the
+    contract digest, in a side table of the same SQLite file, before any provider
+    I/O. Only a RESERVED record can be bound: ``send``, ``reconcile`` and
+    :meth:`contract_for` refuse any other record without a binding (for example
+    one dispatched through the raw ``store``, or already terminal), and refuse a
+    binding to a different digest, so an effect cannot be reconciled or receipted
+    under a contract it was not dispatched under. After a restart, register the
+    same contract again.
     """
 
     def __init__(self, store: EffectStore, registry: ProviderContractRegistry) -> None:
@@ -210,15 +218,19 @@ class ContractedEffectStore:
         record = self.store.get(key)
         if record.request.provider_id != contract.provider_id:
             raise ProviderNotDispatchable("effect record is bound to a different provider")
+        bind = bind and record.state is EffectState.RESERVED
         bound = self._bound_digest(key, contract if bind else None)
-        if bound is not None and bound != contract.digest:
+        if bound is None:
+            raise ProviderNotDispatchable("effect has no durable contract binding")
+        if bound != contract.digest:
             raise ProviderNotDispatchable("effect was dispatched under a different contract")
         return contract
 
     def contract_for(self, key: str, provider: EffectProvider) -> ProviderContract:
         """Return the dispatchable contract that binds this effect and provider.
 
-        Refuses when the effect is durably bound to a different contract digest.
+        Refuses when the effect has no durable binding (it was never sent through
+        this wrapper) or is bound to a different contract digest.
         """
         return self._checked(key, provider, bind=False)
 
