@@ -271,8 +271,13 @@ This is a semver-major change (4.0.0): the production profile of the stable
   raw call arguments, so a default such as `note: str = "<forbidden keyword>"` was
   committed in the receipt and never checked. Defaults omitted by the caller are
   evaluated as extra payloads after the call arguments, at issue and at execute, in
-  every profile; explicitly passed values, `*args`/`**kwargs` and `self`/`cls` are not
-  included, and existing payloads are unchanged. A default that violates a rule, or is
+  every profile; explicitly passed values and `*args`/`**kwargs` are not included, and
+  existing payloads are unchanged. A defaulted parameter named `self` or `cls` is
+  evaluated like any other, in both profiles: a real receiver is always supplied, so
+  only a free function's ordinary parameter can default under that name (production
+  digests it, and exempting it let `def f(x, cls="<forbidden keyword>")` run). A
+  non-JSON-native `self`/`cls` default, such as a class object, therefore now denies
+  in the compatibility profile too. A default that violates a rule, or is
   longer than 10,000 characters, now denies. A non-JSON-native default already denied
   through the binder (`ArgumentNotDigestible`); at issue it is now refused first with
   `GOVERNANCE-PAYLOAD-UNEVALUABLE`. New helper:

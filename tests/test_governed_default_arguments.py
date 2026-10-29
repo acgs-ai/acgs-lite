@@ -191,6 +191,52 @@ def test_defaulted_values_skip_supplied_variadic_and_receiver() -> None:
     )
 
 
+def test_defaulted_values_include_parameters_named_like_receivers() -> None:
+    # Only a defaulted self/cls is reported; a real receiver is always supplied.
+    def f(self: str = "s", cls: str = "c") -> None:
+        return None
+
+    assert defaulted_argument_values(f, (), {}) == ("s", "c")
+    assert defaulted_argument_values(f, ("x",), {}) == ("c",)
+
+
+@pytest.mark.parametrize("name", ["self", "cls"])
+@pytest.mark.parametrize("guard", [_compat, _production])
+def test_forbidden_default_on_receiver_named_parameter_denied_at_issue(
+    guard: Any, name: str
+) -> None:
+    calls: list[str] = []
+    namespace: dict[str, Any] = {"calls": calls}
+    exec(  # noqa: S102 - builds a parameter literally named self/cls
+        f"def f(text: str, {name}: str = 'forbiddenword') -> str:\n"
+        "    calls.append(text)\n"
+        "    return 'ok'\n",
+        namespace,
+    )
+    governed = guard()(namespace["f"])
+
+    with pytest.raises(ConstitutionalViolationError) as excinfo:
+        governed.issue_grant("hello")
+    assert excinfo.value.rule_id == "BAD-WORD"
+    grant = governed.issue_grant("hello", **{name: "safe"})
+    assert governed("hello", **{name: "safe"}, execution_grant=grant) == "ok"
+    assert calls == ["hello"]
+
+
+def test_forbidden_cls_default_denied_on_compat_execute() -> None:
+    calls: list[str] = []
+
+    @_compat()
+    def f(text: str, cls: str = "forbiddenword") -> str:
+        calls.append(text)
+        return "ok"
+
+    with pytest.raises(ConstitutionalViolationError) as excinfo:
+        f("hello", decision_receipt=_receipt("f"))
+    assert excinfo.value.rule_id == "BAD-WORD"
+    assert calls == []
+
+
 def test_defaulted_values_fail_closed_on_bad_binding() -> None:
     def f(a: int) -> None:
         return None

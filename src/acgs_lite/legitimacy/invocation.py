@@ -178,7 +178,9 @@ def defaulted_argument_values(
     These are digested by :func:`canonical_argument_digest` (it applies defaults)
     but are not among the raw call arguments, so they must be evaluated
     separately. ``*args``/``**kwargs`` parameters have no default and are never
-    included; neither are ``self``/``cls``.
+    included. Parameters named ``self``/``cls`` are not exempt, in either profile: a
+    real receiver is always supplied, so a defaulted one is an ordinary parameter
+    whose default the callable runs with.
     """
     try:
         signature = inspect.signature(func)
@@ -192,9 +194,7 @@ def defaulted_argument_values(
     return tuple(
         parameter.default
         for name, parameter in signature.parameters.items()
-        if name not in bound.arguments
-        and name not in ("self", "cls")
-        and parameter.default is not inspect.Parameter.empty
+        if name not in bound.arguments and parameter.default is not inspect.Parameter.empty
     )
 
 
