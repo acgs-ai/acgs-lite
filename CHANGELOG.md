@@ -187,6 +187,12 @@ This is a semver-major change (4.0.0): the production profile of the stable
   refuses a second grant for the same `receipt_hash`, and the grant ledger refuses to bind
   one receipt to two grants. Grant ids are random server-side values from `secrets`,
   pre-allocated by `ExecutionAuthority.allocate_grant_id()` and never accepted from callers.
+- A `BaseException` that is not an `Exception` (`KeyboardInterrupt`, `SystemExit`, or the
+  `GeneratorExit` raised when a governed coroutine is closed mid-await) no longer leaves
+  the ledger attempt `STARTED`. The attempt is recorded `PARTIAL` if the callable had
+  started, else `FAILED`, with `error_code="interrupted"`, and the exception still
+  propagates. A retry with the same `execution_attempt_id` now reports that status
+  instead of "already in flight" forever.
 
 ### Added
 

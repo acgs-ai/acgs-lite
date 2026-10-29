@@ -1633,6 +1633,12 @@ class GovernedCallable:
                     status = AttemptStatus.PARTIAL if execution_started else AttemptStatus.FAILED
                     self._finalize_attempt(outcome, status, error_code="exception")
                     raise
+                except BaseException:
+                    # GeneratorExit (coroutine closed mid-await), KeyboardInterrupt,
+                    # SystemExit: settle the attempt so it is not left STARTED forever.
+                    status = AttemptStatus.PARTIAL if execution_started else AttemptStatus.FAILED
+                    self._finalize_attempt(outcome, status, error_code="interrupted")
+                    raise
                 self._finalize_completed(outcome, result)
                 return result
 
@@ -1683,6 +1689,12 @@ class GovernedCallable:
                 except Exception:
                     status = AttemptStatus.PARTIAL if execution_started else AttemptStatus.FAILED
                     self._finalize_attempt(outcome, status, error_code="exception")
+                    raise
+                except BaseException:
+                    # KeyboardInterrupt, SystemExit: settle the attempt so it is not
+                    # left STARTED forever.
+                    status = AttemptStatus.PARTIAL if execution_started else AttemptStatus.FAILED
+                    self._finalize_attempt(outcome, status, error_code="interrupted")
                     raise
                 self._finalize_completed(outcome, result)
                 return result
