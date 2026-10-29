@@ -153,6 +153,21 @@ This is a semver-major change (4.0.0): the production profile of the stable
   `[quickstart_content_mod.py]` (the examples now catch and print the denial of the
   violating `strict=False` runs). Regression matrix:
   `tests/test_governed_agent_payload_enforcement.py`.
+- `GovernedAgent.run()` and `.arun()` no longer pass the caller's keyword arguments
+  to the engine as its evaluation context. The engine reads the clock for
+  time-bounded rules (`timestamp`, `evaluation_time`, `valid_at`, `at`) and the
+  inputs to rule `condition` predicates and custom validators from that context,
+  so a caller could pass `timestamp="2000-01-01T00:00:00"` to deactivate a rule
+  with a later `valid_from`, or a condition key such as `env=` to switch a
+  conditional rule off. The context is now built only from the new constructor
+  argument `governance_context=` (a mapping, copied at construction and never
+  merged with per-call kwargs) plus the call's `governance_action`. Caller kwargs
+  are still evaluated in full as payload content, now under the same trusted
+  context as the input. `action_detail`/`action_description` passed as `run()`
+  kwargs are no longer matched as context values, but their text is still matched
+  as kwargs payload. The CDP record's `human_approval` and `domain` obligations
+  inputs are likewise read from `governance_context`, not from caller kwargs.
+  Regression tests: `tests/test_governed_agent_trusted_context.py`.
 
 ### Migration to 4.0
 
@@ -181,6 +196,13 @@ This is a semver-major change (4.0.0): the production profile of the stable
   enforcement deliberately. Pass handles such as callbacks and clients through a
   closure or the agent's constructor rather than as `run()` keyword arguments, and keep
   each input, kwargs mapping and output within 10,000 characters.
+- `GovernedAgent`: move any engine context you passed as `run()`/`arun()` keyword
+  arguments (`env=`, `environment=`, `domain=`, `human_approval=`, an evaluation
+  timestamp, or keys your rule conditions or custom validators read) into
+  `GovernedAgent(..., governance_context={...})` from deployment configuration.
+  A conditional rule whose key is absent from that mapping is inactive unless its
+  condition uses `"missing": "match"`, so review conditional rules when migrating.
+  Build a separate `GovernedAgent` per distinct trusted context.
 
 ### Security
 

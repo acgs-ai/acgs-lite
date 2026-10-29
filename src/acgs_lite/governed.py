@@ -187,6 +187,14 @@ class GovernedAgent:
     ``governance_action`` on every execution. Passing ``enforce_maci=False`` is
     an explicit advisory-mode opt-out for non-side-effecting evaluation flows.
 
+    The engine evaluation context (the clock for time-bounded rules and the
+    inputs to rule ``condition`` predicates and custom validators) comes only
+    from the operator: the constructor's ``governance_context`` plus the call's
+    ``governance_action``. Caller keyword arguments never enter it; they are
+    evaluated as payload content only, so a caller cannot pass ``timestamp=``
+    (or ``evaluation_time``/``valid_at``/``at``) to deactivate a rule, or a
+    condition key to select which rules apply.
+
     Usage::
 
         from acgs_lite import Constitution, GovernedAgent, MACIRole
@@ -231,7 +239,10 @@ class GovernedAgent:
         circuit_breaker: GovernanceCircuitBreaker | None = None,
         cdp_backend: Any | None = None,
         intervention_engine: Any | None = None,
+        governance_context: Mapping[str, Any] | None = None,
     ) -> None:
+        if governance_context is not None and not isinstance(governance_context, Mapping):
+            raise TypeError("governance_context must be a mapping")
         webhook_url = os.getenv("ACGS_HALT_WEBHOOK_URL")
         if circuit_breaker is None and webhook_url:
             circuit_breaker = GovernanceCircuitBreaker(
@@ -265,6 +276,9 @@ class GovernedAgent:
         self._refusal_engine = RefusalReasoningEngine(self.constitution)
         self._cdp_backend = cdp_backend  # None = disabled; set via ACGS_CDP_ENABLED too
         self._intervention_engine = intervention_engine
+        # Operator-supplied engine context, copied so later mutation of the
+        # caller's mapping cannot change it. Never merged with per-call kwargs.
+        self._governance_context: dict[str, Any] = dict(governance_context or {})
 
         if maci_role:
             self.maci.assign_role(agent_id, maci_role)
@@ -422,13 +436,27 @@ class GovernedAgent:
                 action=payload,
             )
 
+    def _engine_context(self, governance_action: str | None) -> dict[str, Any]:
+        """Build the engine context from trusted sources only.
+
+        That is the constructor's ``governance_context`` plus the call's
+        ``governance_action``. Caller kwargs are excluded: the engine reads the
+        evaluation clock and rule-condition inputs from this dict.
+        """
+        context = dict(self._governance_context)
+        if governance_action is not None:
+            context["governance_action"] = governance_action
+        return context
+
     def _validate_invocation(
         self, input: str, governance_kwargs: dict[str, Any], context: dict[str, Any]
     ) -> None:
         """Validate the input and the caller's kwargs before the agent runs."""
         self._enforce_payloads(input, agent_id=self.agent_id, context=context)
         if governance_kwargs:
-            self._enforce_payloads(governance_kwargs, agent_id=f"{self.agent_id}:kwargs")
+            self._enforce_payloads(
+                governance_kwargs, agent_id=f"{self.agent_id}:kwargs", context=context
+            )
 
     def _validate_output(self, result: Any) -> None:
         """Validate agent output against constitution. Raises on violation."""
@@ -467,9 +495,7 @@ class GovernedAgent:
         execution_kwargs, governance_kwargs = self._prepare_execution_kwargs(kwargs)
 
         # Step 2: Validate input (no retries for input violations)
-        context = dict(governance_kwargs)
-        if governance_action is not None:
-            context["governance_action"] = governance_action
+        context = self._engine_context(governance_action)
         self._validate_invocation(input, governance_kwargs, context)
 
         # Step 3: Execute agent
@@ -664,9 +690,7 @@ class GovernedAgent:
         execution_kwargs, governance_kwargs = self._prepare_execution_kwargs(kwargs)
 
         # Step 2: Validate input (no retries for input violations)
-        context = dict(governance_kwargs)
-        if governance_action is not None:
-            context["governance_action"] = governance_action
+        context = self._engine_context(governance_action)
         self._validate_invocation(input, governance_kwargs, context)
 
         # Step 3: Execute agent
