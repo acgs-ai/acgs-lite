@@ -18,6 +18,7 @@ from acgs_lite.legitimacy import (
     ProviderContract,
     ProviderContractClass,
     ProviderContractRegistry,
+    ProviderNotDispatchable,
     ProviderResult,
     SignedOutcomeReceipt,
     outcome_from_record,
@@ -282,16 +283,139 @@ def test_tampered_envelope_fails_without_raising():
     other = type(key).from_seed(b"\x02" * 32)
     for candidate, pinned in (
         (replace(signed, signature=flipped), key.public_key_hex()),
-        (replace(signed, signature="zz"), key.public_key_hex()),
-        (replace(signed, signature=""), key.public_key_hex()),
+        (replace(signed, signature="00"), key.public_key_hex()),
         (replace(signed, algorithm="rsa"), key.public_key_hex()),
         (replace(signed, public_key=other.public_key_hex()), other.public_key_hex()),
-        (replace(signed, public_key="nothex"), "nothex"),
+        (replace(signed, public_key="abcd"), "abcd"),
         (signed, other.public_key_hex()),
         (signed, "é"),
         (signed, None),
     ):
         assert candidate.verify(pinned) is False
+
+
+def test_key_id_and_algorithm_are_signed():
+    key = signer()
+    signed = sign_outcome(receipt(), key)
+    assert replace(signed, key_id="attacker-chosen").verify(key.public_key_hex()) is False
+    payload = signed.to_dict()
+    payload["key_id"] = "attacker-chosen"
+    assert SignedOutcomeReceipt.from_dict(payload).verify(key.public_key_hex()) is False
+    unicode_id = type(key).from_seed(b"\x03" * 32, key_id="schlüssel")
+    assert sign_outcome(receipt(), unicode_id).verify(unicode_id.public_key_hex()) is True
+
+
+@pytest.mark.parametrize("field", ["signature", "public_key"])
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        str.upper,
+        lambda value: " ".join(value[i : i + 2] for i in range(0, len(value), 2)),
+        lambda value: value + "0",
+        lambda value: "",
+        lambda value: "zz",
+    ],
+)
+def test_hex_fields_have_one_serialization(field, rewrite):
+    signed = sign_outcome(receipt(), signer())
+    with pytest.raises(ValueError, match="lowercase hexadecimal"):
+        replace(signed, **{field: rewrite(getattr(signed, field))})
+    payload = {**signed.to_dict(), field: rewrite(getattr(signed, field))}
+    with pytest.raises(ValueError):
+        SignedOutcomeReceipt.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2026-10-29T00:00:00-00:00",
+        "2026-10-29 00:00:00+00:00",
+        "20261029T000000+0000",
+        "2026-W44-4T00:00:00+00:00",
+        "2026-10-29T00:00:00+00:00:00.5",
+        "2026-10-29T00:00+00:00",
+        "2026-10-29T00:00:00.1234567+00:00",
+        "2026-10-29T00:00:00.5+00:00",
+        "2026-10-29T00:00:00.500+00:00",
+        "2026-10-29T00:00:00z",
+        "2026-13-29T00:00:00+00:00",
+        "\u0662026-10-29T00:00:00+00:00",
+    ],
+)
+def test_non_canonical_timestamps_rejected(value):
+    with pytest.raises(ValueError):
+        receipt(recorded_at=value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2026-10-29T00:00:00Z", "2026-10-29T00:00:00+00:00", "2026-10-29T00:00:00.123456+00:00"],
+)
+def test_canonical_timestamps_accepted(value):
+    assert receipt(recorded_at=value).recorded_at == value
+
+
+def test_outcome_from_record_rejects_empty_recorded_at(contracted):
+    done = replace(reserve(contracted), state=EffectState.DONE)
+    with pytest.raises(ValueError, match="recorded_at"):
+        outcome_from_record(
+            done, contract=contract(), decision_receipt_identity=DECISION, recorded_at=""
+        )
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        "acgs:receipt: \n<anything>",
+        "acgs:receipt:v1:sha256:" + "a" * 63,
+        "acgs:receipt:v1:sha256:" + "A" * 64,
+        "acgs:receipt:v1:sha256:" + "a" * 64 + "\n",
+        "acgs:receipt:v1:sha512:" + "a" * 64,
+        "acgs:signed-envelope:v1:" + "a" * 64,
+        "acgs:outcome:v1:sha256:" + "a" * 64,
+    ],
+)
+def test_decision_identity_grammar_enforced(identity):
+    with pytest.raises(ValueError, match="decision receipt"):
+        receipt(decision_receipt_identity=identity)
+
+
+@pytest.mark.parametrize(
+    "refused",
+    [
+        ProviderContract("payments", ProviderContractClass.UNBOUNDED, "1", False, False),
+        ProviderContract("payments", ProviderContractClass.BOUNDED, "1", True, False, 30),
+    ],
+)
+def test_outcome_from_record_requires_fenceable_contract(contracted, refused):
+    done = replace(reserve(contracted), state=EffectState.DONE)
+    with pytest.raises(ValueError, match="FENCEABLE"):
+        outcome_from_record(done, contract=refused, decision_receipt_identity=DECISION)
+
+
+def test_restart_with_other_contract_version_cannot_receipt(tmp_path):
+    path = tmp_path / "effects.sqlite"
+    store = EffectStore(path)
+    store.create_budget("budget", 10)
+    registry = ProviderContractRegistry()
+    registry.register(contract())
+    before = ContractedEffectStore(store, registry)
+    provider = Provider()
+    effect = reserve(before)
+    assert before.send(effect.key, provider).state is EffectState.DONE
+
+    swapped = ProviderContractRegistry()
+    swapped.register(ProviderContract("payments", ProviderContractClass.FENCEABLE, "2", True, True))
+    after = ContractedEffectStore(EffectStore(path), swapped)
+    with pytest.raises(ProviderNotDispatchable, match="different contract"):
+        after.contract_for(effect.key, provider)
+    with pytest.raises(ProviderNotDispatchable, match="different contract"):
+        after.reconcile(effect.key, provider)
+
+    same = ProviderContractRegistry()
+    same.register(contract())
+    restarted = ContractedEffectStore(EffectStore(path), same)
+    assert restarted.contract_for(effect.key, provider) == contract()
 
 
 def test_signed_from_dict_rejects_malformed_payloads():

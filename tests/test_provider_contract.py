@@ -137,6 +137,38 @@ def test_non_ascii_digest_is_utf8():
     )
 
 
+def test_provider_id_must_be_nfc():
+    import unicodedata
+
+    nfd = unicodedata.normalize("NFD", "café")
+    assert nfd != "café"
+    with pytest.raises(ValueError, match="NFC"):
+        fenceable(provider_id=nfd)
+    with pytest.raises(ValueError, match="NFC"):
+        ProviderContract(nfd, ProviderContractClass.UNBOUNDED, "1", False, False)
+    assert fenceable(provider_id="café").provider_id == "café"
+
+
+def test_first_send_binds_contract_digest_before_provider_io(store):
+    registry = ProviderContractRegistry()
+    registry.register(fenceable())
+    contracted = ContractedEffectStore(store, registry)
+    provider = SpyProvider()
+    effect = reserve(store)
+    assert contracted.send(effect.key, provider).state is EffectState.DONE
+    other = ProviderContractRegistry()
+    other.register(fenceable(version="2027-01-01"))
+    swapped = ContractedEffectStore(store, other)
+    with pytest.raises(ProviderNotDispatchable, match="different contract"):
+        swapped.send(effect.key, provider)
+    pending = reserve(store, grant="grant2")
+    store._claim(pending.key, "payments")
+    assert swapped.reconcile(pending.key, provider).state is EffectState.NOT_DONE
+    with pytest.raises(ProviderNotDispatchable, match="different contract"):
+        contracted.reconcile(pending.key, provider)
+    assert len(provider.sends) == 1 and len(provider.queries) == 1
+
+
 def test_registry_register_get_and_conflict():
     registry = ProviderContractRegistry()
     assert registry.get("payments") is None
