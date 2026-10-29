@@ -66,6 +66,7 @@ from acgs_lite.legitimacy.invocation import (
     _bound_arguments,
     bind_invocation,
     bind_policy,
+    defaulted_argument_values,
     reject_method_spoof_kwargs,
 )
 from acgs_lite.legitimacy.ledger import (
@@ -950,7 +951,7 @@ class GovernedCallable:
         if any(tokens.get(name) is not None for name in tokens):
             raise TypeError("issue_grant refuses authorization transport kwargs")
         self._reject_production_receiver(func, args, kwargs)
-        decision = self._evaluate_invocation(args, kwargs)
+        decision = self._evaluate_invocation(func, args, kwargs)
         invocation = bind_invocation(
             func,
             args,
@@ -1120,14 +1121,20 @@ class GovernedCallable:
                 "production grants do not support receiver methods without exact instance binding"
             )
 
-    def _evaluate_invocation(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> EngineDecision:
+    def _evaluate_invocation(
+        self, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> EngineDecision:
         """Evaluate every governed payload and return the engine's aggregated verdict.
 
         The per-call ``strict=False`` override returns review and block verdicts as
         values so the issue path maps them itself; HALT still raises from the engine.
-        Only ALLOW and ALLOW_WITH_CONTROLS are mintable.
+        Only ALLOW and ALLOW_WITH_CONTROLS are mintable. Parameter defaults the call
+        relies on are evaluated after the call arguments, since the digest commits them.
         """
         payloads = governance_payloads_for_enforcement(*args, kwargs)
+        payloads += governance_payloads_for_enforcement(
+            *defaulted_argument_values(func, args, kwargs)
+        )
         results = [
             self.engine.validate(payload, agent_id=self.agent_id, strict=False)
             for payload in payloads
@@ -1615,6 +1622,13 @@ class GovernedCallable:
                         _deny_unless_valid(
                             engine.validate(payload, agent_id=agent_id), action=payload
                         )
+                    # Defaults are digested into the binding, so they are evaluated too.
+                    for payload in governance_payloads_for_enforcement(
+                        *defaulted_argument_values(func, args, kwargs)
+                    ):
+                        _deny_unless_valid(
+                            engine.validate(payload, agent_id=agent_id), action=payload
+                        )
                     execution_started = True
                     result = await func(*args, **kwargs)
                     for output_payload in governance_payloads_for_enforcement(result):
@@ -1676,6 +1690,13 @@ class GovernedCallable:
                         )
 
                     for payload in governance_payloads_for_enforcement(*args, kwargs):
+                        _deny_unless_valid(
+                            engine.validate(payload, agent_id=agent_id), action=payload
+                        )
+                    # Defaults are digested into the binding, so they are evaluated too.
+                    for payload in governance_payloads_for_enforcement(
+                        *defaulted_argument_values(func, args, kwargs)
+                    ):
                         _deny_unless_valid(
                             engine.validate(payload, agent_id=agent_id), action=payload
                         )

@@ -168,6 +168,36 @@ def _bound_arguments(
     return arguments
 
 
+def defaulted_argument_values(
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: Mapping[str, Any],
+) -> tuple[Any, ...]:
+    """Values the call takes from parameter defaults, in signature order.
+
+    These are digested by :func:`canonical_argument_digest` (it applies defaults)
+    but are not among the raw call arguments, so they must be evaluated
+    separately. ``*args``/``**kwargs`` parameters have no default and are never
+    included; neither are ``self``/``cls``.
+    """
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError) as exc:
+        raise ArgumentNotDigestible("callable has no inspectable signature") from exc
+    filtered = {key: value for key, value in kwargs.items() if key not in CONTROL_KWARGS}
+    try:
+        bound = signature.bind(*args, **filtered)
+    except TypeError as exc:
+        raise ArgumentNotDigestible(f"arguments do not match callable signature: {exc}") from exc
+    return tuple(
+        parameter.default
+        for name, parameter in signature.parameters.items()
+        if name not in bound.arguments
+        and name not in ("self", "cls")
+        and parameter.default is not inspect.Parameter.empty
+    )
+
+
 _MAX_CANONICAL_DEPTH = 32
 
 
@@ -255,6 +285,7 @@ __all__ = [
     "bind_invocation",
     "bind_policy",
     "canonical_argument_digest",
+    "defaulted_argument_values",
     "reject_method_spoof_kwargs",
     "trusted_method_id",
 ]

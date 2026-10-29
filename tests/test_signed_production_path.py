@@ -847,7 +847,9 @@ def test_allow_with_controls_executes(monkeypatch: pytest.MonkeyPatch) -> None:
     decision = EngineDecision(
         "ALLOW_WITH_CONTROLS", (BASELINE_CONSTRAINT_MARKER,), ("LOG_REVIEW",), None, 1
     )
-    monkeypatch.setattr(guard, "_evaluate_invocation", lambda _args, _kwargs: decision)
+    monkeypatch.setattr(
+        guard, "_evaluate_invocation", lambda _func, _args, _kwargs: decision
+    )
     grant = wrapped.issue_grant("acct-1")
     assert grant.receipt.decision_type == "ALLOW_WITH_CONTROLS"
     assert wrapped("acct-1", execution_grant=grant) == "sent:acct-1"

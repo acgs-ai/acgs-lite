@@ -193,6 +193,17 @@ This is a semver-major change (4.0.0): the production profile of the stable
   started, else `FAILED`, with `error_code="interrupted"`, and the exception still
   propagates. A retry with the same `execution_attempt_id` now reports that status
   instead of "already in flight" forever.
+- Parameter defaults the call relies on are now evaluated, not only digested. The
+  argument digest has always bound defaults, but `GovernedCallable` evaluated only the
+  raw call arguments, so a default such as `note: str = "<forbidden keyword>"` was
+  committed in the receipt and never checked. Defaults omitted by the caller are
+  evaluated as extra payloads after the call arguments, at issue and at execute, in
+  every profile; explicitly passed values, `*args`/`**kwargs` and `self`/`cls` are not
+  included, and existing payloads are unchanged. A default that violates a rule, or is
+  longer than 10,000 characters, now denies. A non-JSON-native default already denied
+  through the binder (`ArgumentNotDigestible`); at issue it is now refused first with
+  `GOVERNANCE-PAYLOAD-UNEVALUABLE`. New helper:
+  `acgs_lite.legitimacy.invocation.defaulted_argument_values`.
 
 ### Added
 
