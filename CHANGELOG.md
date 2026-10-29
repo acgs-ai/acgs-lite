@@ -161,7 +161,9 @@ This is a semver-major change (4.0.0): the production profile of the stable
   with a later `valid_from`, or a condition key such as `env=` to switch a
   conditional rule off. The context is now built only from the new constructor
   argument `governance_context=` (a mapping, copied at construction and never
-  merged with per-call kwargs) plus the call's `governance_action`, and every
+  merged with per-call kwargs) plus the call's `governance_action` (still chosen
+  by the caller, and it overrides a `governance_action` set in
+  `governance_context`, so rule conditions on it are caller-selected), and every
   check of the call uses it: the input, the caller's kwargs, and the agent's
   output, including each remediation retry's output. The output check adds
   `"source": "agent_output"` unless `governance_context` sets `source` itself.
