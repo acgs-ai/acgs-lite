@@ -497,3 +497,181 @@ def test_interrupt_with_unsettleable_attempt_disables_execution(
         transfer("acct-1", 10, execution_grant=grant, execution_attempt_id="att-1")
     assert guard._execution_disabled is True
     assert calls == ["acct-1:10"]
+
+
+# --- interrupts between the consume and the governed call --------------------
+
+
+def _governed_transfer(guard: GovernedCallable, calls: list[str], *, asynchronous: bool) -> object:
+    def body(account_id: str, amount: int) -> str:
+        calls.append(f"{account_id}:{amount}")
+        return "sent"
+
+    if asynchronous:
+
+        async def transfer(account_id: str, amount: int) -> str:
+            return body(account_id, amount)
+
+    else:
+
+        def transfer(account_id: str, amount: int) -> str:  # type: ignore[misc]
+            return body(account_id, amount)
+
+    return guard(transfer)
+
+
+def _call(governed: object, grant: object, *, asynchronous: bool) -> object:
+    result = governed(  # type: ignore[operator]
+        "acct-1", 10, execution_grant=grant, execution_attempt_id="att-1"
+    )
+    return asyncio.run(result) if asynchronous else result
+
+
+def _assert_failed_interrupted(guard: GovernedCallable) -> None:
+    record = _attempt(guard)
+    assert record.status is AttemptStatus.FAILED  # type: ignore[attr-defined]
+    assert record.error_code == "interrupted"  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_interrupt_in_durable_authorization_audit_settles_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asynchronous: bool
+) -> None:
+    calls: list[str] = []
+    audit = AuditLog(backend=JSONLAuditBackend(tmp_path / "audit.jsonl"))
+    guard = GovernedCallable(
+        Constitution.default(),
+        authorization_profile=AuthorizationProfile.PRODUCTION,
+        audit_log=audit,
+        require_durable_audit=True,
+        **_production_signing(),
+    )
+    governed = _governed_transfer(guard, calls, asynchronous=asynchronous)
+    grant = governed.issue_grant("acct-1", 10)  # type: ignore[attr-defined]
+    original = audit.record_durable
+
+    def record_durable(entry: AuditEntry) -> object:
+        if entry.type == "execution_authorized":
+            raise KeyboardInterrupt
+        return original(entry)
+
+    monkeypatch.setattr(audit, "record_durable", record_durable)
+    with pytest.raises(KeyboardInterrupt):
+        _call(governed, grant, asynchronous=asynchronous)
+    _assert_failed_interrupted(guard)
+    with pytest.raises(LegitimacyInvariantError, match="already failed"):
+        _call(governed, grant, asynchronous=asynchronous)
+    assert calls == []
+
+
+def test_interrupt_in_durable_authorization_audit_unsettleable_disables_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    audit = AuditLog(backend=JSONLAuditBackend(tmp_path / "audit.jsonl"))
+    guard = GovernedCallable(
+        Constitution.default(),
+        authorization_profile=AuthorizationProfile.PRODUCTION,
+        audit_log=audit,
+        require_durable_audit=True,
+        **_production_signing(),
+    )
+    governed = _governed_transfer(guard, calls, asynchronous=False)
+    grant = governed.issue_grant("acct-1", 10)  # type: ignore[attr-defined]
+
+    def record_durable(entry: AuditEntry) -> object:
+        raise KeyboardInterrupt
+
+    def finalize(**kwargs: object) -> object:
+        raise OSError("ledger unavailable")
+
+    monkeypatch.setattr(audit, "record_durable", record_durable)
+    monkeypatch.setattr(guard._ledger, "finalize", finalize)
+    with pytest.raises(KeyboardInterrupt):
+        _call(governed, grant, asynchronous=False)
+    assert guard._execution_disabled is True
+    assert calls == []
+
+
+@pytest.mark.parametrize("raised", [KeyboardInterrupt, RuntimeError])
+def test_failure_releasing_grant_reservation_settles_failed(
+    monkeypatch: pytest.MonkeyPatch, raised: type[BaseException]
+) -> None:
+    calls: list[str] = []
+    guard = _production_guard()
+    governed = _governed_transfer(guard, calls, asynchronous=False)
+    grant = governed.issue_grant("acct-1", 10)  # type: ignore[attr-defined]
+    original = guard._release_signed_grant
+    fired: list[bool] = []
+
+    def release(grant_id: str) -> None:
+        original(grant_id)
+        if not fired:
+            fired.append(True)
+            raise raised
+
+    monkeypatch.setattr(guard, "_release_signed_grant", release)
+    with pytest.raises(raised):
+        _call(governed, grant, asynchronous=False)
+    record = _attempt(guard)
+    assert record.status is AttemptStatus.FAILED  # type: ignore[attr-defined]
+    expected = "interrupted" if raised is KeyboardInterrupt else "exception"
+    assert record.error_code == expected  # type: ignore[attr-defined]
+    with pytest.raises(LegitimacyInvariantError, match="already failed"):
+        _call(governed, grant, asynchronous=False)
+    assert calls == []
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_interrupt_entering_execution_settles_failed(
+    monkeypatch: pytest.MonkeyPatch, asynchronous: bool
+) -> None:
+    calls: list[str] = []
+    guard = _production_guard()
+    governed = _governed_transfer(guard, calls, asynchronous=asynchronous)
+    grant = governed.issue_grant("acct-1", 10)  # type: ignore[attr-defined]
+    original = guard._recovered_result
+    fired: list[bool] = []
+
+    def recovered_result(outcome: object) -> object:
+        if not fired:
+            fired.append(True)
+            raise KeyboardInterrupt
+        return original(outcome)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(guard, "_recovered_result", recovered_result)
+    with pytest.raises(KeyboardInterrupt):
+        _call(governed, grant, asynchronous=asynchronous)
+    _assert_failed_interrupted(guard)
+    with pytest.raises(LegitimacyInvariantError, match="already failed"):
+        _call(governed, grant, asynchronous=asynchronous)
+    assert calls == []
+
+
+def test_recovery_failure_does_not_resettle_the_recorded_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A recover outcome belongs to an earlier call; a failure while recovering it
+    # must not write a new terminal status over the recorded one.
+    calls: list[str] = []
+    guard = _production_guard()
+    governed = _governed_transfer(guard, calls, asynchronous=False)
+    grant = governed.issue_grant("acct-1", 10)  # type: ignore[attr-defined]
+    assert _call(governed, grant, asynchronous=False) == "sent"
+    writes: list[object] = []
+    original = guard._ledger.finalize
+
+    def finalize(**kwargs: object) -> object:
+        writes.append(kwargs.get("status"))
+        return original(**kwargs)  # type: ignore[arg-type]
+
+    def recovered_result(outcome: object) -> object:
+        raise RuntimeError("recovery failed")
+
+    monkeypatch.setattr(guard._ledger, "finalize", finalize)
+    monkeypatch.setattr(guard, "_recovered_result", recovered_result)
+    with pytest.raises(RuntimeError, match="recovery failed"):
+        _call(governed, grant, asynchronous=False)
+    assert writes == []
+    assert _attempt(guard).status is AttemptStatus.COMPLETED  # type: ignore[attr-defined]
+    assert calls == ["acct-1:10"]

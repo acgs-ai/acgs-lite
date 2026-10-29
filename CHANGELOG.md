@@ -256,6 +256,16 @@ This is a semver-major change (4.0.0): the production profile of the stable
   `require_durable_audit=True`) is replaced with `PARTIAL`. Without durable audit a
   `COMPLETED` record the ledger already wrote is the commit and is kept, so recovery
   returns it. If the attempt cannot be settled, execution is disabled on the instance.
+- The same holds before the callable runs. An interrupt (`KeyboardInterrupt`,
+  `SystemExit`) raised in the durable `execution_authorized` audit write under
+  `require_durable_audit=True`, an interrupt or error raised while releasing the
+  grant reservation after the ledger consume, or one raised while entering the
+  governed call (including recovery of the ledger outcome) now records the
+  attempt `FAILED` (`error_code="interrupted"`, or `"exception"` for an error) and
+  propagates; the callable does not run, and a retry reports `attempt already
+  failed` instead of `attempt already in flight` forever. A call now settles only
+  the attempt it started: a failure while recovering an earlier attempt never
+  writes a terminal status over that attempt's record.
 - Parameter defaults the call relies on are now evaluated, not only digested. The
   argument digest has always bound defaults, but `GovernedCallable` evaluated only the
   raw call arguments, so a default such as `note: str = "<forbidden keyword>"` was

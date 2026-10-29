@@ -1244,6 +1244,7 @@ class GovernedCallable:
             reserved_id = _carrier_grant_id(grant if grant is not None else signed)
             if reserved_id is not None:
                 self._reserve_signed_grant(reserved_id)
+            outcome: ConsumeDecision | None = None
             try:
                 if grant is not None:
                     if not isinstance(grant, ExecutionGrant):
@@ -1284,19 +1285,27 @@ class GovernedCallable:
                     trust_kwargs=False,
                     enforce_expiry=enforce_expiry,
                 )
-                return (
-                    self._consume_and_audit(
-                        verified_receipt,
-                        attempt_id=attempt_id,
-                        invocation=invocation,
-                        policy=policy,
-                        context_digest=context_digest,
-                    ),
-                    invocation.argument_digest,
+                outcome = self._consume_and_audit(
+                    verified_receipt,
+                    attempt_id=attempt_id,
+                    invocation=invocation,
+                    policy=policy,
+                    context_digest=context_digest,
                 )
             finally:
                 if reserved_id is not None:
-                    self._release_signed_grant(reserved_id)
+                    try:
+                        self._release_signed_grant(reserved_id)
+                    except BaseException as exc:
+                        # The attempt is consumed but the caller never receives it, so
+                        # no side effect will run: settle it rather than leave it STARTED.
+                        code = "exception" if isinstance(exc, Exception) else "interrupted"
+                        try:
+                            self._finalize_attempt(outcome, AttemptStatus.FAILED, error_code=code)
+                        except Exception:
+                            self._execution_disabled = True
+                        raise
+            return outcome, invocation.argument_digest
 
         if grant is not None:
             if not isinstance(grant, ExecutionGrant):
@@ -1377,7 +1386,8 @@ class GovernedCallable:
         error_code: str | None = None,
         output_sha256: str | None = None,
     ) -> None:
-        if outcome is None:
+        # A call settles only the attempt it started; a recovered attempt is not its own.
+        if outcome is None or outcome.mode != "proceed":
             return
         self._ledger.finalize(
             attempt_id=outcome.record.attempt_id,
@@ -1514,6 +1524,18 @@ class GovernedCallable:
                     status=AttemptStatus.FAILED,
                     error_code="audit_persistence_failed",
                 )
+                raise
+            except BaseException:
+                # KeyboardInterrupt or SystemExit during the authorization audit write:
+                # no side effect ran, so the attempt is settled FAILED, not left STARTED.
+                try:
+                    self._ledger.finalize(
+                        attempt_id=outcome.record.attempt_id,
+                        status=AttemptStatus.FAILED,
+                        error_code="interrupted",
+                    )
+                except Exception:
+                    self._execution_disabled = True
                 raise
         return outcome
 
@@ -1683,13 +1705,14 @@ class GovernedCallable:
 
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                outcome, bound_digest = self._gate(func, args, kwargs)
-                recovered = self._recovered_result(outcome)
-                if recovered is not _PROCEED:
-                    return recovered
-
                 execution_started = False
+                outcome, bound_digest = self._gate(func, args, kwargs)
+                # Enter the try at once: anything raised after the consume, recovery
+                # included, must settle the attempt this call started.
                 try:
+                    recovered = self._recovered_result(outcome)
+                    if recovered is not _PROCEED:
+                        return recovered
                     # Fail-closed: only a completed check that found no violation
                     # clears the call. Missing solver, malformed policy, timeout,
                     # exception, and "no policy applies here" all block. See
@@ -1766,13 +1789,14 @@ class GovernedCallable:
 
             @functools.wraps(func)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-                outcome, bound_digest = self._gate(func, args, kwargs)
-                recovered = self._recovered_result(outcome)
-                if recovered is not _PROCEED:
-                    return recovered
-
                 execution_started = False
+                outcome, bound_digest = self._gate(func, args, kwargs)
+                # Enter the try at once: anything raised after the consume, recovery
+                # included, must settle the attempt this call started.
                 try:
+                    recovered = self._recovered_result(outcome)
+                    if recovered is not _PROCEED:
+                        return recovered
                     # Fail-closed: only a completed check that found no violation
                     # clears the call. Missing solver, malformed policy, timeout,
                     # exception, and "no policy applies here" all block. See
