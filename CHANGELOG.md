@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.2] - Unreleased
+
+### Changed
+
+- Packaging: removed the experimental `gove` optional extra from the package
+  metadata and its README section. No runtime or API changes.
+
 ## [3.0.1] - 2026-09-21
 
 ### Fixed
