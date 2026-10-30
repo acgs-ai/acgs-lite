@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install declared optional combination
-        run: python -m pip install ".[gove,crypto]" "gove-zone==1.0.0rc2" pytest pytest-asyncio
+        run: python -m pip install ".[crypto]" "gove-zone==1.0.0rc2" pytest pytest-asyncio
       - name: Verify bridge import and conformance contracts
         run: |
           python -I -c "import acgs_lite, gove_zone; print(acgs_lite.__version__, gove_zone.__file__)"
@@ -91,7 +91,7 @@ jobs:
           cp "$1" "$RUNNER_TEMP/qualified.whl"
           python -m venv "$RUNNER_TEMP/wheel-env"
           "$RUNNER_TEMP/wheel-env/bin/python" -m pip install \
-            "${1}[z3,gove,crypto]" "gove-zone==1.0.0rc2" pytest pytest-asyncio
+            "${1}[z3,crypto]" "gove-zone==1.0.0rc2" pytest pytest-asyncio
       - name: Qualify installed wheel offline examples
         run: |
           "$RUNNER_TEMP/wheel-env/bin/python" scripts/qualify_wheel.py \

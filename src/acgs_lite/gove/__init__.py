@@ -1,6 +1,6 @@
 """Bridge: run acgs-lite constitutions inside the gove-zone kernel.
 
-Requires the optional ``gove`` extra (Python >= 3.11). Import of this
+Requires gove-zone to be installed separately (Python >= 3.11). Import of this
 package never fails; using the bridge without gove-zone installed raises
 :class:`GoveKernelUnavailable` (fail closed).
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 
 class GoveKernelUnavailable(RuntimeError):
-    """gove-zone is not installed; install acgs-lite[gove] on Python >= 3.11."""
+    """gove-zone is not installed; install it separately on Python >= 3.11."""
 
 
 try:

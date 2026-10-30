@@ -30,8 +30,8 @@ def test_release_qualification_installs_required_crypto_extra() -> None:
         for step in workflow["jobs"]["qualify"]["steps"]
         if step.get("name") == "Install exact wheel in clean environment"
     )
-    assert '".[gove,crypto]"' in bridge_install
-    assert '"${1}[z3,gove,crypto]"' in wheel_install
+    assert '".[crypto]"' in bridge_install
+    assert '"${1}[z3,crypto]"' in wheel_install
 
 
 @pytest.mark.parametrize(
