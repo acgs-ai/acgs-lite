@@ -31,7 +31,7 @@ from acgs_lite.legitimacy.signing import (
 
 OUTCOME_RECEIPT_SCHEMA = "acgs-outcome-receipt-v1"
 _OUTCOME_DOMAIN = b"acgs-outcome-receipt-v1\x00"
-_DECISION_IDENTITY = re.compile(r"acgs:(?:receipt|signed-envelope):v1:sha256:[0-9a-f]{64}")
+_DECISION_IDENTITY = re.compile(r"acgs:(?:receipt:v[12]|signed-envelope:v1):sha256:[0-9a-f]{64}")
 # One spelling per instant except the documented Z / +00:00 pair; fromisoformat
 # would otherwise accept basic format, week dates, spaces and sub-second offsets.
 _UTC_TIMESTAMP = re.compile(

@@ -75,6 +75,8 @@ from acgs_lite.legitimacy.provider_contract import (
 from acgs_lite.legitimacy.receipt import (
     BASELINE_CONSTRAINT_MARKER,
     RECEIPT_HASH_DOMAIN_V2,
+    RECEIPT_SCHEMA_V1,
+    RECEIPT_SCHEMA_V2,
     DecisionReceipt,
     ExecutionBoundary,
     to_receipt_dict,
@@ -101,6 +103,8 @@ __all__ = [
     "OUTCOME_RECEIPT_SCHEMA",
     "PROVIDER_CONTRACT_SCHEMA",
     "RECEIPT_HASH_DOMAIN_V2",
+    "RECEIPT_SCHEMA_V1",
+    "RECEIPT_SCHEMA_V2",
     "ActualCall",
     "ArgumentNotDigestible",
     "AsyncGrantResolver",

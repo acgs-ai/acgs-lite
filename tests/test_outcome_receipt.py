@@ -9,11 +9,15 @@ from threading import Lock
 import pytest
 
 from acgs_lite.legitimacy import (
+    BASELINE_CONSTRAINT_MARKER,
     OUTCOME_RECEIPT_SCHEMA,
+    RECEIPT_SCHEMA_V2,
     ContractedEffectStore,
+    DecisionReceipt,
     EffectOutcome,
     EffectState,
     EffectStore,
+    ExecutionBoundary,
     OutcomeReceipt,
     ProviderContract,
     ProviderContractClass,
@@ -22,7 +26,10 @@ from acgs_lite.legitimacy import (
     ProviderResult,
     SignedOutcomeReceipt,
     outcome_from_record,
+    receipt_identity,
     sign_outcome,
+    sign_receipt,
+    signed_envelope_identity,
 )
 
 DECISION = "acgs:receipt:v1:sha256:" + "a" * 64
@@ -125,6 +132,7 @@ def test_canonical_bytes_hash_and_identity():
     [
         dict(outcome=EffectOutcome.NOT_DONE),
         dict(decision_receipt_identity="acgs:signed-envelope:v1:sha256:" + "c" * 64),
+        dict(decision_receipt_identity="acgs:receipt:v2:sha256:" + "c" * 64),
         dict(provider_contract_digest="d" * 64),
         dict(provider_reference=None),
         dict(recorded_at="2026-10-29T12:00:01+00:00"),
@@ -371,13 +379,49 @@ def test_outcome_from_record_rejects_empty_recorded_at(contracted):
         "acgs:receipt:v1:sha256:" + "A" * 64,
         "acgs:receipt:v1:sha256:" + "a" * 64 + "\n",
         "acgs:receipt:v1:sha512:" + "a" * 64,
+        "acgs:receipt:v3:sha256:" + "a" * 64,
         "acgs:signed-envelope:v1:" + "a" * 64,
+        "acgs:signed-envelope:v2:sha256:" + "a" * 64,
         "acgs:outcome:v1:sha256:" + "a" * 64,
     ],
 )
 def test_decision_identity_grammar_enforced(identity):
     with pytest.raises(ValueError, match="decision receipt"):
         receipt(decision_receipt_identity=identity)
+
+
+def test_v2_decision_receipt_and_envelope_identities_accepted(contracted):
+    key = signer()
+    decision = DecisionReceipt.create(
+        request_id="req-v2",
+        goal="tools/call refund",
+        proposed_method="refund",
+        decision_type="ALLOW",
+        authority_basis="acgs-constitution:default",
+        matched_constraints=(BASELINE_CONSTRAINT_MARKER,),
+        policy_version="v1",
+        execution_boundary=ExecutionBoundary(
+            allowed_method="refund",
+            allowed_scope="call-digest:sha256:" + "1" * 64,
+            allowed_subjects=(),
+            expires_at=None,
+            single_use=True,
+        ),
+        schema_version=RECEIPT_SCHEMA_V2,
+        grant_id="grant-v2",
+        policy_digest="2" * 64,
+        method_id="refund",
+        argument_digest="1" * 64,
+    )
+    v2_identity = receipt_identity(decision)
+    assert v2_identity.startswith("acgs:receipt:v2:sha256:")
+    envelope_identity = signed_envelope_identity(sign_receipt(decision, key))
+    assert envelope_identity.startswith("acgs:signed-envelope:v1:sha256:")
+    done = replace(reserve(contracted), state=EffectState.DONE)
+    for identity in (v2_identity, envelope_identity):
+        built = outcome_from_record(done, contract=contract(), decision_receipt_identity=identity)
+        assert built.decision_receipt_identity == identity
+        assert sign_outcome(built, key).verify(key.public_key_hex()) is True
 
 
 @pytest.mark.parametrize(
