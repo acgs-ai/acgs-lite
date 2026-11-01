@@ -11,7 +11,7 @@ readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 authors = [
-    {name = "ACGS Team", email = "hello@acgs.dev"},
+    {name = "ACGS Team", email = "hello@acgs.ai"},
 ]
 keywords = ["ai", "governance", "constitutional", "agents", "legitimacy", "fail-closed", "decision-receipts", "bounded-execution", "maci", "audit", "eu-ai-act", "ai-governance", "compliance", "constitutional-ai", "formal-verification", "z3", "lean4", "hipaa", "gdpr", "nist-ai-rmf", "ai-act", "responsible-ai"]
 classifiers = [

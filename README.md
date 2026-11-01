@@ -900,7 +900,7 @@ pytest tests/ --import-mode=importlib
 
 ## 📄 License
 
-Apache-2.0. See [LICENSE](https://github.com/acgs-ai/acgs-lite/blob/main/LICENSE) for details.
+Apache-2.0. See [LICENSE](https://github.com/acgs-ai/acgs-lite/blob/main/LICENSE) for details. Commercial licensing terms are described in [NOTICE](https://github.com/acgs-ai/acgs-lite/blob/main/NOTICE).
 
 Commercial enterprise licences (SLA, support, air-gapped deployment) available at [acgs.ai](https://acgs.ai).
 
