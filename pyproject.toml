@@ -68,6 +68,8 @@ all = ["acgs-lite[a2a,openai,anthropic,agno,langchain,litellm,google,llamaindex,
 docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",
+    # mkdocstrings>=1.0.7 needs Python 3.11; 1.0.6 breaks on pymdown-extensions 12.
+    "pymdown-extensions<12; python_version < '3.11'",
     "mike>=2.0",
     "mkdocs-git-revision-date-localized-plugin>=1.2",
 ]
