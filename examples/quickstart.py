@@ -155,7 +155,11 @@ def main() -> None:
     )
     audit_agent.run("safe action 1", governance_action="execute")
     audit_agent.run("safe action 2", governance_action="execute")
-    audit_agent.run("self-validate bypass", governance_action="execute")  # Violation (non-strict)
+    try:
+        # strict=False does not let a blocking violation through; it is denied and audited.
+        audit_agent.run("self-validate bypass", governance_action="execute")
+    except ConstitutionalViolationError as e:
+        print(f"   ❌ Denied and audited: {e.rule_id}")
 
     stats = audit_agent.stats
     print(f"   Total validations: {stats['total_validations']}")

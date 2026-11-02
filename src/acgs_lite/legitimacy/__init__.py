@@ -59,6 +59,7 @@ from acgs_lite.legitimacy.ledger import (
 )
 from acgs_lite.legitimacy.receipt import (
     BASELINE_CONSTRAINT_MARKER,
+    RECEIPT_HASH_DOMAIN_V2,
     DecisionReceipt,
     ExecutionBoundary,
     to_receipt_dict,
@@ -82,6 +83,7 @@ from acgs_lite.legitimacy.signing import (
 __all__ = [
     "BASELINE_CONSTRAINT_MARKER",
     "CANONICAL_DECISION_STATES",
+    "RECEIPT_HASH_DOMAIN_V2",
     "ActualCall",
     "ArgumentNotDigestible",
     "AsyncGrantResolver",

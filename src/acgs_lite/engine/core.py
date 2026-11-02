@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import time
+import unicodedata
 from collections import defaultdict
 from contextlib import contextmanager, suppress
 from typing import Any, Literal
@@ -32,6 +33,84 @@ from .batch import BatchValidationMixin
 from .enforcement import EnforcementResolution, resolve_enforcement
 from .matcher import _HAS_AHO, _HAS_RUST, _RUST_ALLOW, GovernanceMatcherMixin, _ac, _rust
 from .models import CustomValidator, ValidationResult, Violation, _dedup_violations
+
+# Default_Ignorable_Code_Point, from Unicode 16.0.0 DerivedCoreProperties.txt.
+# ``unicodedata`` does not expose the property. Besides format characters it covers
+# invisible code points of other categories that NFKC keeps: the combining grapheme
+# joiner and variation selectors (Mn), Hangul fillers (Lo), Khmer inherent vowels
+# (Mn), and unassigned reserved ranges (Cn).
+_DEFAULT_IGNORABLE_RANGES: tuple[tuple[int, int], ...] = (
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+_DEFAULT_IGNORABLE: frozenset[int] = frozenset(
+    cp for low, high in _DEFAULT_IGNORABLE_RANGES for cp in range(low, high + 1)
+)
+
+
+def normalize_for_matching(text: str) -> str:
+    """Fold *text* to the form rule keywords and patterns are matched against.
+
+    Applies NFKC (fullwidth and other compatibility forms become their plain
+    equivalents) and then drops every format character (Unicode category ``Cf``:
+    zero-width space/joiners, soft hyphen, bidi controls) and every
+    Default_Ignorable_Code_Point (variation selectors, the combining grapheme
+    joiner, Hangul fillers), all of which NFKC keeps and none of which render.
+    Other combining marks are kept, so accented text is not folded.
+    ASCII text is returned unchanged: it is NFKC-stable and has neither.
+    """
+    if text.isascii():
+        return text
+    folded = unicodedata.normalize("NFKC", text)
+    return "".join(
+        c for c in folded if ord(c) not in _DEFAULT_IGNORABLE and unicodedata.category(c) != "Cf"
+    )
+
+
+def _match_variants(text: str) -> tuple[str, ...]:
+    """Lowercased texts to match: the original, plus its normalized form if it differs.
+
+    Rules are evaluated against every variant and the findings are unioned, so
+    normalization can only add matches and never hides one the original text hits.
+    """
+    lowered = text.lower()
+    if text.isascii():
+        return (lowered,)
+    normalized = normalize_for_matching(text).lower()
+    return (lowered,) if normalized == lowered else (lowered, normalized)
+
+
+def _has_distinct_normalized_form(text: str) -> bool:
+    """True when matching *text* needs a second, normalized pass (never for ASCII)."""
+    return not text.isascii() and normalize_for_matching(text).lower() != text.lower()
+
+
+def _needs_normalized_pass(action: str, context: dict[str, Any] | None) -> bool:
+    """True when the action or a matched context value has a distinct normalized form."""
+    if _has_distinct_normalized_form(action):
+        return True
+    if not context:
+        return False
+    return any(
+        _has_distinct_normalized_form(value)
+        for key, value in context.items()
+        if key in ("action_detail", "action_description") and isinstance(value, str)
+    )
 
 
 class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
@@ -641,45 +720,49 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         """
         start = time.perf_counter()
         applicable_rules = self._runtime_active_rules(context)
-        text_lower = action.lower()
-        has_neg = bool(_NEGATIVE_VERBS_RE.search(text_lower))
-        has_pos = (not has_neg) and any(w in _POSITIVE_VERBS_SET for w in text_lower.split()[:4])
         action_trimmed = action[:500]
         action_200 = action[:200]
         violations: list[Violation] = []
 
-        for rule in applicable_rules:
-            if rule.matches_with_signals(text_lower, has_neg, has_pos):
-                violations.append(
-                    Violation(
-                        rule_id=rule.id,
-                        rule_text=rule.text,
-                        severity=rule.severity,
-                        matched_content=action_200,
-                        category=rule.category,
+        # Each variant (original, and its normalized form when different) is matched
+        # with its own signals; findings are unioned and deduplicated below.
+        for text_lower in _match_variants(action):
+            has_neg = bool(_NEGATIVE_VERBS_RE.search(text_lower))
+            has_pos = (not has_neg) and any(
+                w in _POSITIVE_VERBS_SET for w in text_lower.split()[:4]
+            )
+            for rule in applicable_rules:
+                if rule.matches_with_signals(text_lower, has_neg, has_pos):
+                    violations.append(
+                        Violation(
+                            rule_id=rule.id,
+                            rule_text=rule.text,
+                            severity=rule.severity,
+                            matched_content=action_200,
+                            category=rule.category,
+                        )
                     )
-                )
 
         if context and ("action_detail" in context or "action_description" in context):
             for key, value in context.items():
                 if key not in ("action_detail", "action_description") or not isinstance(value, str):
                     continue
-                value_lower = value.lower()
-                value_has_neg = bool(_NEGATIVE_VERBS_RE.search(value_lower))
-                value_has_pos = (not value_has_neg) and any(
-                    word in _POSITIVE_VERBS_SET for word in value_lower.split()[:4]
-                )
-                for rule in applicable_rules:
-                    if rule.matches_with_signals(value_lower, value_has_neg, value_has_pos):
-                        violations.append(
-                            Violation(
-                                rule_id=rule.id,
-                                rule_text=rule.text,
-                                severity=rule.severity,
-                                matched_content=f"context[{key}]: {value[:100]}",
-                                category=rule.category,
+                for value_lower in _match_variants(value):
+                    value_has_neg = bool(_NEGATIVE_VERBS_RE.search(value_lower))
+                    value_has_pos = (not value_has_neg) and any(
+                        word in _POSITIVE_VERBS_SET for word in value_lower.split()[:4]
+                    )
+                    for rule in applicable_rules:
+                        if rule.matches_with_signals(value_lower, value_has_neg, value_has_pos):
+                            violations.append(
+                                Violation(
+                                    rule_id=rule.id,
+                                    rule_text=rule.text,
+                                    severity=rule.severity,
+                                    matched_content=f"context[{key}]: {value[:100]}",
+                                    category=rule.category,
+                                )
                             )
-                        )
 
         # M7: always run custom validators when present so their findings reach
         # the audit trail even when a CRITICAL string rule already matched. The
@@ -958,6 +1041,12 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             _is_noop,
             _rv,
         ) = self._hot
+        # Obfuscated input (fullwidth forms, zero-width or other format chars) is
+        # matched on both its original and normalized text. Only the Python path
+        # below runs that second pass, so such input skips the Rust fast paths.
+        # ASCII input pays one isascii() check per text here.
+        if _rv is not None and _needs_normalized_pass(action, context):
+            _rv = None
         if (
             _rv is not None
             and _fast_records is not None
@@ -1073,9 +1162,6 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         action_trimmed = action[:500]
         action_200 = action[:200]
 
-        text_lower = action.lower()
-        _first_word, _, _ = text_lower.partition(" ")
-        _has_neg = bool(_NEGATIVE_VERBS_RE.search(text_lower))
         # M7: when custom validators are registered, do not let the matcher
         # short-circuit-raise on a CRITICAL string rule. Accumulate the violation
         # instead so the custom-validator block (below) and the audit write both
@@ -1093,60 +1179,71 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         # mode (``_fast_records is not None``) keeps the short-circuit, so the hot
         # benchmark path is unchanged.
         matcher_strict = strict and not self.custom_validators and _fast_records is not None
-        if _has_ac and _first_word in _pos_verbs and not _has_neg:
-            violations = self._validate_python_ac(
-                action,
-                matcher_strict,
-                text_lower,
-                True,
-                violations,
-            )
-        elif _has_ac:
-            violations = self._validate_python_ac(
-                action,
-                matcher_strict,
-                text_lower,
-                False,
-                violations,
-            )
-        elif _first_word in _POSITIVE_VERBS_SET and self._neg_findall is not None and not _has_neg:
-            violations = self._validate_python_regex(
-                action,
-                matcher_strict,
-                text_lower,
-                True,
-                violations,
-            )
-        elif self._combined_findall is not None:
-            violations = self._validate_python_regex(
-                action,
-                matcher_strict,
-                text_lower,
-                False,
-                violations,
-            )
+        # The original text is matched first, then its normalized form when that
+        # differs (see normalize_for_matching). Each pass uses its own signals and
+        # every Violation carries the original action, so duplicates collapse in
+        # _dedup_violations and nothing recorded shows the normalized text.
+        for text_lower in _match_variants(action):
+            _first_word, _, _ = text_lower.partition(" ")
+            _has_neg = bool(_NEGATIVE_VERBS_RE.search(text_lower))
+            if _has_ac and _first_word in _pos_verbs and not _has_neg:
+                violations = self._validate_python_ac(
+                    action,
+                    matcher_strict,
+                    text_lower,
+                    True,
+                    violations,
+                )
+            elif _has_ac:
+                violations = self._validate_python_ac(
+                    action,
+                    matcher_strict,
+                    text_lower,
+                    False,
+                    violations,
+                )
+            elif (
+                _first_word in _POSITIVE_VERBS_SET
+                and self._neg_findall is not None
+                and not _has_neg
+            ):
+                violations = self._validate_python_regex(
+                    action,
+                    matcher_strict,
+                    text_lower,
+                    True,
+                    violations,
+                )
+            elif self._combined_findall is not None:
+                violations = self._validate_python_regex(
+                    action,
+                    matcher_strict,
+                    text_lower,
+                    False,
+                    violations,
+                )
 
         if context and ("action_detail" in context or "action_description" in context):
             for key, value in context.items():
                 if key in ("action_detail", "action_description") and isinstance(value, str):
-                    val_lower = value.lower()
-                    val_neg = bool(_NEGATIVE_VERBS_RE.search(val_lower))
-                    val_pos = (not val_neg) and any(
-                        w in _POSITIVE_VERBS_SET for w in val_lower.split()[:4]
-                    )
-                    for rule in self._active_rules:
-                        if rule.matches_with_signals(val_lower, val_neg, val_pos):
-                            if violations is None:
-                                violations = []
-                            violations.append(
-                                Violation(
-                                    rule_id=rule.id,
-                                    rule_text=rule.text,
-                                    severity=rule.severity,
-                                    matched_content=f"context[{key}]: {value[:100]}",
-                                    category=rule.category,
+                    for val_lower in _match_variants(value):
+                        val_neg = bool(_NEGATIVE_VERBS_RE.search(val_lower))
+                        val_pos = (not val_neg) and any(
+                            w in _POSITIVE_VERBS_SET for w in val_lower.split()[:4]
+                        )
+                        for rule in self._active_rules:
+                            if rule.matches_with_signals(val_lower, val_neg, val_pos):
+                                if violations is None:
+                                    violations = []
+                                violations.append(
+                                    Violation(
+                                        rule_id=rule.id,
+                                        rule_text=rule.text,
+                                        severity=rule.severity,
+                                        matched_content=f"context[{key}]: {value[:100]}",
+                                        category=rule.category,
+                                    )
                                 )
-                            )
 
         # M7: always run custom validators when present so their findings reach
         # the audit trail even when a CRITICAL string rule already matched. The
@@ -1370,4 +1467,5 @@ __all__ = [
     "_NoopRecorder",
     "_dedup_violations",
     "_request_counter",
+    "normalize_for_matching",
 ]
