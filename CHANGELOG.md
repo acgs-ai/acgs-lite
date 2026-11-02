@@ -7,6 +7,368 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+This is a semver-major change (4.0.0): the production profile of the stable
+`GovernedCallable` now requires Ed25519 execution signatures.
+
+> **Upgrading `GovernedAgent`: conditional deny rules can stop firing without an
+> error.** `run()`/`arun()` keyword arguments no longer reach the engine context.
+> A caller that still passes `env="production"` (or `domain=`, `human_approval=`,
+> a timestamp, or any key a rule condition reads) per call gets no error, but a
+> rule conditioned on that key no longer matches, so the action it used to deny
+> is allowed. Move those values into `GovernedAgent(..., governance_context={...})`
+> before upgrading, or give the condition `"missing": "match"`. See the
+> `GovernedAgent` migration note below.
+
+### BREAKING
+
+- `GovernedCallable(authorization_profile=PRODUCTION)` now requires
+  `receipt_signer=`, a non-ephemeral Ed25519 `ReceiptSigner`, and
+  `trusted_execution_keys=` (`key_id -> public key hex`) that pins the signer's
+  key with execution scope. A missing, ephemeral (`Ed25519ReceiptSigner.generate()`),
+  unpinned or non-Ed25519 signer raises `LegitimacyInvariantError` at
+  construction. The production profile therefore needs the `crypto` extra.
+  Ephemeral detection covers only `generate()`: a key built with the constructor,
+  `from_seed()` or `from_private_bytes()` is accepted however its bytes were made,
+  so provisioning the key and its pin out of band is the operator's job.
+- Every production grant is signed with execution scope over a v2 receipt and an
+  envelope that commits the method, argument, policy and trusted-context digests,
+  scope, subjects, grant id and expiry (`ExecutionGrant.signed_receipt`). Grants
+  now expire after `grant_ttl_seconds` (default 300) on both the wall clock and a
+  monotonic deadline; the receipt boundary and grant carry that `expires_at`.
+- Both production carriers, `execution_grant=` and `signed_receipt=`, are verified
+  by `_verify_signed_production` before the ledger consume. Production execution
+  is denied for a receipt-scope signature, an unpinned key, a v1 receipt, a
+  decision other than `ALLOW`/`ALLOW_WITH_CONTROLS`, an expired, tampered or
+  mismatched envelope, a grant id that differs from the receipt, a signature not
+  issued by this instance for this callable, and a second use. Each issued grant
+  id is bound to the exact receipt hash and the signing key id and public key: a
+  receipt signed by another pinned key, or a different receipt reusing a live grant
+  id, is refused before the ledger consume and cannot lock out the real grant.
+- Expiry blocks new executions only. A retry with the grant and the
+  `execution_attempt_id` the ledger already recorded is still answered from the
+  ledger after `grant_ttl_seconds` (completed result, or the recorded status),
+  with no new side effect; signature, key pin and bindings are still verified.
+  The issuing instance keeps a consumed grant recoverable while its attempt runs and
+  for one further `grant_ttl_seconds` after the later of expiry and the attempt's
+  settlement, so a slow attempt is still recoverable after it finishes, then drops
+  it so the registry stays bounded; a later retry is refused, never re-executed.
+  `ExecutionAuthority.verify`, `validate_receipt_for_execution` and `call_matches`
+  gain a keyword-only `enforce_expiry=True` for this.
+- `signed_receipt=` is now executable in production when it is this instance's
+  execution signature. It shares the grant's single-use ledger entry, so a grant
+  and its signed receipt together execute once.
+- `trusted_issuer_keys` no longer authorizes execution; only
+  `trusted_execution_keys` does.
+- `receipt_signer`, `trusted_execution_keys` and `grant_ttl_seconds` are refused
+  outside the production profile. The compatibility profile is unchanged.
+- Governed payloads are JSON-only. The governance projector
+  (`governance_payloads_for_enforcement`), the invocation binder / argument digest
+  (`canonical_argument_digest`, `bind_invocation`) and the output digest
+  (`digest_output`) admit exactly the same values, matched with `type(v) is T`, never
+  `isinstance`: `dict` whose keys are all exact `str`, `list`, `tuple` (evaluated as a
+  list; the argument digest still distinguishes it from a list), `str`, `int`, `bool`,
+  finite `float`, `None`, and `bytes`/`bytearray` that decode as strict UTF-8 with no
+  NUL (evaluated as text). Nesting deeper than 32 levels, reference cycles and the
+  10,000-character budget still deny. Earlier 4.0 work projected rich objects, and
+  every round of that left a value whose runtime behaviour differed from its projected
+  state (an `Enum` with `str` mixin data or extra member attributes, a dataclass or
+  model overriding `__getattribute__`, a `@computed_field` that mutates or flips state,
+  a property shadowing a pydantic extra key); those are now denied outright.
+  **Denied** with `GOVERNANCE-PAYLOAD-UNEVALUABLE`, at any depth, on input and output
+  in every profile: `Enum`/`IntEnum`/`StrEnum` members, dataclasses, pydantic models
+  (v1 and v2, including `RootModel`), `datetime`/`date`/`time`, `UUID`, paths,
+  `Decimal`, `set`/`frozenset`, `NamedTuple`, every non-`dict` `Mapping` and
+  non-`list`/`tuple` sequence (`OrderedDict`, `defaultdict`, `Counter`, `ChainMap`,
+  `MappingProxyType`, `deque`, `array`, `memoryview`, generators), subclasses of any
+  accepted type (including `str`/`int`/`float`/`bytes` subclasses, and subclasses
+  whose metaclass makes them compare and hash equal to the base type), dict keys that
+  are not exact `str` (`int`, `bool`, `None`, `Enum`, `tuple` keys), NaN and
+  infinities, plain objects, exceptions and handles. The binder raises
+  `ArgumentNotDigestible` for the same values (and now also for undecodable or
+  NUL-bearing bytes, nesting deeper than 32 levels and integers beyond Python's
+  int-to-str limit), and computes the argument digest before it reads `scope` or
+  `subjects`, so it never calls `str()` on a caller-supplied object. Output that
+  is not JSON-native denies after the call ran: the attempt is recorded `PARTIAL`
+  and the caller does not receive the result; a recovery replay of that attempt is
+  refused. `governance_payloads_for_enforcement` has no `skip_opaque` keyword.
+  Argument digests of JSON-native values are unchanged.
+  Tests whose expectation changed (25 functions, 44 cases): in
+  `test_governance_projection_allowlist.py`, the five rich rows of
+  `test_allowlisted_hidden_content_is_evaluated_on_input_and_output` moved to
+  `test_unlisted_type_is_denied_on_input_and_output` (the control rows remain as
+  `test_plain_keyword_content_is_denied_by_rule_on_input_and_output`),
+  `test_benign_allowlisted_payload_projects_every_field` and
+  `test_benign_allowlisted_output_is_returned` (JSON-native fixture),
+  `test_enum_with_none_value_is_skipped_like_none` (now `..._is_denied_not_skipped`);
+  in `test_governed_nested_payloads.py`,
+  `test_keyword_object_fields_are_evaluated_at_issue_and_execute` (now
+  `test_keyword_objects_are_denied_at_issue_and_execute`),
+  `test_container_elements_are_evaluated` (now `test_rich_container_elements_are_denied`),
+  `test_keyword_and_positional_object_yield_the_same_evaluated_content` (now
+  `..._deny_alike`), `test_disguised_and_repr_false_fields_reach_the_engine` (now
+  `test_disguised_and_repr_false_objects_deny_instead_of_using_repr`),
+  `test_benign_nested_payload_still_mints_a_grant`, `test_nested_output_content_is_evaluated`
+  (plus the new `test_nested_rich_output_is_denied`), `test_well_known_value_types_are_projected`
+  (now `test_well_known_value_types_are_denied` and
+  `test_well_known_values_converted_by_the_caller_are_projected`),
+  `test_well_known_nested_values_are_evaluated_not_denied` (now
+  `..._deny_and_conversions_are_evaluated`), `test_benign_well_known_nested_values_mint`
+  (now `test_benign_well_known_values_mint_only_after_conversion`),
+  `test_enum_keys_project_while_legacy_dict_cycles_and_opaque_keys_deny` (now
+  `test_enum_keys_legacy_dict_cycles_and_opaque_keys_deny`),
+  `test_redacted_model_output_content_is_evaluated` and `..._input_...` (now
+  `test_redacted_model_output_is_denied` / `..._input_is_denied`),
+  `test_model_field_values_are_projected_recursively` (now
+  `test_models_are_denied_with_or_without_opaque_fields`); in
+  `test_governed_payload_enforcement.py`,
+  `test_decimal_and_enum_positional_arguments_are_evaluated` (now
+  `..._deny_and_conversions_are_evaluated`), `test_enforcement_payload_helper_counts_every_value`
+  (an `int` key denies), `test_undecodable_bytes_denied` (the binder denies first on
+  execute); in `test_invocation_binding.py`,
+  `test_int_and_str_mapping_keys_have_distinct_digests` (now
+  `test_only_str_mapping_keys_are_digestible`),
+  `test_enum_digest_includes_fully_qualified_type_identity` and
+  `test_enum_mixin_values_do_not_alias_their_primitives` (now
+  `test_enum_members_are_not_digestible` / `test_enum_mixin_members_are_not_digestible`);
+  in `test_execution_hardening.py`,
+  `test_custom_result_with_constant_repr_is_not_recovered_as_verified` (output
+  governance denies the dataclass before the digest) and
+  `test_distinct_enum_types_cannot_substitute_for_granted_argument` (now
+  `test_enum_arguments_cannot_be_granted_or_substituted`). Regression matrix:
+  `tests/test_governance_json_only.py`.
+- `GovernedAgent.run()` and `.arun()` enforce the same fail-closed payload contract
+  as `GovernedCallable`. The input string, the caller's keyword arguments and the
+  agent's output are projected with `governance_payloads_for_enforcement` instead of
+  the truncating preview serializer, so content past 10,000 characters and content
+  inside opaque values is no longer skipped: an oversize value denies with
+  `GOVERNANCE-PAYLOAD-OVERSIZE` and a non-JSON value with
+  `GOVERNANCE-PAYLOAD-UNEVALUABLE` (`GovernancePayloadError`). This includes an input
+  string over 10,000 characters, framework objects (callbacks, clients) passed as
+  `run()` keyword arguments, and an agent that returns a framework message or
+  response object. Every engine result must be `valid is True`: `strict=False` no
+  longer lets a blocking input or kwargs violation run the agent, or a blocking
+  output violation return the output. Non-blocking (warning) violations still pass
+  in both modes. A caller-supplied `response_format` is now governed like any other
+  kwarg; the structured-output request `GovernedAgent` injects from the constitution
+  is not evaluated as caller content. Output rule violations still drive the
+  `max_retries` remediation loop and deny once it is exhausted; an oversize or
+  non-JSON output denies at once without re-invoking the agent.
+  `validate_output=False` remains the explicit opt-out for output enforcement (it also
+  disables structured-output injection). Integration adapters keep their existing
+  preview-based, observational checks. Tests whose expectation changed: in
+  `test_core.py`, `TestIntegration::test_full_governance_pipeline` (the violating
+  `strict=False` run now raises `SAFE-001` and the agent is not called); in
+  `test_examples_smoke.py`, `test_example_runs_successfully[quickstart.py]` and
+  `[quickstart_content_mod.py]` (the examples now catch and print the denial of the
+  violating `strict=False` runs). Regression matrix:
+  `tests/test_governed_agent_payload_enforcement.py`.
+- `GovernedAgent.run()` and `.arun()` no longer pass the caller's keyword arguments
+  to the engine as its evaluation context. The engine reads the clock for
+  time-bounded rules (`timestamp`, `evaluation_time`, `valid_at`, `at`) and the
+  inputs to rule `condition` predicates and custom validators from that context,
+  so a caller could pass `timestamp="2000-01-01T00:00:00"` to deactivate a rule
+  with a later `valid_from`, or a condition key such as `env=` to switch a
+  conditional rule off. The context is now built only from the new constructor
+  argument `governance_context=` (a mapping, copied at construction and never
+  merged with per-call kwargs) plus the call's `governance_action` (still chosen
+  by the caller, and it overrides a `governance_action` set in
+  `governance_context`, so rule conditions on it are caller-selected), and every
+  check of the call uses it: the input, the caller's kwargs, and the agent's
+  output, including each remediation retry's output. The output check adds
+  `"source": "agent_output"` unless `governance_context` sets `source` itself.
+  Caller kwargs are still evaluated in full as payload content.
+  `action_detail`/`action_description` passed as `run()` kwargs are no longer
+  matched as context values, but their text is still matched as kwargs
+  payload. The CDP record's `human_approval` and `domain` obligations
+  inputs are likewise read from `governance_context`, not from caller kwargs.
+  Regression tests: `tests/test_governed_agent_trusted_context.py`.
+
+### Migration to 4.0
+
+- Load a persistent Ed25519 key (`Ed25519ReceiptSigner.from_private_bytes(...)`,
+  or a KMS/HSM-backed `ReceiptSigner`) and pass it as `receipt_signer`. Do not use
+  `generate()` in production.
+- Distribute the public key out of band and pass it in `trusted_execution_keys`
+  from deployment configuration, keyed by the signer's `key_id`. Moving a key from
+  `trusted_issuer_keys` does not grant execution scope by itself; add it to
+  `trusted_execution_keys` deliberately.
+- Execute within `grant_ttl_seconds` of `issue_grant()`, or raise the TTL.
+- The ledger is still in-process: a signed receipt executes only on the instance
+  that issued it. See `docs/api/legitimacy.md`.
+- Install `acgs-lite[crypto]` wherever the production profile runs.
+- Convert rich objects to JSON-native values before calling a governed function,
+  for arguments and for what it returns: `model.model_dump(mode="json")` for pydantic
+  models, `dataclasses.asdict(...)` (then convert its fields), `value.isoformat()` for
+  `datetime`/`date`/`time`, `str(uuid)`, `str(path)`, `str(decimal)`, `member.value`
+  for an `Enum`, `sorted(...)` for a set, and `str` keys for dicts. The governed
+  function receives exactly the value that was evaluated, so do the conversion at the
+  call site, not inside the governed function.
+- `GovernedAgent`: do not rely on `strict=False` to let a violating run proceed; catch
+  `ConstitutionalViolationError` where the old code read the result. Return a
+  JSON-native value from the wrapped agent (for example `message.content` or
+  `response.model_dump(mode="json")`), or pass `validate_output=False` to skip output
+  enforcement deliberately. Pass handles such as callbacks and clients through a
+  closure or the agent's constructor rather than as `run()` keyword arguments, and keep
+  each input, kwargs mapping and output within 10,000 characters.
+- `GovernedAgent`: move any engine context you passed as `run()`/`arun()` keyword
+  arguments (`env=`, `environment=`, `domain=`, `human_approval=`, an evaluation
+  timestamp, or keys your rule conditions or custom validators read) into
+  `GovernedAgent(..., governance_context={...})` from deployment configuration.
+  That context governs the agent's output as well as its input, so a rule
+  conditioned on it (or bounded by its clock) now also applies to what the agent
+  returns. A conditional rule whose key is absent from that mapping is inactive
+  unless its condition uses `"missing": "match"`, so review conditional rules
+  when migrating. Build a separate `GovernedAgent` per distinct trusted context.
+
+### Security
+
+- `GovernedCallable` no longer fails open on payloads it could not evaluate. Governed
+  input and output longer than 10,000 characters are now denied with
+  `GovernancePayloadError` (`rule_id="GOVERNANCE-PAYLOAD-OVERSIZE"`) instead of being
+  truncated before evaluation, at issue and at execute. Oversize output is detected after
+  the call ran: the attempt is recorded (`PARTIAL`) and the caller does not receive the
+  result.
+- Top-level scalar arguments and return values (`int`, `float`, `bool`, UTF-8
+  `bytes`) are now evaluated instead of being skipped.
+- Governed arguments and return values are projected recursively for enforcement, at any
+  nesting depth and whether passed positionally or by keyword, under the JSON-only
+  contract above. The projector never calls a method the value's own type can override
+  (`items()`, `model_dump()`, `dict()`, `__dict__`, `__getattr__`, `__str__`), so a value
+  cannot choose what it appears to contain. Previously a nested object reached the
+  engine as its `repr()`/`__str__` text, so its content was never evaluated. Nothing is
+  stringified with a `default=str` fallback any more.
+- Values that cannot be evaluated in full are denied in every profile with
+  `rule_id="GOVERNANCE-PAYLOAD-UNEVALUABLE"`, at any depth, in arguments (before the
+  call) and return values (after it, attempt `PARTIAL`, result withheld) alike: every
+  type outside the JSON-only contract, bytes that are not strict UTF-8 or that decode
+  to text containing NUL (UTF-16/UTF-32 smuggling), non-`str` dict keys, NaN and
+  infinities, reference cycles and nesting deeper than 32 levels. Pass handles through
+  a closure or `functools.partial`, not as governed arguments.
+- `GovernedCallable(strict=False)` no longer turns enforcement into log-only: a blocking
+  engine verdict (or a result without `valid is True`) denies at issue, execute input and
+  execute output, raising with the primary violation's `rule_id`. The production profile
+  now rejects `strict=False` at construction.
+- `serialize_for_governance` / `iter_governance_payloads` are unchanged and documented as
+  preview-only; enforcement uses the new `governance_payloads_for_enforcement`.
+- `replay_and_verify(..., expected_policy_digest=...)` fails closed (`ok is False`) when the
+  signed execution envelope commits no `PolicyBinding.digest` (`policy_digest_absent`) or a
+  different one (`policy_digest_mismatch`), so a same-label constitution with different
+  rule patterns no longer replays as valid.
+- One decision receipt now mints at most one execution grant: `ExecutionAuthority.issue`
+  refuses a second grant for the same `receipt_hash`, and the grant ledger refuses to bind
+  one receipt to two grants. Grant ids are random server-side values from `secrets`,
+  pre-allocated by `ExecutionAuthority.allocate_grant_id()` and never accepted from callers.
+- A `BaseException` that is not an `Exception` (`KeyboardInterrupt`, `SystemExit`, or the
+  `GeneratorExit` raised when a governed coroutine is closed mid-await) no longer leaves
+  the ledger attempt `STARTED`. The attempt is recorded `PARTIAL` if the callable had
+  started, else `FAILED`, with `error_code="interrupted"`, and the exception still
+  propagates. A retry with the same `execution_attempt_id` now reports that status
+  instead of "already in flight" forever.
+- The same holds for an interrupt raised after the callable returned, while the
+  completed result is being committed (waiting for the completion lock, writing the
+  ledger record, or writing the durable `execution_completed` audit entry). The attempt
+  is recorded `PARTIAL` with `error_code="interrupted"` and the exception propagates. A
+  `COMPLETED` ledger record whose durable audit entry was not yet written (under
+  `require_durable_audit=True`) is replaced with `PARTIAL`. Without durable audit a
+  `COMPLETED` record the ledger already wrote is the commit and is kept, so recovery
+  returns it. If the attempt cannot be settled, execution is disabled on the instance.
+- The same holds before the callable runs. An interrupt (`KeyboardInterrupt`,
+  `SystemExit`) raised in the durable `execution_authorized` audit write under
+  `require_durable_audit=True`, an interrupt or error raised while releasing the
+  grant reservation after the ledger consume, or one raised while entering the
+  governed call (including recovery of the ledger outcome) now records the
+  attempt `FAILED` (`error_code="interrupted"`, or `"exception"` for an error) and
+  propagates; the callable does not run, and a retry reports `attempt already
+  failed` instead of `attempt already in flight` forever. A call now settles only
+  the attempt it started: a failure while recovering an earlier attempt never
+  writes a terminal status over that attempt's record.
+- Parameter defaults the call relies on are now evaluated, not only digested. The
+  argument digest has always bound defaults, but `GovernedCallable` evaluated only the
+  raw call arguments, so a default such as `note: str = "<forbidden keyword>"` was
+  committed in the receipt and never checked. Defaults omitted by the caller are
+  evaluated as extra payloads after the call arguments, at issue and at execute, in
+  every profile; explicitly passed values and `*args`/`**kwargs` are not included, and
+  existing payloads are unchanged. A defaulted parameter named `self` or `cls` is
+  evaluated like any other, in both profiles: a real receiver is always supplied, so
+  only a free function's ordinary parameter can default under that name (production
+  digests it, and exempting it let `def f(x, cls="<forbidden keyword>")` run). A
+  non-JSON-native `self`/`cls` default, such as a class object, therefore now denies
+  in the compatibility profile too. A default that violates a rule, or is
+  longer than 10,000 characters, now denies. A non-JSON-native default already denied
+  through the binder (`ArgumentNotDigestible`); at issue it is now refused first with
+  `GOVERNANCE-PAYLOAD-UNEVALUABLE`. New helper:
+  `acgs_lite.legitimacy.invocation.defaulted_argument_values`.
+- `GovernedCallable` now detects arguments mutated between authorization and the
+  call. The argument digest bound at the gate is recomputed, with the same binding
+  options, after the Z3 gate and payload validation and immediately before the
+  function runs, in every profile. If a list or dict argument changed in between
+  (another thread, or a hook running inside validation), the call is denied with
+  `LegitimacyInvariantError("invocation binding mismatch: ...")`, the callable does
+  not run, and a production attempt is recorded `FAILED`. Arguments are not copied;
+  the callable still receives the caller's objects.
+- `GovernanceEngine.validate` now matches rule keywords and patterns against the
+  Unicode-normalized action as well as the original. Matching used `action.lower()`
+  only, so a fullwidth keyword (`ｄｅｌｅｔｅ`) or one with a zero-width space, zero-width
+  joiner or soft hyphen spliced in evaded a rule blocking `delete`. Non-ASCII text is
+  now also matched after NFKC folding with format characters (category `Cf`) removed,
+  for the action and the `action_detail`/`action_description` context values, in the
+  hot path and the runtime-rule-filtering path. Findings from both passes are unioned,
+  so normalization can only add a denial. Receipts, audit entries, `ValidationResult.action`
+  and `Violation.matched_content` keep the original text. Such input skips the Rust fast
+  path and runs on the Python matcher; ASCII input is unchanged and pays one
+  `isascii()` check. New helper: `acgs_lite.engine.core.normalize_for_matching`.
+- The normalized match text now also drops every Unicode Default_Ignorable_Code_Point
+  (Unicode 16.0.0 `DerivedCoreProperties.txt`), not only category `Cf`. Invisible code
+  points of other categories survived NFKC and still split a keyword: the combining
+  grapheme joiner U+034F, variation selectors U+FE00–FE0F and U+E0100–E01EF, Khmer
+  inherent vowels U+17B4–17B5 (all `Mn`), Hangul fillers U+115F–1160, U+3164 and
+  U+FFA0 (`Lo`), and the reserved ignorable ranges (`Cn`). Other combining marks are
+  kept, so accented text is not folded; text with an emoji presentation selector
+  (U+FE0F) and no keyword stays valid. Homoglyphs (confusables) are still not folded.
+- `GovernedAgent.arun()` now checks the circuit breaker. Only `run()` did, so a tripped
+  Article 14 kill-switch (`GovernanceCircuitBreaker.trip()`, or the cross-process
+  signal file) did not stop async runs. Both entry points share one preamble that
+  raises `GovernanceHaltError` before the MACI check, kwargs handling, input
+  validation or the agent call. `arun()` also emits CDP records as `run()` does: an
+  `allow` record when the output passes and a `deny` record when the output is finally
+  denied, and a `GovernanceHaltError` from the configured intervention engine reaches
+  the caller. Regression tests: `tests/test_governed_agent_arun_parity.py`.
+
+### Added
+
+- Decision receipt schema v2 (criterion 16). `DecisionReceipt` gains trailing defaulted
+  fields `schema_version`, `grant_id`, `policy_digest` (full `PolicyBinding.digest`),
+  `method_id`, `argument_digest` and `context_digest`. v2 hashes are domain-separated with
+  `RECEIPT_HASH_DOMAIN_V2 = b"acgs-receipt-v2\x00"` over the v1 keys plus
+  `schema_version: 2` and the non-None v2 keys. v1 receipts keep their byte-identical hash
+  and wire shape; a missing `schema_version` always means v1, v2 fields on a v1 receipt
+  (or v2 keys on the wire without `schema_version: 2`) are refused, and no v1 bytes verify
+  as v2 or vice versa. `receipt_identity` returns `acgs:receipt:v2:...` for v2 receipts.
+  The v2 wire schema is closed: `SignedReceipt.from_dict` refuses unknown v2 receipt and
+  `execution_boundary` keys (v1 keeps ignoring extra keys) and reports a non-mapping
+  `receipt` as the domain `ValueError`. `ExecutionAuthority` prunes its receipt registry
+  of expired v2 grants.
+
+### Changed
+
+- Issue receipts minted by `GovernedCallable.issue_grant` now record the engine's real
+  decision (worst verdict across payloads) instead of a fixed `"execution-grant-issued"`
+  stamp: `ALLOW` carries `BASELINE_CONSTRAINT_MARKER`; WARN-only results are
+  `ALLOW_WITH_CONTROLS` with the warning rule ids and `required_controls=("AUDIT_WARNINGS",)`.
+  Review/escalate verdicts are refused at issue with the rule's own `rule_id`; block verdicts
+  deny with the primary blocking rule; HALT propagates the engine exception.
+- `build_issue_receipt` (untiered) now requires a keyword-only `decision: EngineDecision`.
+  `ReplayInputs` gains defaulted `required_controls` and `policy_digest`;
+  `ReplayVerification` gains `policy_digest_valid` (included in `ok`).
+- `GovernedCallable.issue_grant` now mints v2 receipts that commit the grant id and policy
+  digest. `ExecutionAuthority.issue` takes a keyword-only `grant_id` (required for v2
+  receipts and checked against the receipt's committed bindings); without it only v1
+  receipts mint (legacy path). `build_issue_receipt` takes optional keyword-only
+  `grant_id` / `context_digest` and builds a v2 receipt when `grant_id` is given.
+- `replay_and_verify` reads the policy digest from a v2 receipt itself (either signature
+  scope) and fails closed with `policy_digest_conflict` when an execution envelope names a
+  different digest; v1 receipts keep the envelope path.
+
 ## [3.0.1] - 2026-09-21
 
 ### Fixed

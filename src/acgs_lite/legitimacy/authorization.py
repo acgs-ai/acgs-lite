@@ -6,16 +6,24 @@ import hashlib
 import hmac
 import json
 import secrets
+import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
+from acgs_lite.legitimacy.decide import DecisionState
 from acgs_lite.legitimacy.invariants import LegitimacyInvariantError
 from acgs_lite.legitimacy.invocation import InvocationBinding, PolicyBinding
-from acgs_lite.legitimacy.receipt import DecisionReceipt, ExecutionBoundary
+from acgs_lite.legitimacy.receipt import (
+    BASELINE_CONSTRAINT_MARKER,
+    RECEIPT_SCHEMA_V2,
+    DecisionReceipt,
+    ExecutionBoundary,
+)
+from acgs_lite.legitimacy.signing import SignedReceipt
 
 
 class AuthorizationProfile(str, Enum):
@@ -99,6 +107,9 @@ class ExecutionGrant:
     context_digest: str | None = None
     # Keeping the target alive prevents reuse of its MAC-bound process-local id.
     callable_target: Callable[..., Any] | None = field(default=None, repr=False, compare=False)
+    # Production: the Ed25519 execution-scope signature over this grant's receipt.
+    # Not MAC-bound; the gate requires it to sign exactly ``receipt``.
+    signed_receipt: SignedReceipt | None = field(default=None, repr=False)
 
     def to_evidence_dict(self) -> dict[str, Any]:
         """Serializable evidence. The MAC is omitted so this cannot be replayed as a grant."""
@@ -118,12 +129,95 @@ class ExecutionGrant:
         }
 
 
+def _parse_expiry(expires_at: str | None) -> datetime | None:
+    """Expiry as an aware datetime; ``None`` (never prune) when absent or unparseable."""
+    if expires_at is None:
+        return None
+    try:
+        expires = datetime.fromisoformat(expires_at)
+    except ValueError:
+        return None
+    return expires if expires.tzinfo is not None else expires.replace(tzinfo=timezone.utc)
+
+
 class ExecutionAuthority:
-    """Mints and verifies same-instance grants with a per-authority HMAC key."""
+    """Mints and verifies same-instance grants with a per-authority HMAC key.
+
+    Grant ids are random, server-side and single use: v2 receipts commit an id
+    pre-allocated by :meth:`allocate_grant_id`, and one receipt mints at most one
+    grant. Both registries are process-local, like the grant ledger. Entries for
+    expired v2 grants are pruned: such a receipt can never mint again because its
+    committed grant id is spent.
+    """
 
     def __init__(self) -> None:
         self.issuer_id = uuid.uuid4().hex
         self._secret = secrets.token_bytes(32)
+        self._lock = threading.Lock()
+        self._pending: set[str] = set()
+        # receipt_hash -> (grant_id, prune-after deadline or None to keep forever)
+        self._issued_receipts: dict[str, tuple[str, datetime | None]] = {}
+
+    def allocate_grant_id(self) -> str:
+        """Reserve a fresh random grant id to be committed into a v2 receipt."""
+        grant_id = secrets.token_hex(16)
+        with self._lock:
+            self._pending.add(grant_id)
+        return grant_id
+
+    def release_grant_id(self, grant_id: str) -> None:
+        """Discard an allocation whose receipt was never issued."""
+        with self._lock:
+            self._pending.discard(grant_id)
+
+    def _claim_grant_id(
+        self,
+        *,
+        receipt: DecisionReceipt,
+        invocation: InvocationBinding,
+        policy: PolicyBinding,
+        context_digest: str | None,
+        grant_id: str | None,
+        expires_at: str | None,
+    ) -> str:
+        v2 = receipt.schema_version == RECEIPT_SCHEMA_V2
+        # Only v2 entries may be pruned: a v1 legacy receipt has no committed grant id,
+        # so dropping its entry would let it mint a second grant.
+        prune_after = _parse_expiry(expires_at) if v2 else None
+        with self._lock:
+            now = datetime.now(timezone.utc)
+            for stale in [
+                receipt_hash
+                for receipt_hash, (_gid, due) in self._issued_receipts.items()
+                if due is not None and due < now
+            ]:
+                del self._issued_receipts[stale]
+            if receipt.receipt_hash in self._issued_receipts:
+                raise LegitimacyInvariantError("receipt already minted a grant")
+            if grant_id is None:
+                if v2:
+                    raise LegitimacyInvariantError("v2 receipt requires an allocated grant id")
+                claimed = secrets.token_hex(16)
+            else:
+                if grant_id not in self._pending:
+                    raise LegitimacyInvariantError("grant id was not allocated by this authority")
+                # Single use: a refused allocation is spent, never retried.
+                self._pending.discard(grant_id)
+                claimed = grant_id
+            if v2:
+                if receipt.grant_id != claimed:
+                    raise LegitimacyInvariantError("grant id does not match receipt")
+                if receipt.policy_digest != policy.digest:
+                    raise LegitimacyInvariantError("receipt policy digest does not match policy")
+                if (
+                    receipt.method_id != invocation.method_id
+                    or receipt.argument_digest != invocation.argument_digest
+                ):
+                    raise LegitimacyInvariantError("receipt does not match invocation binding")
+                if receipt.context_digest != context_digest:
+                    raise LegitimacyInvariantError("receipt does not match trusted context digest")
+            self._issued_receipts[receipt.receipt_hash] = (claimed, prune_after)
+            return claimed
 
     def issue(
         self,
@@ -135,9 +229,28 @@ class ExecutionAuthority:
         single_use: bool = True,
         context_digest: str | None = None,
         callable_target: Callable[..., Any] | None = None,
+        grant_id: str | None = None,
+        signed_receipt: SignedReceipt | None = None,
     ) -> ExecutionGrant:
+        """Mint the one grant for ``receipt``.
+
+        ``grant_id`` must come from :meth:`allocate_grant_id` and is required for v2
+        receipts, which commit it. Without it only v1 receipts mint (legacy path).
+        ``signed_receipt``, when given, must sign exactly ``receipt``.
+        """
+        if signed_receipt is not None and (
+            signed_receipt.receipt.receipt_hash != receipt.receipt_hash
+        ):
+            raise LegitimacyInvariantError("signed receipt does not sign this grant's receipt")
+        grant_id = self._claim_grant_id(
+            receipt=receipt,
+            invocation=invocation,
+            policy=policy,
+            context_digest=context_digest,
+            grant_id=grant_id,
+            expires_at=expires_at,
+        )
         issued_at = datetime.now(timezone.utc).isoformat()
-        grant_id = uuid.uuid4().hex
         mac = self._mac(
             grant_id=grant_id,
             receipt_hash=receipt.receipt_hash,
@@ -167,6 +280,7 @@ class ExecutionAuthority:
             single_use=single_use,
             binding_mac=mac,
             callable_target=callable_target,
+            signed_receipt=signed_receipt,
         )
 
     def verify(
@@ -176,7 +290,14 @@ class ExecutionAuthority:
         invocation: InvocationBinding,
         policy: PolicyBinding,
         context_digest: str | None = None,
+        enforce_expiry: bool = True,
     ) -> None:
+        """Fail closed unless ``grant`` is this authority's, intact, and bound to the call.
+
+        ``enforce_expiry=False`` skips only the clock comparison. Callers use it for
+        recovery of an attempt already recorded for this grant, which runs no new
+        side effect; the expiry string must still parse.
+        """
         if grant.issuer_id != self.issuer_id:
             raise LegitimacyInvariantError("grant issuer does not match this authority")
         expected = self._mac(
@@ -197,6 +318,11 @@ class ExecutionAuthority:
             raise LegitimacyInvariantError("grant authenticity check failed")
         if not grant.receipt.verify_hash():
             raise LegitimacyInvariantError("grant receipt integrity check failed")
+        if (
+            grant.receipt.schema_version == RECEIPT_SCHEMA_V2
+            and grant.receipt.grant_id != grant.grant_id
+        ):
+            raise LegitimacyInvariantError("grant id does not match receipt")
         if grant.method_id != invocation.method_id:
             raise LegitimacyInvariantError("grant method identity mismatch")
         if grant.argument_digest != invocation.argument_digest:
@@ -212,7 +338,7 @@ class ExecutionAuthority:
                 raise LegitimacyInvariantError("grant expiry is not parseable") from exc
             if expires.tzinfo is None:
                 expires = expires.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) > expires:
+            if enforce_expiry and datetime.now(timezone.utc) > expires:
                 raise LegitimacyInvariantError("grant has expired")
 
     def _mac(
@@ -255,42 +381,153 @@ class ExecutionAuthority:
         return digest
 
 
+AUDIT_WARNINGS_CONTROL = "AUDIT_WARNINGS"
+
+# Worst verdict wins when aggregating payloads.
+_DECISION_RANK: dict[str, int] = {
+    "ALLOW": 0,
+    "ALLOW_WITH_CONTROLS": 1,
+    "STRUCTURED_REVIEW_REQUIRED": 2,
+    "DENY_GOAL": 3,
+    "HARD_DENY": 4,
+}
+
+
+@dataclass(slots=True, frozen=True)
+class EngineDecision:
+    """The engine's aggregated verdict over every governed payload of one invocation."""
+
+    decision_type: DecisionState
+    matched_rule_ids: tuple[str, ...]
+    required_controls: tuple[str, ...]
+    rationale: str | None
+    payload_count: int
+    primary_rule_id: str | None = None
+
+
+def _rule_ids(items: object) -> list[str]:
+    if not isinstance(items, (list, tuple)):
+        return []
+    return [
+        rid for rid in (getattr(item, "rule_id", None) for item in items) if isinstance(rid, str)
+    ]
+
+
+def _classify_result(result: object) -> tuple[DecisionState, list[str]]:
+    """Map one engine result to a decision and the rule ids that produced it."""
+    if getattr(result, "valid", None) is True:
+        warning_ids = _rule_ids(getattr(result, "warnings", None))
+        return ("ALLOW_WITH_CONTROLS", warning_ids) if warning_ids else ("ALLOW", [])
+    blocking_ids = _rule_ids(getattr(result, "violations", None))
+    # ViolationAction is a str enum; compare by value to keep legitimacy engine-agnostic.
+    if getattr(result, "action_taken", None) == "halt_and_alert":
+        return "HARD_DENY", blocking_ids
+    review_ids = set(_rule_ids(getattr(result, "review_requests", None)))
+    review_ids.update(_rule_ids(getattr(result, "escalations", None)))
+    if blocking_ids and all(rid in review_ids for rid in blocking_ids):
+        return "STRUCTURED_REVIEW_REQUIRED", blocking_ids
+    # Any non-review blocking violation, or an invalid result with no evidence, denies.
+    deny_ids = [rid for rid in blocking_ids if rid not in review_ids]
+    return "DENY_GOAL", deny_ids
+
+
+def engine_decision_from_results(results: Sequence[object]) -> EngineDecision:
+    """Aggregate per-payload engine results; the worst verdict wins, order-independently."""
+    if not results:
+        raise LegitimacyInvariantError("no engine result to decide from")
+    classified = [_classify_result(result) for result in results]
+    worst = max((decision for decision, _ids in classified), key=_DECISION_RANK.__getitem__)
+    contributing = [ids for decision, ids in classified if decision == worst]
+    primary = next((ids[0] for ids in contributing if ids), None)
+    matched = tuple(sorted({rid for ids in contributing for rid in ids}))
+    if worst == "ALLOW":
+        return EngineDecision("ALLOW", (BASELINE_CONSTRAINT_MARKER,), (), None, len(results))
+    if worst == "ALLOW_WITH_CONTROLS":
+        return EngineDecision(
+            "ALLOW_WITH_CONTROLS", matched, (AUDIT_WARNINGS_CONTROL,), None, len(results), primary
+        )
+    rationale = f"engine {worst}: {', '.join(matched) or 'no violation evidence'}"
+    return EngineDecision(worst, matched, (), rationale, len(results), primary)
+
+
 def build_issue_receipt(
     *,
     func: Callable[..., Any],
     invocation: InvocationBinding,
     policy: PolicyBinding,
+    decision: EngineDecision,
+    grant_id: str | None = None,
+    context_digest: str | None = None,
+    expires_at: str | None = None,
 ) -> DecisionReceipt:
-    """Kernel-built evidence receipt. Callers cannot supply the receipt being bound."""
+    """Kernel-built evidence receipt recording the engine's decision.
+
+    Callers cannot supply the receipt being bound. With ``grant_id`` (allocated by
+    the authority) the receipt is schema v2 and commits the grant id, the full
+    ``PolicyBinding.digest``, the method, argument and trusted-context digests.
+    Without it the receipt is v1.
+    """
+    if grant_id is None and context_digest is not None:
+        raise LegitimacyInvariantError("context digest is only committed by v2 receipts")
+    v2: dict[str, Any] = {}
+    if grant_id is not None:
+        v2 = {
+            "schema_version": RECEIPT_SCHEMA_V2,
+            "grant_id": grant_id,
+            "policy_digest": policy.digest,
+            "method_id": invocation.method_id,
+            "argument_digest": invocation.argument_digest,
+            "context_digest": context_digest,
+        }
     boundary = ExecutionBoundary(
         allowed_method=func.__name__,
         allowed_scope=invocation.scope,
         allowed_subjects=invocation.subjects,
-        expires_at=None,
+        expires_at=expires_at,
         single_use=True,
     )
     return DecisionReceipt.create(
         request_id=f"grant-{uuid.uuid4().hex}",
         goal=f"Authorized invocation of {invocation.method_id}",
         proposed_method=func.__name__,
-        decision_type="ALLOW",
+        decision_type=decision.decision_type,
         authority_basis="acgs-lite:execution-authority",
-        matched_constraints=("execution-grant-issued",),
+        matched_constraints=decision.matched_rule_ids,
         policy_version=policy.version,
-        required_controls=(),
+        required_controls=decision.required_controls,
+        denial_or_review_rationale=decision.rationale,
         execution_boundary=boundary,
+        **v2,
     )
 
 
-def authorization_envelope_json(invocation: InvocationBinding, policy: PolicyBinding) -> str:
-    """Canonical envelope covered by a v2 execution signature."""
-    payload = {
+def authorization_envelope_json(
+    invocation: InvocationBinding,
+    policy: PolicyBinding,
+    *,
+    grant_id: str | None = None,
+    context_digest: str | None = None,
+    expires_at: str | None = None,
+) -> str:
+    """Canonical envelope covered by a v2 execution signature.
+
+    The keyword-only grant fields are emitted only when given, so callers that
+    omit them get the original five-key envelope byte for byte.
+    """
+    payload: dict[str, Any] = {
         "method_id": invocation.method_id,
         "argument_digest": invocation.argument_digest,
         "policy_digest": policy.digest,
         "scope": invocation.scope,
         "subjects": list(invocation.subjects),
     }
+    for key, value in (
+        ("grant_id", grant_id),
+        ("context_digest", context_digest),
+        ("expires_at", expires_at),
+    ):
+        if value is not None:
+            payload[key] = value
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
@@ -356,12 +593,14 @@ __all__ = [
     "AUTHORIZATION_MAC_DOMAIN",
     "AsyncGrantResolver",
     "AuthorizationProfile",
+    "EngineDecision",
     "ExecutionAuthority",
     "ExecutionGrant",
     "GrantResolver",
     "TrustedExecutionContext",
     "authorization_envelope_json",
     "build_issue_receipt",
+    "engine_decision_from_results",
     "extract_authorization_kwargs",
     "parse_authorization_envelope",
     "resolve_profile",

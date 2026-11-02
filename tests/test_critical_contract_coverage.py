@@ -709,6 +709,7 @@ from acgs_lite.engine.rust import _RUST_ALLOW, _RUST_DENY, _RUST_DENY_CRITICAL
 from acgs_lite.errors import ConstitutionalViolationError
 from acgs_lite.legitimacy import LegitimacyInvariantError, TrustedExecutionContext
 from acgs_lite.legitimacy.authorization import (
+    EngineDecision,
     ExecutionAuthority,
     build_issue_receipt,
     extract_authorization_kwargs,
@@ -738,6 +739,15 @@ from acgs_lite.legitimacy.signing import (
     SignedReceipt,
     sign_execution_authorization,
     verify_signature,
+)
+
+# Phase 2: callers must pass the engine's decision; these tests exercise an allow.
+_ALLOW_DECISION = EngineDecision(
+    decision_type="ALLOW",
+    matched_rule_ids=("NO_SPECIFIC_CONSTRAINT_MATCHED_UNDER_POLICY_VERSION",),
+    required_controls=(),
+    rationale=None,
+    payload_count=1,
 )
 
 
@@ -1059,7 +1069,9 @@ def test_execution_authority_rejects_every_changed_binding() -> None:
     constitution = Constitution.default()
     invocation = bind_invocation(action, ("safe",), {})
     policy = bind_policy(constitution)
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
     authority = ExecutionAuthority()
     grant = authority.issue(
         receipt=receipt,
@@ -1122,7 +1134,9 @@ def test_execution_authority_rejects_bad_or_expired_timestamps(
 
     invocation = bind_invocation(action, ("safe",), {})
     policy = bind_policy(Constitution.default())
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
     authority = ExecutionAuthority()
     grant = authority.issue(
         receipt=receipt,
@@ -1233,7 +1247,9 @@ def test_receipt_execution_refuses_unverifiable_audit_and_control_evidence() -> 
 
     invocation = bind_invocation(action, ("account-1",), {})
     policy = bind_policy(Constitution.default())
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
 
     class MissingVerifier:
         pass
@@ -1285,7 +1301,9 @@ def test_execution_signature_binds_envelope_and_rejects_malformed_wire_data() ->
 
     invocation = bind_invocation(action, ("account-1",), {})
     policy = bind_policy(Constitution.default())
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
     with pytest.raises(ValueError, match="exactly 32 bytes"):
         Ed25519ReceiptSigner.from_seed(b"short")
     signer = Ed25519ReceiptSigner.from_seed(b"s" * 32, key_id="test-key")
@@ -1327,7 +1345,9 @@ def test_corrupted_receipt_fields_fail_before_execution(
 
     invocation = bind_invocation(action, ("safe",), {})
     policy = bind_policy(Constitution.default())
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
     object.__setattr__(receipt, field, value)
     with pytest.raises(LegitimacyInvariantError, match=message):
         validate_receipt_for_execution(receipt)
@@ -1339,7 +1359,9 @@ def test_receipt_hash_verifier_failure_is_fail_closed(monkeypatch) -> None:
 
     invocation = bind_invocation(action, ("safe",), {})
     policy = bind_policy(Constitution.default())
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
 
     def raises(_self):
         raise RuntimeError("synthetic verifier failure")
