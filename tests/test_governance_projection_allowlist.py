@@ -16,6 +16,7 @@ import array
 import asyncio
 import collections
 import enum
+import inspect
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -452,8 +453,15 @@ def test_enum_with_none_value_is_denied_not_skipped() -> None:
 
 
 def test_skip_opaque_is_no_longer_accepted() -> None:
-    with pytest.raises(TypeError):
-        governance_payloads_for_enforcement({"k": "v"}, skip_opaque=True)  # type: ignore[call-arg]
+    # Introspect rather than call with the removed keyword: the static call
+    # tripped CodeQL py/call/wrong-named-argument. Absence from the signature
+    # plus no **kwargs catch-all means any skip_opaque= call raises TypeError.
+    params = inspect.signature(governance_payloads_for_enforcement).parameters
+    assert "skip_opaque" not in params
+    assert not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+    removed = {"skip_opaque": True}
+    with pytest.raises(TypeError, match="skip_opaque"):
+        governance_payloads_for_enforcement({"k": "v"}, **removed)
 
 
 # --- benign JSON-native payloads still pass ---------------------------------------
