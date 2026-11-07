@@ -51,6 +51,10 @@ MAX_CREDENTIAL_TTL_S = 900.0
 _TOKEN_DOMAIN = b"acgs-control-plane-credential-v1\x00"
 _SCOPE = re.compile(r"[A-Za-z0-9._:/*@-]{1,256}")
 _PAYLOAD_KEYS = frozenset({"cid", "pid", "scopes", "iat", "exp", "epoch", "obo"})
+# Phase 4: "trg" (trigger) and "sys" (the principal's system_id) are present
+# only when set; an absent "sys" means system_id None.
+_OPTIONAL_KEYS = frozenset({"trg", "sys"})
+_TRIGGER_ID = re.compile(r"[A-Za-z0-9._:/@+-]{1,256}")
 _PRINCIPAL_ID = re.compile(r"[A-Za-z0-9._@:-]+")
 
 
@@ -72,6 +76,10 @@ class ScopedCredential:
     credential_id: str
     on_behalf_of: str | None = None
     """Canonical id of the original requester this session acts for (signed)."""
+    trigger_id: str | None = None
+    """The autonomous trigger this session runs under (signed, Phase 4)."""
+    system_id: str | None = None
+    """The principal's system_id at issuance (signed; must match on use)."""
 
 
 def scope_touches_core(
@@ -157,8 +165,13 @@ class CredentialIssuer:
         ttl_s: float | None = None,
         requester: Principal | None = None,
         on_behalf_of: str | None = None,
+        trigger_id: str | None = None,
     ) -> ScopedCredential:
         """Mint a credential for *principal*.
+
+        ``trigger_id`` binds the session to one autonomous trigger; the
+        dispatcher then uses it instead of a caller-supplied value. An AGENT
+        requester may not choose it.
 
         ``requester`` is who asked (``None``: the harness itself). An AGENT
         requester may only ask for itself, and no non-human principal is ever
@@ -198,6 +211,11 @@ class CredentialIssuer:
                 raise CredentialIssuanceRefused("a principal cannot act on behalf of itself")
             if requester is not None and requester.kind is PrincipalKind.AGENT:
                 raise CredentialIssuanceRefused("an agent may not name its own requester")
+        if trigger_id is not None:
+            if not isinstance(trigger_id, str) or not _TRIGGER_ID.fullmatch(trigger_id):
+                raise CredentialIssuanceRefused("trigger_id must match [A-Za-z0-9._:/@+-]{1,256}")
+            if requester is not None and requester.kind is PrincipalKind.AGENT:
+                raise CredentialIssuanceRefused("an agent may not choose its own trigger")
         now = float(self._clock())
         pid = principal.canonical_id
         with self._lock:
@@ -213,6 +231,10 @@ class CredentialIssuer:
             "epoch": epoch,
             "obo": obo,
         }
+        if trigger_id is not None:
+            payload["trg"] = trigger_id
+        if principal.system_id is not None:
+            payload["sys"] = principal.system_id
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         token = _b64encode(raw) + "." + self._mac(raw)
         return ScopedCredential(
@@ -223,6 +245,8 @@ class CredentialIssuer:
             expires_at=expires,
             credential_id=credential_id,
             on_behalf_of=obo,
+            trigger_id=trigger_id,
+            system_id=principal.system_id,
         )
 
     def verify(
@@ -249,7 +273,11 @@ class CredentialIssuer:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:  # pragma: no cover - MAC checked first
             raise CredentialInvalid("malformed token payload") from exc
-        if not isinstance(payload, dict) or set(payload) != _PAYLOAD_KEYS:
+        if (
+            not isinstance(payload, dict)
+            or not set(payload) >= _PAYLOAD_KEYS
+            or not set(payload) - _PAYLOAD_KEYS <= _OPTIONAL_KEYS
+        ):
             raise CredentialInvalid("malformed token payload")  # pragma: no cover
         current = float(self._clock()) if now is None else float(now)
         if current >= float(payload["exp"]):
@@ -262,6 +290,9 @@ class CredentialIssuer:
                 raise CredentialInvalid("credential revoked (principal epoch)")
         if principal is not None and canonical_principal_id(principal.id) != pid:
             raise CredentialInvalid("credential belongs to another principal")
+        signed_system = payload.get("sys")
+        if principal is not None and principal.system_id != signed_system:
+            raise CredentialInvalid("credential was issued for another system_id")
         scopes = frozenset(payload["scopes"])
         if required_scope not in scopes:
             raise CredentialInvalid(f"credential lacks scope {required_scope!r}")
@@ -273,6 +304,8 @@ class CredentialIssuer:
             expires_at=float(payload["exp"]),
             credential_id=str(payload["cid"]),
             on_behalf_of=None if payload["obo"] is None else str(payload["obo"]),
+            trigger_id=None if payload.get("trg") is None else str(payload["trg"]),
+            system_id=None if signed_system is None else str(signed_system),
         )
 
     # TODO(control-plane-gap): revocations and epochs live in memory; a

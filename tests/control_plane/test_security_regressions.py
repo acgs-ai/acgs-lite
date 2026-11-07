@@ -261,6 +261,9 @@ class TestHigh2TrustedComputingBase:
             "acgs_lite.control_plane.core_write",
             "acgs_lite.control_plane.credentials",
             "acgs_lite.control_plane.killswitch",
+            "acgs_lite.control_plane.telemetry",
+            "acgs_lite.control_plane.breaker",
+            "acgs_lite.control_plane.telemetry_api",
             "acgs_lite.integrations.control_plane_mcp",
         ]
         code = (
