@@ -186,6 +186,28 @@ class BudgetLedger:
         with self._lock:
             return self._state(principal.canonical_id, self._runs[principal.canonical_id])
 
+    def used_fraction(self, principal: Principal) -> float | None:
+        """Largest used/limit ratio over the run's limited resources (Phase 5
+        runbook ``budget_fraction`` stop condition); ``None`` without a run
+        or without any limit."""
+        with self._lock:
+            run = self._runs.get(principal.canonical_id)
+            if run is None:
+                return None
+            elapsed = max(0.0, float(self._clock()) - run.started)
+            limits = run.limits
+            ratios = [
+                used / limit if limit > 0 else 1.0
+                for used, limit in (
+                    (run.spend_usd, limits.spend_usd),
+                    (float(run.tokens), limits.tokens),
+                    (float(run.iterations), limits.iterations),
+                    (elapsed, limits.wall_clock_s),
+                )
+                if limit is not None
+            ]
+        return max(ratios) if ratios else None
+
     def check(self, principal: Principal) -> BudgetState:
         """Return the state or raise :class:`BudgetExhausted` (or ``KeyError``)."""
         state = self.state(principal)

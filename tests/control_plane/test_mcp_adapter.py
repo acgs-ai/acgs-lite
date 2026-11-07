@@ -66,9 +66,15 @@ def _server(
     def stats() -> dict[str, int]:
         return {"files": 3}
 
-    dispatcher.register("write_file", write_file, path_params={"path"}, opaque_params={"content"})
-    dispatcher.register("explode", explode, path_params={"path"})
-    dispatcher.register("stats", stats)
+    dispatcher.register(
+        "write_file",
+        write_file,
+        path_params={"path"},
+        opaque_params={"content"},
+        merge_capable=False,
+    )
+    dispatcher.register("explode", explode, path_params={"path"}, merge_capable=False)
+    dispatcher.register("stats", stats, merge_capable=False)
 
     async def list_tools(ctx: Any, params: Any) -> types.ListToolsResult:
         return types.ListToolsResult(tools=TOOLS)

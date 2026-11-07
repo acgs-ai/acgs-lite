@@ -9,7 +9,10 @@ namespace, INV-CORE-WRITE already denies any non-human proposer.
 
 Binding: every evidence ref must carry ``artifact_digest == candidate_digest``
 (one green run cannot certify a different candidate), and the PROMOTION
-receipt records the hashed ``candidate_digest``. The gate binds its ledger
+receipt records the hashed ``candidate_digest``. With ``roles=`` at least one
+gate-attested approver must hold the ``promotion.approve`` capability in the
+:class:`~.roles.RoleAssignments`; with ``incident_lock=`` a declared incident
+refuses promotion by anyone but the lock holder. The gate binds its ledger
 once (private capability) and requires the PDP to be bound to the *same*
 ledger, so a permissive PDP cannot be paired with the harness ledger.
 """
@@ -20,6 +23,7 @@ import re
 import threading
 import warnings
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from acgs_lite.control_plane import receipt_ledger as _ledger_module
 from acgs_lite.control_plane.approvals import SignedApproval
@@ -37,6 +41,10 @@ from acgs_lite.control_plane.principal import Principal
 from acgs_lite.control_plane.receipt_ledger import ReceiptEmissionError, ReceiptLedger
 from acgs_lite.control_plane.receipts import SignedControlPlaneReceipt, promotion_evidence_keys
 from acgs_lite.control_plane.tiers import ActionTier
+
+if TYPE_CHECKING:
+    from acgs_lite.control_plane.incident import IncidentMutationLock
+    from acgs_lite.control_plane.roles import RoleAssignments
 
 __all__ = ["PROMOTION_ACTION", "PromotionGate", "PromotionRejected"]
 
@@ -68,7 +76,23 @@ class PromotionGate:
         pdp: PolicyDecisionPoint,
         evidence_policy: EvidencePolicy = DEFAULT_EVIDENCE_POLICY,
         tier: ActionTier = DEFAULT_PROMOTION_TIER,
+        roles: RoleAssignments | None = None,
+        incident_lock: IncidentMutationLock | None = None,
     ) -> None:
+        if roles is not None:
+            from acgs_lite.control_plane.roles import RoleAssignments
+
+            if type(roles) is not RoleAssignments:
+                raise TypeError("roles must be a RoleAssignments")
+            if pdp.approval_gate is None:
+                raise ValueError("role-checked promotion needs a PDP with an ApprovalGate")
+        if incident_lock is not None:
+            from acgs_lite.control_plane.incident import IncidentMutationLock
+
+            if type(incident_lock) is not IncidentMutationLock:
+                raise TypeError("incident_lock must be an IncidentMutationLock")
+        self._roles = roles
+        self._incident_lock = incident_lock
         if type(ledger) is not ReceiptLedger:
             raise TypeError("ledger must be a ReceiptLedger")
         if not isinstance(run_verifier, ExternalRunVerifier):
@@ -188,6 +212,10 @@ class PromotionGate:
         reused = self._reused_evidence(candidate_id, refs)
         if reused:
             raise PromotionRejected("; ".join(reused))
+        if self._incident_lock is not None:
+            denial = self._incident_lock.write_denial(principal)
+            if denial is not None:
+                raise PromotionRejected(f"incident: {denial}")
         request = DecisionRequest(
             principal=principal,
             action=PROMOTION_ACTION,
@@ -200,6 +228,17 @@ class PromotionGate:
             },
             approvals=approval_tuple,
         )
+        gate = self._pdp.approval_gate
+        if self._roles is not None and gate is not None:
+            from acgs_lite.control_plane.roles import CAP_PROMOTION_APPROVE
+
+            quorum = gate.evaluate(request, approval_tuple, record_request=False)
+            if not any(
+                self._roles.has_capability(a, CAP_PROMOTION_APPROVE) for a in quorum.approvers
+            ):
+                raise PromotionRejected(
+                    "no attested approver holds the promotion.approve capability"
+                )
         decision, decided = self._pdp._decide_attested(request)
         if not decision.allowed or decided is None:
             raise PromotionRejected(f"PDP denied promotion: {decision.reason}", decision)
