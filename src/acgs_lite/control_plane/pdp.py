@@ -30,6 +30,12 @@ TODO(control-plane-gap): the PDP runs in the agent's process; an agent with
 arbitrary code execution in that process can bypass it (and every Phase 3
 harness object). Out-of-process enforcement is a later phase.
 
+Telemetry (Phase 4): with ``telemetry=`` (a
+:class:`~acgs_lite.control_plane.telemetry.TelemetryRecorder`) every
+published decision is recorded as a DECISION event, best effort: a telemetry
+failure never flips a decision and is only counted
+(:attr:`PolicyDecisionPoint.telemetry_failures`).
+
 Receipts (Phase 2): with ``receipt_ledger=`` the PDP binds that
 :class:`~acgs_lite.control_plane.receipt_ledger.ReceiptLedger` (one PDP per
 ledger, via a private capability) and appends a receipt for every decision it
@@ -74,6 +80,7 @@ if TYPE_CHECKING:
     from acgs_lite.control_plane.approvals import ApprovalGate, QuorumResult
     from acgs_lite.control_plane.killswitch import KillSwitch
     from acgs_lite.control_plane.receipt_ledger import ReceiptLedger
+    from acgs_lite.control_plane.telemetry import TelemetryRecorder
 
 __all__ = [
     "DEFAULT_TIMEOUT_S",
@@ -248,6 +255,7 @@ class PolicyDecisionPoint:
         pre_denial_window_s: float = DEFAULT_PRE_DENIAL_WINDOW_S,
         approval_gate: ApprovalGate | None = None,
         kill_switch: KillSwitch | None = None,
+        telemetry: TelemetryRecorder | None = None,
     ) -> None:
         if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)):
             raise ValueError("timeout_s must be a number")
@@ -275,8 +283,15 @@ class PolicyDecisionPoint:
 
             if type(kill_switch) is not KillSwitch:
                 raise ValueError("kill_switch must be a KillSwitch")
+        if telemetry is not None:
+            from acgs_lite.control_plane.telemetry import TelemetryRecorder
+
+            if type(telemetry) is not TelemetryRecorder:
+                raise ValueError("telemetry must be a TelemetryRecorder")
         self._approval_gate = approval_gate
         self._kill_switch = kill_switch
+        self._telemetry = telemetry
+        self._telemetry_failures = 0
         # Capability of the one CoreChangeWriter bound to this PDP (if any).
         self._core_writer_token: object | None = None
         self._core_writer_lock = threading.Lock()
@@ -366,6 +381,13 @@ class PolicyDecisionPoint:
             return self._receipt_failures
 
     @property
+    def telemetry_failures(self) -> int:
+        """Count of DECISION telemetry records that failed (observability
+        only: a failure never changes a decision)."""
+        with self._receipt_failures_lock:
+            return self._telemetry_failures
+
+    @property
     def suppressed_denial_receipts(self) -> int:
         """Pre-denials that were denied but not receipted (rate limit)."""
         with self._receipt_failures_lock:
@@ -431,7 +453,9 @@ class PolicyDecisionPoint:
     ) -> tuple[Decision, ...]:
         """In-package (dispatcher): decide every request of one tool call and
         consume its approvals once, only if all of them are allowed."""
-        evaluated = [self._evaluate(request) for request in requests]
+        # Dry runs (consume=False) record no telemetry: they are not decisions
+        # anyone acts on, and would otherwise inflate the denominators.
+        evaluated = [self._evaluate(request, record_requests=consume) for request in requests]
         decisions = [item[0] for item in evaluated]
         if consume and decisions and all(d.allowed for d in decisions):
             first = self._consume_approvals(decisions[0], evaluated[0][2])
@@ -440,13 +464,18 @@ class PolicyDecisionPoint:
                     self._audit_failure_deny(d, reason=first.reason, error="approval_replay")
                     for d in decisions[1:]
                 ]
+        group_id = decisions[0].decision_id if decisions else None
         return tuple(
-            self._publish(decision, item[1])
+            self._publish(decision, item[1], telemetry=consume, group_id=group_id)
             for decision, item in zip(decisions, evaluated, strict=True)
         )
 
     def _evaluate(
-        self, request: object, *, core_write_token: object | None = None
+        self,
+        request: object,
+        *,
+        core_write_token: object | None = None,
+        record_requests: bool = True,
     ) -> tuple[Decision, DecisionRequest | None, QuorumResult | None]:
         typed = request if isinstance(request, DecisionRequest) else None
         if self._kill_switch is not None and self._kill_switch_engaged():
@@ -455,7 +484,7 @@ class PolicyDecisionPoint:
         if self._approval_gate is not None and typed is not None:
             try:
                 if _validate_request(typed) is None:
-                    typed, quorum = self._attest_approvals(typed)
+                    typed, quorum = self._attest_approvals(typed, record_requests)
             except Exception as exc:
                 logger.error("pdp approval attestation failed: %s", type(exc).__name__)
                 denied = self._deny(typed, "approval attestation failed", error="approval_error")
@@ -492,12 +521,14 @@ class PolicyDecisionPoint:
         except Exception:
             return True
 
-    def _attest_approvals(self, request: DecisionRequest) -> tuple[DecisionRequest, QuorumResult]:
+    def _attest_approvals(
+        self, request: DecisionRequest, record_requests: bool = True
+    ) -> tuple[DecisionRequest, QuorumResult]:
         """Replace host-asserted approvers by the gate-attested ones."""
         gate = self._approval_gate
         if gate is None:  # pragma: no cover - guarded by the caller
             raise RuntimeError("no approval gate")
-        result = gate.evaluate(request, request.approvals)
+        result = gate.evaluate(request, request.approvals, record_request=record_requests)
         attested = replace(request, approvers=result.approvers, approvals=result.counted_approvals)
         return attested, result
 
@@ -519,6 +550,22 @@ class PolicyDecisionPoint:
         beyond that the call still denies but is only counted
         (:attr:`suppressed_denial_receipts`).
         """
+        return self._record_denial(
+            reason, principal_id=principal_id, action=action, resource=resource, error=error
+        )
+
+    def _record_denial(
+        self,
+        reason: str,
+        *,
+        principal_id: str = "",
+        action: str = "",
+        resource: str = "",
+        error: str = "dispatch_denied",
+        telemetry: bool = True,
+    ) -> Decision:
+        """In-package (dispatcher): :meth:`record_denial`, optionally without
+        telemetry for dry runs. It can still only record a deny."""
         decision = Decision.denied(
             reason,
             constitution_hash=self._constitution_hash,
@@ -532,7 +579,13 @@ class PolicyDecisionPoint:
         if not receipted:
             with self._receipt_failures_lock:
                 self._suppressed_denial_receipts += 1
-        return self._publish(decision, None, origin=ORIGIN_DISPATCHER_PRE_DENIAL, receipt=receipted)
+        return self._publish(
+            decision,
+            None,
+            origin=ORIGIN_DISPATCHER_PRE_DENIAL,
+            receipt=receipted,
+            telemetry=telemetry,
+        )
 
     def _pre_denial_within_limit(self, principal_id: str) -> bool:
         # TODO(control-plane-gap): the pre-denial receipt rate limit (count,
@@ -561,6 +614,8 @@ class PolicyDecisionPoint:
         *,
         origin: str = ORIGIN_PDP,
         receipt: bool = True,
+        telemetry: bool = True,
+        group_id: str | None = None,
     ) -> Decision:
         """Audit, emit a receipt and notify listeners. None of them can turn a
         deny into an allow; an allow whose audit write or receipt emission
@@ -578,7 +633,30 @@ class PolicyDecisionPoint:
                 listener(decision)
             except Exception as exc:
                 logger.warning("pdp listener failed: %s", type(exc).__name__)
+        if telemetry:
+            self._record_telemetry(decision, request, group_id)
         return decision
+
+    def _record_telemetry(
+        self, decision: Decision, request: DecisionRequest | None, group_id: str | None
+    ) -> None:
+        """Phase 4: one DECISION event per published decision, recorded after
+        the allow bit is final; ``group_id`` ties a dispatch's per-path
+        decisions to its ``tool.call`` decision. Best effort: it can neither
+        allow nor deny."""
+        telemetry = self._telemetry
+        if telemetry is None:
+            return
+        try:
+            principal = getattr(request, "principal", None)
+            kind = principal.kind if isinstance(principal, Principal) else None
+            telemetry.record_decision(
+                decision.decision_id, kind, decision.allowed, group_id=group_id
+            )
+        except Exception as exc:
+            logger.warning("pdp telemetry failed: %s", type(exc).__name__)
+            with self._receipt_failures_lock:
+                self._telemetry_failures += 1
 
     # -- internals -----------------------------------------------------
 

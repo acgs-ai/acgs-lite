@@ -33,7 +33,9 @@ The ``cryptography`` extra provides Ed25519; it is imported lazily through
 
 from __future__ import annotations
 
+import collections
 import hashlib
+import logging
 import math
 import re
 import secrets
@@ -43,13 +45,16 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from acgs_lite.control_plane.action_hash import action_hash, canonical_json
 from acgs_lite.control_plane.context import DecisionRequest
 from acgs_lite.control_plane.principal import Principal, PrincipalKind, canonical_principal_id
 from acgs_lite.control_plane.tiers import ActionTier
 from acgs_lite.legitimacy.signing import SIGNATURE_ALGORITHM, ReceiptSigner, verify_signature
+
+if TYPE_CHECKING:
+    from acgs_lite.control_plane.telemetry import TelemetryRecorder
 
 __all__ = [
     "APPROVAL_SIGNATURE_DOMAIN",
@@ -64,7 +69,11 @@ __all__ = [
     "SignedApproval",
 ]
 
+logger = logging.getLogger(__name__)
+
 APPROVAL_SIGNATURE_DOMAIN = b"acgs-control-plane-approval-v1\x00"
+# Distinct action hashes remembered as "approval requested" (telemetry dedupe).
+_MAX_REQUESTED_TRACKED = 4096
 # TODO(control-plane-gap): approval TTL (15 min) and clock skew (30 s) are
 # design inference; no primary evidence for either value.
 DEFAULT_APPROVAL_TTL_S = 900.0
@@ -311,6 +320,19 @@ class ApprovalGate:
     :meth:`evaluate` never raises and never consumes; :meth:`consume`
     atomically spends the nonces of a satisfied result right before the
     approved action runs, so concurrent replays lose.
+
+    Phase 4: with ``telemetry=`` the gate records APPROVAL_REQUESTED the
+    first time it sees an action hash that needs a quorum (any non-dry-run
+    evaluation, satisfied or not, or :meth:`note_approval_requested` from
+    ``GovernedToolDispatcher.action_hash_for``) and one APPROVAL_GRANTED per
+    counted approver when a quorum is consumed. The GRANTED time is the
+    approval's signed ``issued_at`` clamped to [first seen, consumption], so
+    an agent sitting on a signed approval does not inflate the latency. An
+    approval signed before the gate first saw the hash (pre-collected)
+    yields latency 0 and is reported as ``pre_approved``. ``issued_at`` is
+    the signer's clock; the recorder must use the same (wall) clock. Best
+    effort: telemetry errors are counted (:attr:`telemetry_failures`), never
+    raised.
     """
 
     # TODO(control-plane-gap): consumed nonces live in memory; a restarted
@@ -323,7 +345,13 @@ class ApprovalGate:
         policies: Mapping[ActionTier, QuorumPolicy] = DEFAULT_QUORUM_POLICIES,
         clock: Callable[[], float] = time.time,
         max_clock_skew_s: float = DEFAULT_CLOCK_SKEW_S,
+        telemetry: TelemetryRecorder | None = None,
     ) -> None:
+        if telemetry is not None:
+            from acgs_lite.control_plane.telemetry import TelemetryRecorder
+
+            if type(telemetry) is not TelemetryRecorder:
+                raise TypeError("telemetry must be a TelemetryRecorder")
         if not isinstance(authority, ApprovalAuthority):
             raise TypeError("authority must be an ApprovalAuthority")
         checked: dict[ActionTier, QuorumPolicy] = {}
@@ -339,6 +367,10 @@ class ApprovalGate:
         self._skew = float(max_clock_skew_s)
         self._lock = threading.Lock()
         self._consumed: set[tuple[str, str]] = set()
+        self._telemetry = telemetry
+        self._requested: collections.OrderedDict[str, float] = collections.OrderedDict()
+        self._resolved: set[str] = set()  # requested hashes whose quorum was consumed
+        self.telemetry_failures = 0
 
     @property
     def authority(self) -> ApprovalAuthority:
@@ -358,12 +390,97 @@ class ApprovalGate:
             if any(key in self._consumed for key in keys):
                 return False
             self._consumed.update(keys)
+        telemetry = self._telemetry
+        if telemetry is not None:
+            self._record_granted(telemetry, result)
         return True
 
-    def evaluate(self, request: DecisionRequest, approvals: Iterable[object]) -> QuorumResult:
-        """Return the quorum verdict for *request*; never raises."""
+    def _record_granted(self, telemetry: TelemetryRecorder, result: QuorumResult) -> None:
         try:
-            return self._evaluate(request, tuple(approvals))
+            now = float(telemetry.clock())
+            with self._lock:
+                requested_at = self._requested.get(result.action_hash)
+                if result.action_hash in self._requested:
+                    self._resolved.add(result.action_hash)
+        except Exception as exc:
+            logger.warning("approval telemetry failed: %s", type(exc).__name__)
+            with self._lock:
+                self.telemetry_failures += 1
+            return
+        for approver_id, approval in zip(
+            result.counted_approver_ids, result.counted_approvals, strict=False
+        ):
+            at = min(float(approval.issued_at), now)
+            if requested_at is not None:
+                at = max(at, min(requested_at, now))
+            self._telemetry_call(
+                telemetry.record_approval_granted, result.action_hash, approver_id, at=at
+            )
+
+    def _telemetry_call(
+        self, fn: Callable[..., object], *args: object, at: float | None = None
+    ) -> None:
+        try:
+            if at is None:
+                fn(*args)
+            else:
+                fn(*args, at=at)
+        except Exception as exc:
+            logger.warning("approval telemetry failed: %s", type(exc).__name__)
+            with self._lock:
+                self.telemetry_failures += 1
+
+    def _evict_one(self) -> None:
+        """Drop the oldest resolved request; only if none is resolved, the
+        oldest pending one (lock held).
+
+        TODO(control-plane-gap): with more than _MAX_REQUESTED_TRACKED pending
+        requests the oldest pending requested_at is lost; its GRANTED time is
+        then clamped only by consumption time.
+        """
+        for key in self._requested:
+            if key in self._resolved:
+                del self._requested[key]
+                self._resolved.discard(key)
+                return
+        self._requested.popitem(last=False)
+
+    def note_approval_requested(self, action_hash: str) -> None:
+        """Record (once per hash) that *action_hash* awaits a quorum."""
+        telemetry = self._telemetry
+        if telemetry is None or not isinstance(action_hash, str) or not action_hash:
+            return
+        try:
+            now = float(telemetry.clock())
+        except Exception as exc:
+            logger.warning("approval telemetry failed: %s", type(exc).__name__)
+            with self._lock:
+                self.telemetry_failures += 1
+            return
+        with self._lock:
+            if action_hash in self._requested:
+                return
+            self._requested[action_hash] = now
+            while len(self._requested) > _MAX_REQUESTED_TRACKED:
+                self._evict_one()
+        self._telemetry_call(telemetry.record_approval_requested, action_hash, at=now)
+
+    def evaluate(
+        self,
+        request: DecisionRequest,
+        approvals: Iterable[object],
+        *,
+        record_request: bool = True,
+    ) -> QuorumResult:
+        """Return the quorum verdict for *request*; never raises.
+
+        ``record_request=False`` (dry runs) skips the APPROVAL_REQUESTED
+        telemetry; it never changes the verdict."""
+        try:
+            result = self._evaluate(request, tuple(approvals))
+            if record_request and result.required > 0:
+                self.note_approval_requested(result.action_hash)
+            return result
         except Exception as exc:
             return QuorumResult(
                 satisfied=False,

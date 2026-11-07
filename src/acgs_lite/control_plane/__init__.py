@@ -11,7 +11,10 @@ hash with requester/author/sibling exclusion (:mod:`.approvals`,
 resource budgets (:mod:`.budgets`), automatic autonomy demotion
 (:mod:`.autonomy`) and a human-only change class (:mod:`.change_class`)
 whose file writes go only through :class:`CoreChangeWriter`
-(:mod:`.core_write`).
+(:mod:`.core_write`). Phase 4: oversight telemetry -- override rate,
+approval latency, verifier precision/recall and post-merge rework, segmented
+agent vs human (:mod:`.telemetry`, :mod:`.telemetry_api`) -- feeding the
+error budget, plus a per-trigger circuit breaker (:mod:`.breaker`).
 
 Mutating agents must never be able to write to the things that judge them.
 The immutable core is protected twice, by independent code paths:
@@ -44,6 +47,13 @@ from acgs_lite.control_plane.autonomy import (
     AutonomyRestoreRejected,
     ErrorBudget,
     FailureKind,
+)
+from acgs_lite.control_plane.breaker import (
+    BreakerPolicy,
+    BreakerResetRejected,
+    BreakerState,
+    BreakerStatus,
+    TriggerCircuitBreaker,
 )
 from acgs_lite.control_plane.budgets import (
     BudgetChargeRefused,
@@ -128,6 +138,16 @@ from acgs_lite.control_plane.receipts import (
     ReceiptKind,
     SignedControlPlaneReceipt,
 )
+from acgs_lite.control_plane.telemetry import (
+    AgentTelemetryRejected,
+    InMemoryTelemetryStore,
+    JSONLTelemetryStore,
+    OversightEvent,
+    OversightMetrics,
+    TelemetryAutonomyBridge,
+    TelemetryRecorder,
+    TelemetryStore,
+)
 from acgs_lite.control_plane.tiers import ActionTier
 
 __all__ = [
@@ -140,6 +160,7 @@ __all__ = [
     "READ_ONLY_ACTIONS",
     "WRITE_VERBS",
     "ActionTier",
+    "AgentTelemetryRejected",
     "ApprovalAuthority",
     "ApprovalGate",
     "ApprovalRegistrationRejected",
@@ -147,6 +168,10 @@ __all__ = [
     "AutonomyController",
     "AutonomyLevel",
     "AutonomyRestoreRejected",
+    "BreakerPolicy",
+    "BreakerResetRejected",
+    "BreakerState",
+    "BreakerStatus",
     "BudgetChargeRefused",
     "BudgetExhausted",
     "BudgetLedger",
@@ -176,9 +201,13 @@ __all__ = [
     "ImmutableCoreError",
     "ImmutableCoreRegistry",
     "InMemoryReceiptStore",
+    "InMemoryTelemetryStore",
     "JSONLReceiptStore",
+    "JSONLTelemetryStore",
     "KillSwitch",
     "KillSwitchOperationRejected",
+    "OversightEvent",
+    "OversightMetrics",
     "PolicyDecisionPoint",
     "PolicyEffect",
     "PolicyParseError",
@@ -204,8 +233,12 @@ __all__ = [
     "ScopedCredential",
     "SignedApproval",
     "SignedControlPlaneReceipt",
+    "TelemetryAutonomyBridge",
+    "TelemetryRecorder",
+    "TelemetryStore",
     "ToolDenied",
     "ToolResult",
+    "TriggerCircuitBreaker",
     "TrustedRunRegistry",
     "WriteGrant",
     "action_hash",
