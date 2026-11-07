@@ -1,0 +1,474 @@
+"""Cedar-style policy decision point (PDP).
+
+Semantics, in order:
+
+1. The non-overridable :data:`CONSTITUTION_INVARIANTS` are evaluated first,
+   always, whatever policy set is loaded.
+2. Any satisfied forbid (invariant or policy) -> DENY.
+3. Otherwise any satisfied permit -> PERMIT.
+4. Otherwise -> DENY (default deny).
+
+An error while evaluating *any* statement denies the whole decision. Cedar
+skips an erroring policy instead; that is unsafe here because a forbid that
+errors would silently stop forbidding, which turns an exception into an
+allow. Unparseable input, a missing policy set, a missing constitution
+binding, a stale expected constitution hash and an evaluation timeout also
+deny. Every decision carries ``constitution_hash`` and ``policy_digest``
+(from :func:`acgs_lite.legitimacy.invocation.bind_policy`; the digest is the
+real "policy unchanged" proof because ``Constitution.hash`` omits patterns,
+``enabled`` and conditions).
+"""
+
+from __future__ import annotations
+
+import concurrent.futures
+import logging
+import math
+import threading
+import uuid
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
+from typing import Any
+
+from acgs_lite.audit import AuditEntry, AuditLog
+from acgs_lite.control_plane.context import DecisionContext, DecisionRequest
+from acgs_lite.control_plane.immutable_core import DEFAULT_IMMUTABLE_CORE, ImmutableCoreRegistry
+from acgs_lite.control_plane.invariants import CONSTITUTION_INVARIANTS, core_category_for
+from acgs_lite.control_plane.policy import (
+    PolicyEffect,
+    PolicyParseError,
+    PolicySet,
+    PolicyStatement,
+)
+from acgs_lite.control_plane.principal import Principal, PrincipalKind
+from acgs_lite.control_plane.tiers import ActionTier
+from acgs_lite.fail_closed import fail_closed
+from acgs_lite.legitimacy.invocation import bind_policy
+
+__all__ = [
+    "DEFAULT_TIMEOUT_S",
+    "Decision",
+    "PolicyDecisionPoint",
+    "PolicyEffect",
+    "PolicyParseError",
+    "PolicySet",
+    "PolicyStatement",
+]
+
+logger = logging.getLogger(__name__)
+
+# TODO(control-plane-gap): 250 ms is a design inference (declarative
+# statements evaluate in microseconds; the bound only exists to stop a hung
+# Python condition from stalling a decision). No primary evidence for the
+# value; it is configurable per PDP.
+DEFAULT_TIMEOUT_S = 0.25
+DEFAULT_MAX_WORKERS = 4
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass(frozen=True)
+class Decision:
+    """Outcome of one PDP evaluation. ``allowed`` is the only gate bit."""
+
+    allowed: bool
+    reason: str
+    determining_policies: tuple[str, ...]
+    constitution_hash: str
+    policy_digest: str
+    inputs_digest: str
+    decided_at: str
+    principal_id: str
+    action: str
+    resource: str
+    tier: ActionTier | None
+    error: str | None = None
+    policy_set_digest: str = ""
+    decision_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    """Opaque id, recorded in the audit entry; safe to show to an agent."""
+
+    @classmethod
+    def denied(
+        cls,
+        reason: str,
+        *,
+        constitution_hash: str = "",
+        policy_digest: str = "",
+        inputs_digest: str = "",
+        principal_id: str = "",
+        action: str = "",
+        resource: str = "",
+        tier: ActionTier | None = None,
+        determining_policies: tuple[str, ...] = (),
+        error: str | None = None,
+        policy_set_digest: str = "",
+    ) -> Decision:
+        return cls(
+            allowed=False,
+            reason=reason,
+            determining_policies=determining_policies,
+            constitution_hash=constitution_hash,
+            policy_digest=policy_digest,
+            inputs_digest=inputs_digest,
+            decided_at=_now(),
+            principal_id=principal_id,
+            action=action,
+            resource=resource,
+            tier=tier,
+            error=error,
+            policy_set_digest=policy_set_digest,
+        )
+
+    def with_id(self, decision_id: str) -> Decision:
+        return replace(self, decision_id=decision_id)
+
+
+# Returned by the @fail_closed backstop when something outside the explicit
+# handling raised. It deliberately carries no hashes: it is not a decision
+# about any particular request.
+_BACKSTOP_DENY = Decision(
+    allowed=False,
+    reason="fail-closed: unexpected error in decision path",
+    determining_policies=(),
+    constitution_hash="",
+    policy_digest="",
+    inputs_digest="",
+    decided_at="",
+    principal_id="",
+    action="",
+    resource="",
+    tier=None,
+    error="fail_closed",
+)
+
+
+class _StatementError(Exception):
+    def __init__(self, statement_id: str, cause: BaseException) -> None:
+        # Only the exception *type*: messages can carry secrets or paths.
+        super().__init__(f"{statement_id}: {type(cause).__name__}")
+        self.statement_id = statement_id
+
+
+def _evaluate_statements(
+    statements: Sequence[PolicyStatement], ctx: DecisionContext
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    forbids: list[str] = []
+    permits: list[str] = []
+    for statement in statements:
+        try:
+            matched = statement.matches(ctx)
+        except Exception as exc:
+            raise _StatementError(statement.id, exc) from exc
+        if matched:
+            (forbids if statement.effect is PolicyEffect.FORBID else permits).append(statement.id)
+    return tuple(forbids), tuple(permits)
+
+
+def _validate_request(request: DecisionRequest) -> str | None:
+    principal = request.principal
+    if not isinstance(principal, Principal) or not isinstance(principal.kind, PrincipalKind):
+        return "principal must be a Principal"
+    if not isinstance(principal.id, str) or not principal.id.strip():
+        return "principal id must be a non-empty string"
+    if not isinstance(request.action, str) or not request.action.strip():
+        return "action must be a non-empty string"
+    if not isinstance(request.resource, str) or not request.resource:
+        return "resource must be a non-empty string"
+    if not isinstance(request.tier, ActionTier):
+        return "tier must be an ActionTier"
+    if not isinstance(request.approvers, tuple) or not all(
+        isinstance(approver, Principal) for approver in request.approvers
+    ):
+        return "approvers must be a tuple of Principal"
+    if not isinstance(request.attributes, Mapping) or not all(
+        isinstance(key, str) for key in request.attributes
+    ):
+        return "attributes must be a mapping with string keys"
+    if request.expected_constitution_hash is not None and not isinstance(
+        request.expected_constitution_hash, str
+    ):
+        return "expected_constitution_hash must be a string or None"
+    return None
+
+
+class PolicyDecisionPoint:
+    """Evaluate :class:`DecisionRequest` objects against invariants + policy."""
+
+    def __init__(
+        self,
+        policy_set: PolicySet | None,
+        *,
+        constitution_hash: str,
+        policy_digest: str,
+        registry: ImmutableCoreRegistry = DEFAULT_IMMUTABLE_CORE,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
+        audit_log: AuditLog | None = None,
+        durable_audit: bool = False,
+        listeners: Sequence[Callable[[Decision], None]] = (),
+        max_workers: int = DEFAULT_MAX_WORKERS,
+    ) -> None:
+        if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)):
+            raise ValueError("timeout_s must be a number")
+        if not math.isfinite(timeout_s) or timeout_s <= 0:
+            raise ValueError("timeout_s must be a positive finite number")
+        if max_workers < 1:
+            raise ValueError("max_workers must be >= 1")
+        if not isinstance(registry, ImmutableCoreRegistry):
+            raise ValueError("registry must be an ImmutableCoreRegistry")
+        self._policy_set = policy_set
+        self._constitution_hash = constitution_hash if isinstance(constitution_hash, str) else ""
+        self._policy_digest = policy_digest if isinstance(policy_digest, str) else ""
+        self._registry = registry
+        self._timeout_s = float(timeout_s)
+        self._audit_log = audit_log
+        self._durable_audit = durable_audit
+        self._listeners = tuple(listeners)
+        self._max_workers = max_workers
+        self._executor: concurrent.futures.ThreadPoolExecutor | None = None
+        self._executor_lock = threading.Lock()
+
+    @classmethod
+    def for_constitution(
+        cls, constitution: Any, policy_set: PolicySet | None, **kwargs: Any
+    ) -> PolicyDecisionPoint:
+        """Bind to *constitution* via :func:`bind_policy` (hash + full digest)."""
+        binding = bind_policy(constitution)
+        return cls(
+            policy_set,
+            constitution_hash=binding.version,
+            policy_digest=binding.digest,
+            **kwargs,
+        )
+
+    @property
+    def constitution_hash(self) -> str:
+        return self._constitution_hash
+
+    @property
+    def policy_digest(self) -> str:
+        return self._policy_digest
+
+    @property
+    def registry(self) -> ImmutableCoreRegistry:
+        return self._registry
+
+    @property
+    def timeout_s(self) -> float:
+        return self._timeout_s
+
+    def close(self) -> None:
+        with self._executor_lock:
+            if self._executor is not None:
+                self._executor.shutdown(wait=False, cancel_futures=True)
+                self._executor = None
+
+    def __enter__(self) -> PolicyDecisionPoint:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    def decide(self, request: object) -> Decision:
+        """Evaluate *request*; never raises, never fails open."""
+        decision = self._decide(request)
+        if decision.error == "fail_closed":
+            # The backstop is a shared constant; give each occurrence its own id.
+            decision = replace(decision, decision_id=uuid.uuid4().hex, decided_at=_now())
+        return self.publish(decision)
+
+    def publish(self, decision: Decision) -> Decision:
+        """Audit and notify listeners. Neither can turn a deny into an allow;
+        an allow whose audit write fails becomes a deny."""
+        try:
+            decision = self._audit(decision)
+        except Exception as exc:  # pragma: no cover - _audit handles its own errors
+            logger.error("pdp audit path failed: %s", type(exc).__name__)
+            if decision.allowed:
+                decision = self._audit_failure_deny(decision)
+        for listener in self._listeners:
+            try:
+                listener(decision)
+            except Exception as exc:
+                logger.warning("pdp listener failed: %s", type(exc).__name__)
+        return decision
+
+    # -- internals -----------------------------------------------------
+
+    def _deny(
+        self,
+        request: DecisionRequest | None,
+        reason: str,
+        *,
+        error: str | None,
+        inputs_digest: str = "",
+        determining_policies: tuple[str, ...] = (),
+    ) -> Decision:
+        principal_id = action = resource = ""
+        tier: ActionTier | None = None
+        if request is not None:
+            principal = getattr(request, "principal", None)
+            principal_id = str(getattr(principal, "id", "") or "")
+            action = request.action if isinstance(request.action, str) else ""
+            resource = request.resource if isinstance(request.resource, str) else ""
+            tier = request.tier if isinstance(request.tier, ActionTier) else None
+        return Decision.denied(
+            reason,
+            constitution_hash=self._constitution_hash,
+            policy_digest=self._policy_digest,
+            inputs_digest=inputs_digest,
+            principal_id=principal_id,
+            action=action,
+            resource=resource,
+            tier=tier,
+            determining_policies=determining_policies,
+            error=error,
+            policy_set_digest=self._policy_set.source_digest if self._policy_set else "",
+        )
+
+    def _get_executor(self) -> concurrent.futures.ThreadPoolExecutor:
+        with self._executor_lock:
+            if self._executor is None:
+                self._executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self._max_workers, thread_name_prefix="acgs-pdp"
+                )
+            return self._executor
+
+    @fail_closed(deny_value=_BACKSTOP_DENY, log_level=logging.ERROR)
+    def _decide(self, request: object) -> Decision:
+        if not isinstance(request, DecisionRequest):
+            return self._deny(
+                None, "unparseable request: not a DecisionRequest", error="invalid_request"
+            )
+        problem = _validate_request(request)
+        if problem is not None:
+            return self._deny(None, f"unparseable request: {problem}", error="invalid_request")
+        if not self._constitution_hash.strip() or not self._policy_digest.strip():
+            return self._deny(
+                request, "missing constitution hash or policy digest", error="missing_binding"
+            )
+        if self._policy_set is None:
+            return self._deny(request, "no policy set loaded", error="missing_policy")
+        if (
+            request.expected_constitution_hash is not None
+            and request.expected_constitution_hash != self._constitution_hash
+        ):
+            return self._deny(
+                request,
+                "stale policy: expected constitution hash "
+                f"{request.expected_constitution_hash!r} != {self._constitution_hash!r}",
+                error="stale_policy",
+            )
+        try:
+            inputs_digest = request.inputs_digest()
+        except (TypeError, ValueError) as exc:
+            return self._deny(
+                request, f"unparseable request attributes: {exc}", error="invalid_request"
+            )
+        ctx = DecisionContext(
+            request=request,
+            constitution_hash=self._constitution_hash,
+            policy_digest=self._policy_digest,
+            core_category=core_category_for(request, self._registry),
+            registry=self._registry,
+        )
+        statements = (*CONSTITUTION_INVARIANTS, *self._policy_set.statements)
+        future = self._get_executor().submit(_evaluate_statements, statements, ctx)
+        try:
+            forbids, permits = future.result(timeout=self._timeout_s)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            return self._deny(
+                request,
+                f"policy evaluation exceeded {self._timeout_s}s",
+                error="timeout",
+                inputs_digest=inputs_digest,
+            )
+        except _StatementError as exc:
+            return self._deny(
+                request,
+                f"policy evaluation error: {exc}",
+                error="evaluation_error",
+                inputs_digest=inputs_digest,
+                determining_policies=(exc.statement_id,),
+            )
+        if forbids:
+            return self._deny(
+                request,
+                "forbidden by " + ", ".join(forbids),
+                error=None,
+                inputs_digest=inputs_digest,
+                determining_policies=forbids,
+            )
+        if not permits:
+            return self._deny(
+                request,
+                "no permit matched (default deny)",
+                error=None,
+                inputs_digest=inputs_digest,
+            )
+        return Decision(
+            allowed=True,
+            reason="permitted by " + ", ".join(permits),
+            determining_policies=permits,
+            constitution_hash=self._constitution_hash,
+            policy_digest=self._policy_digest,
+            inputs_digest=inputs_digest,
+            decided_at=_now(),
+            principal_id=request.principal.id,
+            action=request.action,
+            resource=request.resource,
+            tier=request.tier,
+            error=None,
+            policy_set_digest=self._policy_set.source_digest,
+        )
+
+    def _audit_failure_deny(self, decision: Decision) -> Decision:
+        return Decision.denied(
+            "audit record failed; allow withdrawn",
+            constitution_hash=decision.constitution_hash,
+            policy_digest=decision.policy_digest,
+            inputs_digest=decision.inputs_digest,
+            principal_id=decision.principal_id,
+            action=decision.action,
+            resource=decision.resource,
+            tier=decision.tier,
+            error="audit_failed",
+            policy_set_digest=decision.policy_set_digest,
+        ).with_id(decision.decision_id)
+
+    def _audit(self, decision: Decision) -> Decision:
+        if self._audit_log is None:
+            return decision
+        entry = AuditEntry(
+            id=f"pdp-{decision.decision_id}",
+            type="pdp_decision",
+            agent_id=decision.principal_id,
+            action=decision.action,
+            valid=decision.allowed,
+            violations=[] if decision.allowed else list(decision.determining_policies),
+            constitutional_hash=decision.constitution_hash,
+            metadata={
+                "policy_digest": decision.policy_digest,
+                "inputs_digest": decision.inputs_digest,
+                "determining_policies": list(decision.determining_policies),
+                "tier": None if decision.tier is None else int(decision.tier),
+                "resource": decision.resource,
+                "reason": decision.reason,
+                "error": decision.error,
+                "policy_set_digest": decision.policy_set_digest,
+                "decision_id": decision.decision_id,
+            },
+        )
+        try:
+            if self._durable_audit:
+                self._audit_log.record_durable(entry)
+            else:
+                self._audit_log.record(entry)
+        except Exception as exc:
+            logger.error("pdp audit record failed: %s", type(exc).__name__)
+            if decision.allowed:
+                return self._audit_failure_deny(decision)
+        return decision

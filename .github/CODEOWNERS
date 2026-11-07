@@ -1,0 +1,95 @@
+# GENERATED — do not hand edit; regenerate with scripts/render_codeowners.py
+# Source: acgs_lite.control_plane.immutable_core.DEFAULT_IMMUTABLE_CORE
+# Every immutable-core path requires review by a human code owner.
+
+# evaluator
+/evals/** @acgs-ai/governance-humans
+/evaluator/** @acgs-ai/governance-humans
+
+# test_suite
+/eval-suites/** @acgs-ai/governance-humans
+/eval_suites/** @acgs-ai/governance-humans
+/test_suites/** @acgs-ai/governance-humans
+
+# heldout_data
+/data/held_out/** @acgs-ai/governance-humans
+/data/heldout/** @acgs-ai/governance-humans
+/held_out/** @acgs-ai/governance-humans
+/heldout/** @acgs-ai/governance-humans
+
+# sandbox_config
+/config/sandbox* @acgs-ai/governance-humans
+/config/sandbox*/** @acgs-ai/governance-humans
+/sandbox/** @acgs-ai/governance-humans
+
+# policy
+**/constitution*.yaml @acgs-ai/governance-humans
+**/constitution*.yml @acgs-ai/governance-humans
+/policies/** @acgs-ai/governance-humans
+/policy/** @acgs-ai/governance-humans
+
+# tool_allowlist
+**/tool-allowlist* @acgs-ai/governance-humans
+**/tool_allowlist* @acgs-ai/governance-humans
+
+# credentials
+**/.env* @acgs-ai/governance-humans
+/credentials/** @acgs-ai/governance-humans
+/secrets/** @acgs-ai/governance-humans
+
+# promotion_gate
+/promotion/** @acgs-ai/governance-humans
+
+# audit_log
+/audit/** @acgs-ai/governance-humans
+/audit_logs/** @acgs-ai/governance-humans
+
+# iam
+/.github/CODEOWNERS @acgs-ai/governance-humans
+/CODEOWNERS @acgs-ai/governance-humans
+/docs/CODEOWNERS @acgs-ai/governance-humans
+/iam/** @acgs-ai/governance-humans
+
+# ci_rules
+/.github/** @acgs-ai/governance-humans
+/.gitlab-ci.yml @acgs-ai/governance-humans
+/.pre-commit-config.yaml @acgs-ai/governance-humans
+
+# control_plane
+/control-plane/** @acgs-ai/governance-humans
+/pyproject.toml @acgs-ai/governance-humans
+/scripts/check_immutable_core_diff.py @acgs-ai/governance-humans
+/scripts/render_codeowners.py @acgs-ai/governance-humans
+/src/acgs_lite/__init__.py @acgs-ai/governance-humans
+/src/acgs_lite/_compat.py @acgs-ai/governance-humans
+/src/acgs_lite/_meta.py @acgs-ai/governance-humans
+/src/acgs_lite/agents/** @acgs-ai/governance-humans
+/src/acgs_lite/audit.py @acgs-ai/governance-humans
+/src/acgs_lite/circuit_breaker.py @acgs-ai/governance-humans
+/src/acgs_lite/constitution/** @acgs-ai/governance-humans
+/src/acgs_lite/constrained_output.py @acgs-ai/governance-humans
+/src/acgs_lite/control_plane/** @acgs-ai/governance-humans
+/src/acgs_lite/engine/** @acgs-ai/governance-humans
+/src/acgs_lite/errors.py @acgs-ai/governance-humans
+/src/acgs_lite/events.py @acgs-ai/governance-humans
+/src/acgs_lite/fail_closed.py @acgs-ai/governance-humans
+/src/acgs_lite/formal/** @acgs-ai/governance-humans
+/src/acgs_lite/governed.py @acgs-ai/governance-humans
+/src/acgs_lite/integrations/__init__.py @acgs-ai/governance-humans
+/src/acgs_lite/integrations/control_plane_mcp.py @acgs-ai/governance-humans
+/src/acgs_lite/lean_verify.py @acgs-ai/governance-humans
+/src/acgs_lite/legitimacy/** @acgs-ai/governance-humans
+/src/acgs_lite/licensing.py @acgs-ai/governance-humans
+/src/acgs_lite/maci/** @acgs-ai/governance-humans
+/src/acgs_lite/policygen/** @acgs-ai/governance-humans
+/src/acgs_lite/production.py @acgs-ai/governance-humans
+/src/acgs_lite/provenance.py @acgs-ai/governance-humans
+/src/acgs_lite/provider_capabilities.py @acgs-ai/governance-humans
+/src/acgs_lite/provider_capabilities_manifest.json @acgs-ai/governance-humans
+/src/acgs_lite/scoring.py @acgs-ai/governance-humans
+/src/acgs_lite/serialization.py @acgs-ai/governance-humans
+/src/acgs_lite/trajectory.py @acgs-ai/governance-humans
+/src/acgs_lite/z3_verify.py @acgs-ai/governance-humans
+/tests/conftest.py @acgs-ai/governance-humans
+/tests/control_plane/** @acgs-ai/governance-humans
+/uv.lock @acgs-ai/governance-humans
