@@ -2,7 +2,7 @@
 
 The immutable core is everything that *judges* an agent: the evaluator, the
 evaluator's test suites, held-out data, sandbox configuration, policy files,
-the tool allowlist, credentials, the promotion gate, the audit log, IAM, CI
+the tool allowlist, the memory-write policy, credentials, the promotion gate, the audit log, IAM, CI
 rules, and the control-plane enforcement code itself (an agent that can edit
 this registry could simply delete a pattern).
 
@@ -69,6 +69,7 @@ class CoreCategory(StrEnum):
     SANDBOX_CONFIG = "sandbox_config"
     POLICY = "policy"
     TOOL_ALLOWLIST = "tool_allowlist"
+    MEMORY_WRITE_POLICY = "memory_write_policy"
     CREDENTIALS = "credentials"
     PROMOTION_GATE = "promotion_gate"
     AUDIT_LOG = "audit_log"
@@ -391,8 +392,18 @@ DEFAULT_IMMUTABLE_CORE = ImmutableCoreRegistry(
             "policy/**",
             "**/constitution*.yaml",
             "**/constitution*.yml",
+            "**/constitution*.json",
+            "**/constitution*.toml",
         ),
         CoreCategory.TOOL_ALLOWLIST: ("**/tool_allowlist*", "**/tool-allowlist*"),
+        # What an agent may persist into long-term memory decides what it
+        # learns from; editing that policy is a human-only change (Phase 3).
+        CoreCategory.MEMORY_WRITE_POLICY: (
+            "**/memory_write_policy*",
+            "**/memory-write-policy*",
+            "memory-policy/**",
+            "memory_policy/**",
+        ),
         CoreCategory.CREDENTIALS: ("secrets/**", "credentials/**", "**/.env*"),
         CoreCategory.PROMOTION_GATE: ("promotion/**",),
         CoreCategory.AUDIT_LOG: ("audit/**", "audit_logs/**"),

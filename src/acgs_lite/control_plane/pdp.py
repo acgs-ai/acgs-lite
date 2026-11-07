@@ -18,6 +18,18 @@ deny. Every decision carries ``constitution_hash`` and ``policy_digest``
 real "policy unchanged" proof because ``Constitution.hash`` omits patterns,
 ``enabled`` and conditions).
 
+Phase 3: an optional :class:`~acgs_lite.control_plane.killswitch.KillSwitch`
+is checked before anything else (engaged or unreadable -> deny every
+request). With an :class:`~acgs_lite.control_plane.approvals.ApprovalGate`,
+``request.approvers`` asserted by the host are discarded and replaced by the
+registered approvers behind the verified ``request.approvals``; the context is
+stamped ``approvals_verified`` and carries the quorum verdict for
+INV-APPROVAL-QUORUM and INV-HUMAN-ONLY-CHANGE-CLASS.
+
+TODO(control-plane-gap): the PDP runs in the agent's process; an agent with
+arbitrary code execution in that process can bypass it (and every Phase 3
+harness object). Out-of-process enforcement is a later phase.
+
 Receipts (Phase 2): with ``receipt_ledger=`` the PDP binds that
 :class:`~acgs_lite.control_plane.receipt_ledger.ReceiptLedger` (one PDP per
 ledger, via a private capability) and appends a receipt for every decision it
@@ -59,6 +71,8 @@ from acgs_lite.fail_closed import fail_closed
 from acgs_lite.legitimacy.invocation import bind_policy
 
 if TYPE_CHECKING:
+    from acgs_lite.control_plane.approvals import ApprovalGate, QuorumResult
+    from acgs_lite.control_plane.killswitch import KillSwitch
     from acgs_lite.control_plane.receipt_ledger import ReceiptLedger
 
 __all__ = [
@@ -209,6 +223,8 @@ def _validate_request(request: DecisionRequest) -> str | None:
         request.expected_constitution_hash, str
     ):
         return "expected_constitution_hash must be a string or None"
+    if not isinstance(request.approvals, tuple):
+        return "approvals must be a tuple"
     return None
 
 
@@ -230,6 +246,8 @@ class PolicyDecisionPoint:
         receipt_ledger: ReceiptLedger | None = None,
         pre_denial_receipt_limit: int | None = DEFAULT_PRE_DENIAL_RECEIPT_LIMIT,
         pre_denial_window_s: float = DEFAULT_PRE_DENIAL_WINDOW_S,
+        approval_gate: ApprovalGate | None = None,
+        kill_switch: KillSwitch | None = None,
     ) -> None:
         if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)):
             raise ValueError("timeout_s must be a number")
@@ -247,6 +265,21 @@ class PolicyDecisionPoint:
             raise ValueError("pre_denial_receipt_limit must be None or an int >= 1")
         if not math.isfinite(pre_denial_window_s) or pre_denial_window_s <= 0:
             raise ValueError("pre_denial_window_s must be a positive finite number")
+        if approval_gate is not None:
+            from acgs_lite.control_plane.approvals import ApprovalGate
+
+            if type(approval_gate) is not ApprovalGate:
+                raise ValueError("approval_gate must be an ApprovalGate")
+        if kill_switch is not None:
+            from acgs_lite.control_plane.killswitch import KillSwitch
+
+            if type(kill_switch) is not KillSwitch:
+                raise ValueError("kill_switch must be a KillSwitch")
+        self._approval_gate = approval_gate
+        self._kill_switch = kill_switch
+        # Capability of the one CoreChangeWriter bound to this PDP (if any).
+        self._core_writer_token: object | None = None
+        self._core_writer_lock = threading.Lock()
         self._receipt_ledger: ReceiptLedger | None = None
         # The ledger token is held only by this closure, never as an attribute.
         self._append_receipt: Callable[[Decision, DecisionRequest | None, str], object] | None
@@ -315,6 +348,14 @@ class PolicyDecisionPoint:
         return self._timeout_s
 
     @property
+    def approval_gate(self) -> ApprovalGate | None:
+        return self._approval_gate
+
+    @property
+    def kill_switch(self) -> KillSwitch | None:
+        return self._kill_switch
+
+    @property
     def receipt_ledger(self) -> ReceiptLedger | None:
         return self._receipt_ledger
 
@@ -355,12 +396,110 @@ class PolicyDecisionPoint:
         self.close()
 
     def decide(self, request: object) -> Decision:
-        """Evaluate *request*; never raises, never fails open."""
-        decision = self._decide(request)
+        """Evaluate *request*; never raises, never fails open.
+
+        With an ApprovalGate, an allowed decision atomically consumes the
+        approvals it counted *before* it is published; a replay (or a lost
+        race) turns it into a deny with ``error="approval_replay"``.
+        """
+        return self._decide_attested(request)[0]
+
+    def _bind_core_writer(self, binding: object) -> object:
+        """In-package: bind the single CoreChangeWriter; returns its token."""
+        from acgs_lite.control_plane import core_write
+
+        if binding is not core_write._CORE_WRITER_BINDING:
+            raise ValueError("only CoreChangeWriter may bind to the PDP")
+        with self._core_writer_lock:
+            if self._core_writer_token is not None:
+                raise ValueError("a CoreChangeWriter is already bound to this PDP")
+            token = object()
+            self._core_writer_token = token
+            return token
+
+    def _decide_attested(
+        self, request: object, *, core_write_token: object | None = None
+    ) -> tuple[Decision, DecisionRequest | None]:
+        """In-package: the published decision plus the request it was made on
+        (approvers replaced by the gate-attested ones)."""
+        decision, typed, quorum = self._evaluate(request, core_write_token=core_write_token)
+        decision = self._consume_approvals(decision, quorum)
+        return self._publish(decision, typed), typed
+
+    def _decide_tool_call(
+        self, requests: Sequence[DecisionRequest], *, consume: bool
+    ) -> tuple[Decision, ...]:
+        """In-package (dispatcher): decide every request of one tool call and
+        consume its approvals once, only if all of them are allowed."""
+        evaluated = [self._evaluate(request) for request in requests]
+        decisions = [item[0] for item in evaluated]
+        if consume and decisions and all(d.allowed for d in decisions):
+            first = self._consume_approvals(decisions[0], evaluated[0][2])
+            if not first.allowed:
+                decisions = [first] + [
+                    self._audit_failure_deny(d, reason=first.reason, error="approval_replay")
+                    for d in decisions[1:]
+                ]
+        return tuple(
+            self._publish(decision, item[1])
+            for decision, item in zip(decisions, evaluated, strict=True)
+        )
+
+    def _evaluate(
+        self, request: object, *, core_write_token: object | None = None
+    ) -> tuple[Decision, DecisionRequest | None, QuorumResult | None]:
+        typed = request if isinstance(request, DecisionRequest) else None
+        if self._kill_switch is not None and self._kill_switch_engaged():
+            return self._deny(typed, "kill switch engaged", error="kill_switch"), typed, None
+        quorum: QuorumResult | None = None
+        if self._approval_gate is not None and typed is not None:
+            try:
+                if _validate_request(typed) is None:
+                    typed, quorum = self._attest_approvals(typed)
+            except Exception as exc:
+                logger.error("pdp approval attestation failed: %s", type(exc).__name__)
+                denied = self._deny(typed, "approval attestation failed", error="approval_error")
+                return denied, typed, None
+        attested_digest = (
+            core_write_token is not None and core_write_token is self._core_writer_token
+        )
+        decision = self._decide(typed if typed is not None else request, quorum, attested_digest)
         if decision.error == "fail_closed":
             # The backstop is a shared constant; give each occurrence its own id.
             decision = replace(decision, decision_id=uuid.uuid4().hex, decided_at=_now())
-        return self._publish(decision, request if isinstance(request, DecisionRequest) else None)
+        return decision, typed, quorum
+
+    def _consume_approvals(self, decision: Decision, quorum: QuorumResult | None) -> Decision:
+        gate = self._approval_gate
+        if not decision.allowed or gate is None or quorum is None:
+            return decision
+        if not quorum.counted_approvals:
+            return decision
+        try:
+            consumed = gate.consume(quorum)
+        except Exception:
+            consumed = False
+        if consumed:
+            return decision
+        return self._audit_failure_deny(
+            decision, reason="approval already consumed (replay)", error="approval_replay"
+        )
+
+    def _kill_switch_engaged(self) -> bool:
+        switch = self._kill_switch
+        try:
+            return switch is None or bool(switch.is_engaged())
+        except Exception:
+            return True
+
+    def _attest_approvals(self, request: DecisionRequest) -> tuple[DecisionRequest, QuorumResult]:
+        """Replace host-asserted approvers by the gate-attested ones."""
+        gate = self._approval_gate
+        if gate is None:  # pragma: no cover - guarded by the caller
+            raise RuntimeError("no approval gate")
+        result = gate.evaluate(request, request.approvals)
+        attested = replace(request, approvers=result.approvers, approvals=result.counted_approvals)
+        return attested, result
 
     def record_denial(
         self,
@@ -483,7 +622,12 @@ class PolicyDecisionPoint:
             return self._executor
 
     @fail_closed(deny_value=_BACKSTOP_DENY, log_level=logging.ERROR)
-    def _decide(self, request: object) -> Decision:
+    def _decide(
+        self,
+        request: object,
+        quorum: QuorumResult | None = None,
+        content_digest_attested: bool = False,
+    ) -> Decision:
         if not isinstance(request, DecisionRequest):
             return self._deny(
                 None, "unparseable request: not a DecisionRequest", error="invalid_request"
@@ -519,6 +663,9 @@ class PolicyDecisionPoint:
             policy_digest=self._policy_digest,
             core_category=core_category_for(request, self._registry),
             registry=self._registry,
+            approvals_verified=self._approval_gate is not None and quorum is not None,
+            quorum=quorum,
+            content_digest_attested=content_digest_attested,
         )
         statements = (*CONSTITUTION_INVARIANTS, *self._policy_set.statements)
         future = self._get_executor().submit(_evaluate_statements, statements, ctx)

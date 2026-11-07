@@ -11,6 +11,9 @@ Evidence:
 * Replit incident: an agent deleted a live production database during a
   natural-language code freeze. Irreversible (T3) actions therefore need two
   distinct human approvers other than the requester (INV-T3-TWO-PERSON).
+  Phase 3: with an ApprovalGate on the PDP, approvers are only those that
+  signed approvals attest (INV-APPROVAL-QUORUM), and core edits are a
+  distinct human-only change class (INV-HUMAN-ONLY-CHANGE-CLASS).
 * METR (Mar 2026): maintainer merge rates ran ~24pp below the SWE-bench
   grader on 296 AI-written patches, i.e. automated graders over-approve.
   Noted here; addressed by later phases (independent review gates).
@@ -18,9 +21,16 @@ Evidence:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
+from acgs_lite.control_plane.action_hash import approval_subject
+from acgs_lite.control_plane.change_class import (
+    CORE_HUMAN_ONLY_CATEGORIES,
+    ChangeClass,
+    classify_category,
+)
 from acgs_lite.control_plane.context import DecisionContext, DecisionRequest, is_write_action
 from acgs_lite.control_plane.immutable_core import CoreCategory, ImmutableCoreRegistry
 from acgs_lite.control_plane.policy import PolicyEffect, PolicyStatement
@@ -32,6 +42,7 @@ __all__ = [
     "CONSTITUTION_INVARIANTS",
     "HUMAN_CORE_CHANGE_MIN_TIER",
     "HUMAN_ONLY_CHANGE_CATEGORIES",
+    "HUMAN_ONLY_CHANGE_MIN_APPROVALS",
     "SENSITIVE_READ_CATEGORIES",
     "T3_MIN_APPROVERS",
     "core_category_for",
@@ -56,19 +67,11 @@ ACTION_NAMESPACE_CATEGORIES: Mapping[str, CoreCategory] = {
     "iam": CoreCategory.IAM,
     "ci": CoreCategory.CI_RULES,
     "control_plane": CoreCategory.CONTROL_PLANE,
+    "memory_policy": CoreCategory.MEMORY_WRITE_POLICY,
+    "memory_write_policy": CoreCategory.MEMORY_WRITE_POLICY,
 }
 
-HUMAN_ONLY_CHANGE_CATEGORIES = frozenset(
-    {
-        CoreCategory.POLICY,
-        CoreCategory.TOOL_ALLOWLIST,
-        CoreCategory.EVALUATOR,
-        CoreCategory.IAM,
-        CoreCategory.CI_RULES,
-        CoreCategory.AUDIT_LOG,
-        CoreCategory.CONTROL_PLANE,
-    }
-)
+HUMAN_ONLY_CHANGE_CATEGORIES = CORE_HUMAN_ONLY_CATEGORIES
 # Categories an agent may not even read: credentials (exfiltration),
 # held-out data (reading the test set defeats the evaluation), and the
 # evaluator and its suites (reading the grader enables score gaming).
@@ -83,9 +86,14 @@ SENSITIVE_READ_CATEGORIES = frozenset(
     }
 )
 # TODO(control-plane-gap): the T2 floor for human core changes is a design
-# inference (no autonomous/pre-authorised T0/T1 path into the core); Phase 3
-# replaces it with a distinct change class. No primary evidence for "T2".
+# inference (no autonomous/pre-authorised T0/T1 path into the core). Phase 3
+# adds the CORE_HUMAN_ONLY change class on top; no primary evidence for "T2".
 HUMAN_CORE_CHANGE_MIN_TIER = ActionTier.T2
+# Second-human rule for core changes; the number 1 is convention.
+HUMAN_ONLY_CHANGE_MIN_APPROVALS = 1
+# A core change must name the exact content it writes, so the action hash
+# (and therefore the approval) binds the content, not just the target.
+CONTENT_DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 # Two-person rule; Replit motivates "more than one", the number 2 is convention.
 T3_MIN_APPROVERS = 2
 
@@ -158,6 +166,66 @@ def _human_only_change_below_floor(ctx: DecisionContext) -> bool:
     )
 
 
+def _core_change_without_attested_second_human(ctx: DecisionContext) -> bool:
+    request = ctx.request
+    if classify_category(request.action, ctx.core_category) is not ChangeClass.CORE_HUMAN_ONLY:
+        return False
+    if (
+        request.principal.kind is not PrincipalKind.HUMAN
+        or request.tier < HUMAN_CORE_CHANGE_MIN_TIER
+    ):
+        return True
+    digest = request.attributes.get("content_digest")
+    if not isinstance(digest, str) or not CONTENT_DIGEST_PATTERN.fullmatch(digest):
+        return True
+    # The digest must have been computed by the harness from the real bytes
+    # (CoreChangeWriter), never claimed by the caller.
+    if (
+        request.attributes.get("content_digest_source") != "harness"
+        or not ctx.content_digest_attested
+    ):
+        return True
+    # Host-asserted approvers never count: only an ApprovalGate attests them.
+    if not ctx.approvals_verified:
+        return True
+    others = {
+        approver.canonical_id
+        for approver in request.approvers
+        if isinstance(approver, Principal)
+        and approver.kind is PrincipalKind.HUMAN
+        and approver.canonical_id != request.principal.canonical_id
+    }
+    return len(others) < HUMAN_ONLY_CHANGE_MIN_APPROVALS
+
+
+_REQUESTER_ID = re.compile(r"[A-Za-z0-9._@:-]+")
+
+
+def requested_by_problem(principal: Principal, requested_by: object) -> str | None:
+    """Why *requested_by* is unacceptable for an agent's T2+ request, or None."""
+    if requested_by is None:
+        return "requested_by required for agent requests at tier >= T2"
+    if not isinstance(requested_by, str) or not _REQUESTER_ID.fullmatch(requested_by):
+        return "requested_by must be a canonical principal id"
+    if requested_by.casefold() == principal.canonical_id:
+        return "requested_by must differ from the requesting agent"
+    return None
+
+
+def _agent_without_original_requester(ctx: DecisionContext) -> bool:
+    request = ctx.request
+    if request.principal.kind is not PrincipalKind.AGENT or request.tier < ActionTier.T2:
+        return False
+    subject = approval_subject(request)
+    return (
+        requested_by_problem(request.principal, subject.attributes.get("requested_by")) is not None
+    )
+
+
+def _approval_quorum_unmet(ctx: DecisionContext) -> bool:
+    return ctx.quorum is not None and not ctx.quorum.satisfied
+
+
 def _t3_without_two_person(ctx: DecisionContext) -> bool:
     return ctx.request.tier == ActionTier.T3 and not has_two_person_approval(ctx.request)
 
@@ -197,7 +265,7 @@ CONSTITUTION_INVARIANTS: tuple[PolicyStatement, ...] = (
     ),
     _invariant(
         "INV-CORE-HUMAN-ONLY-CHANGE",
-        "Changes to policy/allowlist/evaluator/IAM/CI/audit/control plane need tier >= T2.",
+        "Changes to a CORE_HUMAN_ONLY category need tier >= T2.",
         _human_only_change_below_floor,
     ),
     _invariant(
@@ -209,5 +277,21 @@ CONSTITUTION_INVARIANTS: tuple[PolicyStatement, ...] = (
         "INV-TOOL-ARG-CORE",
         "A non-read-only tool call may not receive an immutable-core path argument.",
         _tool_touches_core,
+    ),
+    _invariant(
+        "INV-APPROVAL-QUORUM",
+        "With an ApprovalGate, the tier's signed-approval quorum must be met.",
+        _approval_quorum_unmet,
+    ),
+    _invariant(
+        "INV-AGENT-REQUESTED-BY",
+        "Agent requests at tier >= T2 must name a distinct original requester.",
+        _agent_without_original_requester,
+    ),
+    _invariant(
+        "INV-HUMAN-ONLY-CHANGE-CLASS",
+        "Core changes need a HUMAN at tier >= T2, a content_digest, and an attested "
+        "approval from another human.",
+        _core_change_without_attested_second_human,
     ),
 )

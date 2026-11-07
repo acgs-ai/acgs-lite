@@ -167,6 +167,9 @@ class TestInvariants:
             "INV-CORE-HUMAN-ONLY-CHANGE",
             "INV-T3-TWO-PERSON",
             "INV-TOOL-ARG-CORE",
+            "INV-APPROVAL-QUORUM",
+            "INV-AGENT-REQUESTED-BY",
+            "INV-HUMAN-ONLY-CHANGE-CLASS",
         ]
         assert all(s.effect is PolicyEffect.FORBID for s in CONSTITUTION_INVARIANTS)
 
@@ -212,23 +215,34 @@ class TestInvariants:
         grader = pdp.decide(_request(agent, action="file.read", resource="evaluator/x.py"))
         assert "INV-CORE-SENSITIVE-READ" in grader.determining_policies
 
-    @pytest.mark.parametrize(
-        ("tier", "allowed"),
-        [(ActionTier.T0, False), (ActionTier.T1, False), (ActionTier.T2, True)],
-    )
+    @pytest.mark.parametrize("tier", [ActionTier.T0, ActionTier.T1])
     def test_human_core_change_requires_t2(
-        self, pdp: PolicyDecisionPoint, human: Principal, tier: ActionTier, allowed: bool
+        self, pdp: PolicyDecisionPoint, human: Principal, tier: ActionTier
     ) -> None:
         decision = pdp.decide(_request(human, resource="policies/main.yaml", tier=tier))
-        assert decision.allowed is allowed
-        if not allowed:
-            assert "INV-CORE-HUMAN-ONLY-CHANGE" in decision.determining_policies
+        assert not decision.allowed
+        assert "INV-CORE-HUMAN-ONLY-CHANGE" in decision.determining_policies
+
+    def test_human_core_change_without_attested_approval_denied(
+        self, pdp: PolicyDecisionPoint, human: Principal
+    ) -> None:
+        # Phase 3: T2 alone is not enough; an ungated PDP cannot attest a
+        # second human, so even host-asserted approvers do not count.
+        bob = Principal("bob", PrincipalKind.HUMAN)
+        for approvers in ((), (bob,)):
+            decision = pdp.decide(
+                _request(
+                    human, resource="policies/main.yaml", tier=ActionTier.T2, approvers=approvers
+                )
+            )
+            assert not decision.allowed
+            assert decision.determining_policies == ("INV-HUMAN-ONLY-CHANGE-CLASS",)
 
     def test_human_low_tier_write_to_other_core_category_allowed(
         self, pdp: PolicyDecisionPoint, human: Principal
     ) -> None:
-        # HELDOUT_DATA is core but not in the human-only-change set.
-        assert pdp.decide(_request(human, resource="data/heldout/x.jsonl")).allowed
+        # CREDENTIALS is core but not a CORE_HUMAN_ONLY change category.
+        assert pdp.decide(_request(human, resource="secrets/rotation.txt")).allowed
 
     def test_tool_name_is_not_classified_as_path(
         self, pdp: PolicyDecisionPoint, agent: Principal
@@ -559,7 +573,12 @@ class TestAuditRecording:
         entries = log.entries
         assert [entry.type for entry in entries] == ["pdp_decision", "pdp_decision"]
         assert [entry.valid for entry in entries] == [True, False]
-        assert entries[1].violations == ["INV-CORE-WRITE", "INV-CORE-SENSITIVE-READ"]
+        assert entries[1].violations == [
+            "INV-CORE-WRITE",
+            "INV-CORE-SENSITIVE-READ",
+            "INV-AGENT-REQUESTED-BY",
+            "INV-HUMAN-ONLY-CHANGE-CLASS",
+        ]
         for entry, decision in zip(entries, (allow, deny), strict=True):
             assert entry.constitutional_hash == constitution.hash
             assert entry.agent_id == "agent-1"
