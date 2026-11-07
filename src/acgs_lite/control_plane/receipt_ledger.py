@@ -470,6 +470,27 @@ class ReceiptLedger:
             approvers, external_runs = (), ()
             if principal is not None and len(principal.system_id or "") > MAX_FIELD_CHARS:
                 principal = None
+        # Phase 3: a PDP with an ApprovalGate replaces approvers by the ones
+        # its signed approvals attest, aligned one-to-one with ``approvals``.
+        raw_approvals = getattr(request, "approvals", ())
+        if (
+            approvers
+            and isinstance(raw_approvals, tuple)
+            and len(raw_approvals) == len(approvers)
+            and all(
+                str(getattr(approval, "approver_id", "")).casefold() == ref.principal_id.casefold()
+                for ref, approval in zip(approvers, raw_approvals, strict=True)
+            )
+        ):
+            approvers = tuple(
+                ApproverRef(
+                    ref.principal_id,
+                    ref.kind,
+                    getattr(approval, "approval_id", None),
+                    getattr(approval, "action_hash", None),
+                )
+                for ref, approval in zip(approvers, raw_approvals, strict=True)
+            )
         attributes = getattr(request, "attributes", None)
         claims_success = (
             kind is ReceiptKind.PROMOTION

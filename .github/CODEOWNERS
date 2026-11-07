@@ -23,6 +23,8 @@
 /sandbox/** @acgs-ai/governance-humans
 
 # policy
+**/constitution*.json @acgs-ai/governance-humans
+**/constitution*.toml @acgs-ai/governance-humans
 **/constitution*.yaml @acgs-ai/governance-humans
 **/constitution*.yml @acgs-ai/governance-humans
 /policies/** @acgs-ai/governance-humans
@@ -31,6 +33,12 @@
 # tool_allowlist
 **/tool-allowlist* @acgs-ai/governance-humans
 **/tool_allowlist* @acgs-ai/governance-humans
+
+# memory_write_policy
+**/memory-write-policy* @acgs-ai/governance-humans
+**/memory_write_policy* @acgs-ai/governance-humans
+/memory-policy/** @acgs-ai/governance-humans
+/memory_policy/** @acgs-ai/governance-humans
 
 # credentials
 **/.env* @acgs-ai/governance-humans

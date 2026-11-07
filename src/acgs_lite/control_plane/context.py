@@ -8,11 +8,14 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from acgs_lite.control_plane.immutable_core import CoreCategory, ImmutableCoreRegistry
 from acgs_lite.control_plane.principal import Principal
 from acgs_lite.control_plane.tiers import ActionTier
+
+if TYPE_CHECKING:
+    from acgs_lite.control_plane.approvals import QuorumResult
 
 __all__ = [
     "READ_ONLY_ACTIONS",
@@ -90,6 +93,11 @@ class DecisionRequest:
 
     The PDP re-validates every field, so a request mutated after construction
     (for example via ``object.__setattr__``) still fails closed.
+
+    ``approvals`` (Phase 3) holds :class:`~acgs_lite.control_plane.approvals.SignedApproval`
+    objects. A PDP configured with an ``ApprovalGate`` ignores the
+    host-asserted ``approvers`` and replaces them with the approvers its
+    verified approvals attest.
     """
 
     principal: Principal
@@ -99,9 +107,11 @@ class DecisionRequest:
     approvers: tuple[Principal, ...] = ()
     attributes: Mapping[str, Any] = field(default_factory=dict)
     expected_constitution_hash: str | None = None
+    approvals: tuple[Any, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "approvers", tuple(self.approvers))
+        object.__setattr__(self, "approvals", tuple(self.approvals))
         # An owned deep copy: nested lists/dicts must not stay shared with the
         # caller, or a value could change between hashing and evaluation. The
         # PDP re-snapshots (``dataclasses.replace``) before it hashes, so the
@@ -111,8 +121,12 @@ class DecisionRequest:
         )
 
     def canonical(self) -> dict[str, Any]:
-        """JSON-ready projection used for :meth:`inputs_digest`."""
-        return {
+        """JSON-ready projection used for :meth:`inputs_digest`.
+
+        ``approvals`` contributes its approval ids only when present, so
+        Phase 1/2 digests are unchanged.
+        """
+        out: dict[str, Any] = {
             "principal": self.principal.to_canonical(),
             "action": self.action,
             "resource": self.resource,
@@ -121,6 +135,9 @@ class DecisionRequest:
             "attributes": dict(self.attributes),
             "expected_constitution_hash": self.expected_constitution_hash,
         }
+        if self.approvals:
+            out["approvals"] = [getattr(a, "approval_id", None) for a in self.approvals]
+        return out
 
     def inputs_digest(self) -> str:
         """SHA-256 over canonical JSON of the request (cited by receipts).
@@ -147,3 +164,9 @@ class DecisionContext:
     policy_digest: str
     core_category: CoreCategory | None
     registry: ImmutableCoreRegistry
+    approvals_verified: bool = False
+    """True only when an ApprovalGate attested ``request.approvers``."""
+    quorum: QuorumResult | None = None
+    """The gate's verdict for this request (``None`` without a gate)."""
+    content_digest_attested: bool = False
+    """True only when the PDP-bound CoreChangeWriter computed ``content_digest``."""

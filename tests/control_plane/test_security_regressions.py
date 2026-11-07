@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,7 @@ from acgs_lite.control_plane import (
     WriteGrant,
     is_write_action,
 )
+from acgs_lite.control_plane.approvals import SignedApproval
 
 pytestmark = [pytest.mark.unit, pytest.mark.red_team]
 
@@ -71,9 +72,10 @@ def sink() -> Sink:
 
 
 @pytest.fixture()
-def dispatcher(pdp: PolicyDecisionPoint, sink: Sink) -> GovernedToolDispatcher:
+def dispatcher(gated_pdp: PolicyDecisionPoint, sink: Sink) -> GovernedToolDispatcher:
+    # The shell tool is T2, which needs an ApprovalGate on the PDP (Phase 3).
     d = GovernedToolDispatcher(
-        pdp,
+        gated_pdp,
         permissions=_permissions(),
         tool_tiers={"write": ActionTier.T1, "rm": ActionTier.T1, "shell": ActionTier.T2},
     )
@@ -196,9 +198,18 @@ class TestCritical1PathExtraction:
         assert sink.calls == []
 
     def test_human_benign_shell_allowed(
-        self, dispatcher: GovernedToolDispatcher, sink: Sink
+        self,
+        dispatcher: GovernedToolDispatcher,
+        sink: Sink,
+        approver_factory: Callable[..., Callable[..., SignedApproval]],
     ) -> None:
-        dispatcher.dispatch(HUMAN, "shell", {"command": "ls -la && echo hi", "cwd": "workspace"})
+        pytest.importorskip("cryptography")
+        args = {"command": "ls -la && echo hi", "cwd": "workspace"}
+        with pytest.raises(ToolDenied) as excinfo:  # T2 needs one signed approval
+            dispatcher.dispatch(HUMAN, "shell", args)
+        assert "INV-APPROVAL-QUORUM" in excinfo.value.decision.determining_policies
+        approval = approver_factory("bob")(dispatcher.action_hash_for(HUMAN, "shell", args))
+        dispatcher.dispatch(HUMAN, "shell", args, approvals=[approval])
         assert sink.calls == [("ls -la && echo hi", "workspace")]
 
     def test_shell_tool_must_be_t2(self, pdp: PolicyDecisionPoint) -> None:
@@ -242,6 +253,14 @@ class TestHigh2TrustedComputingBase:
             "acgs_lite.control_plane.receipt_ledger",
             "acgs_lite.control_plane.receipt_verify",
             "acgs_lite.control_plane.promotion",
+            "acgs_lite.control_plane.action_hash",
+            "acgs_lite.control_plane.approvals",
+            "acgs_lite.control_plane.autonomy",
+            "acgs_lite.control_plane.budgets",
+            "acgs_lite.control_plane.change_class",
+            "acgs_lite.control_plane.core_write",
+            "acgs_lite.control_plane.credentials",
+            "acgs_lite.control_plane.killswitch",
             "acgs_lite.integrations.control_plane_mcp",
         ]
         code = (
