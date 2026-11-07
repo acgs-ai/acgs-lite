@@ -228,16 +228,12 @@ class GovernedToolDispatcher:
     # -- authorisation -------------------------------------------------
 
     def _pre_denial(self, principal: object, tool_name: object, reason: str) -> ToolDenied:
-        decision = self._pdp.publish(
-            Decision.denied(
-                reason,
-                constitution_hash=self._pdp.constitution_hash,
-                policy_digest=self._pdp.policy_digest,
-                principal_id=str(getattr(principal, "id", "") or ""),
-                action="tool.call",
-                resource=tool_name if isinstance(tool_name, str) else "",
-                error="dispatch_denied",
-            )
+        decision = self._pdp.record_denial(
+            reason,
+            principal_id=str(getattr(principal, "id", "") or ""),
+            action="tool.call",
+            resource=tool_name if isinstance(tool_name, str) else "",
+            error="dispatch_denied",
         )
         return ToolDenied(decision)
 

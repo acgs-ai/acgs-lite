@@ -239,6 +239,9 @@ class TestHigh2TrustedComputingBase:
             "acgs_lite.control_plane.dispatcher",
             "acgs_lite.control_plane.invariants",
             "acgs_lite.control_plane.iam",
+            "acgs_lite.control_plane.receipt_ledger",
+            "acgs_lite.control_plane.receipt_verify",
+            "acgs_lite.control_plane.promotion",
             "acgs_lite.integrations.control_plane_mcp",
         ]
         code = (
