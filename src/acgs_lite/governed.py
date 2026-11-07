@@ -30,7 +30,12 @@ _log = logging.getLogger(__name__)
 _MAX_RETRIES_LIMIT = 10
 
 from acgs_lite.audit import AuditEntry, AuditLog
-from acgs_lite.circuit_breaker import GovernanceCircuitBreaker, WebhookNotificationChannel
+from acgs_lite.circuit_breaker import (
+    HALT_SIGNAL_DIR_ENV,
+    GovernanceCircuitBreaker,
+    NotificationChannel,
+    WebhookNotificationChannel,
+)
 from acgs_lite.constitution import Constitution
 from acgs_lite.constitution.refusal_reasoning import RefusalReasoningEngine
 from acgs_lite.constrained_output import attach_response_format
@@ -166,15 +171,21 @@ class GovernedAgent:
         intervention_engine: Any | None = None,
     ) -> None:
         webhook_url = os.getenv("ACGS_HALT_WEBHOOK_URL")
-        if circuit_breaker is None and webhook_url:
-            circuit_breaker = GovernanceCircuitBreaker(
-                system_id=agent_id,
-                notification_channels=[
+        halt_signal_dir = os.getenv(HALT_SIGNAL_DIR_ENV, "").strip()
+        # Opt-in default breaker: built only when a halt webhook or a shared halt
+        # signal dir is configured. With neither, there is no default breaker.
+        if circuit_breaker is None and (webhook_url or halt_signal_dir):
+            channels: list[NotificationChannel] = []
+            if webhook_url:
+                channels.append(
                     WebhookNotificationChannel(
                         webhook_url,
                         secret=os.getenv("ACGS_HALT_WEBHOOK_SECRET"),
                     )
-                ],
+                )
+            circuit_breaker = GovernanceCircuitBreaker(
+                system_id=agent_id,
+                notification_channels=channels,
             )
         self._agent = agent
         self.agent_id = agent_id
