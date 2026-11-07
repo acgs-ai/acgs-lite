@@ -27,6 +27,7 @@
 **/constitution*.toml @acgs-ai/governance-humans
 **/constitution*.yaml @acgs-ai/governance-humans
 **/constitution*.yml @acgs-ai/governance-humans
+/control-plane/runbooks/** @acgs-ai/governance-humans
 /policies/** @acgs-ai/governance-humans
 /policy/** @acgs-ai/governance-humans
 

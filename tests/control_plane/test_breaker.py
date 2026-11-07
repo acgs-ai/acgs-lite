@@ -409,8 +409,8 @@ def _dispatcher(
         calls.append("write:" + path)
         return "ok"
 
-    d.register("read", read, path_params={"path"})
-    d.register("write", write, path_params={"path"})
+    d.register("read", read, path_params={"path"}, merge_capable=False)
+    d.register("write", write, path_params={"path"}, merge_capable=False)
     return d
 
 
@@ -600,7 +600,7 @@ class TestDispatcherIntegration:
             calls.append(path)
             return "ok"
 
-        d.register("write", write, path_params={"path"})
+        d.register("write", write, path_params={"path"}, merge_capable=False)
         d.dispatch(AGENT, "write", {"path": "workspace/a"})  # identity sys-a recorded
         rec.record_rollback("loop-a", "c1")  # unattributed -> cohort sys-a demoted
         for alias in (

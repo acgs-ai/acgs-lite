@@ -29,6 +29,7 @@ import secrets
 import stat
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from acgs_lite.control_plane.approvals import SignedApproval
 from acgs_lite.control_plane.context import DecisionRequest
@@ -36,6 +37,9 @@ from acgs_lite.control_plane.immutable_core import CoreCategory
 from acgs_lite.control_plane.pdp import Decision, PolicyDecisionPoint
 from acgs_lite.control_plane.principal import Principal
 from acgs_lite.control_plane.tiers import ActionTier
+
+if TYPE_CHECKING:
+    from acgs_lite.control_plane.incident import IncidentMutationLock
 
 __all__ = ["CONTENT_DIGEST_SOURCE", "CoreChangeWriter", "CoreWriteRejected"]
 
@@ -58,9 +62,22 @@ def content_digest(content: bytes) -> str:
 class CoreChangeWriter:
     """Harness-owned writer for immutable-core files (one per PDP)."""
 
-    def __init__(self, pdp: PolicyDecisionPoint, *, tier: ActionTier = ActionTier.T2) -> None:
+    def __init__(
+        self,
+        pdp: PolicyDecisionPoint,
+        *,
+        tier: ActionTier = ActionTier.T2,
+        incident_lock: IncidentMutationLock | None = None,
+    ) -> None:
         if not isinstance(pdp, PolicyDecisionPoint):
             raise TypeError("pdp must be a PolicyDecisionPoint")
+        if incident_lock is not None:
+            from acgs_lite.control_plane.incident import IncidentMutationLock
+
+            if type(incident_lock) is not IncidentMutationLock:
+                raise TypeError("incident_lock must be an IncidentMutationLock")
+        # Phase 5: during an incident only the lock holder may change the core.
+        self._incident_lock = incident_lock
         root = pdp.registry.repo_root
         if root is None:
             raise ValueError("CoreChangeWriter needs a registry with repo_root")
@@ -149,6 +166,10 @@ class CoreChangeWriter:
         root = os.path.realpath(self._root)
         if not probe.startswith(root + os.sep) or (self._root / normalized).is_symlink():
             raise CoreWriteRejected(f"path {path!r} escapes the root or is a symlink")
+        if self._incident_lock is not None:
+            denial = self._incident_lock.write_denial(principal)
+            if denial is not None:
+                raise CoreWriteRejected(f"incident: {denial}")
         decision = self._decide(request)
         if not decision.allowed:
             raise CoreWriteRejected(f"core change denied: {decision.reason}", decision)

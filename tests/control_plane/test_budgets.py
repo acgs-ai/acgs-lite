@@ -68,8 +68,8 @@ def _dispatcher(
         calls.append("write:" + path)
         return "ok"
 
-    d.register("read", read, path_params={"path"})
-    d.register("write", write, path_params={"path"})
+    d.register("read", read, path_params={"path"}, merge_capable=False)
+    d.register("write", write, path_params={"path"}, merge_capable=False)
     return d
 
 

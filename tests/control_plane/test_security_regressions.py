@@ -98,9 +98,10 @@ def dispatcher(gated_pdp: PolicyDecisionPoint, sink: Sink) -> GovernedToolDispat
         write,
         path_params={"path"},
         opaque_params={"output_file", "p", "edits", "args"},
+        merge_capable=False,
     )
-    d.register("rm", rm, path_params={"path"})
-    d.register("shell", shell, path_params={"cwd"}, command_param="command")
+    d.register("rm", rm, path_params={"path"}, merge_capable=False)
+    d.register("shell", shell, path_params={"cwd"}, command_param="command", merge_capable=False)
     return d
 
 
@@ -117,7 +118,7 @@ class TestCritical1PathExtraction:
             return None
 
         with pytest.raises(ValueError, match=r"\*args/\*\*kwargs"):
-            dispatcher.register("write_file", write_file)
+            dispatcher.register("write_file", write_file, merge_capable=False)
 
     def test_claude_code_style_file_path_tool(
         self, dispatcher: GovernedToolDispatcher, sink: Sink
@@ -126,7 +127,11 @@ class TestCritical1PathExtraction:
             return sink.record(file_path)
 
         dispatcher.register(
-            "Write", write_tool, path_params={"file_path"}, opaque_params={"content"}
+            "Write",
+            write_tool,
+            path_params={"file_path"},
+            opaque_params={"content"},
+            merge_capable=False,
         )
         args = {"file_path": "src/acgs_lite/control_plane/invariants.py", "content": "X=()"}
         _denied(dispatcher, "Write", args, sink)
@@ -221,7 +226,7 @@ class TestCritical1PathExtraction:
             return None
 
         with pytest.raises(ValueError, match="tier >= T2"):
-            d.register("sh", sh, command_param="command")
+            d.register("sh", sh, command_param="command", merge_capable=False)
 
 
 class TestHigh2TrustedComputingBase:
@@ -265,6 +270,15 @@ class TestHigh2TrustedComputingBase:
             "acgs_lite.control_plane.breaker",
             "acgs_lite.control_plane.telemetry_api",
             "acgs_lite.integrations.control_plane_mcp",
+            "acgs_lite.control_plane.tier_policy",
+            "acgs_lite.control_plane.runbook",
+            "acgs_lite.control_plane.roles",
+            "acgs_lite.control_plane.change_ownership",
+            "acgs_lite.control_plane.incident",
+            "acgs_lite.control_plane.evaluator",
+            "acgs_lite.control_plane.verifier",
+            "acgs_lite.control_plane.facade",
+            "acgs_lite.control_plane.demo_loop",
         ]
         code = (
             "import importlib, json, sys\n"
@@ -328,7 +342,7 @@ class TestMedium3Toctou:
         def many(paths: list[str]) -> str:
             return sink.record(list(paths))
 
-        d.register("many", many, path_params={"paths"})
+        d.register("many", many, path_params={"paths"}, merge_capable=False)
         return d, pdp
 
     def test_argument_mutated_during_authorisation(
@@ -382,7 +396,7 @@ class TestMedium4ParentDirectories:
             def rm(path: str) -> str:
                 return sink.record(path)
 
-            d.register("rm", rm, path_params={"path"})
+            d.register("rm", rm, path_params={"path"}, merge_capable=False)
             with pytest.raises(ToolDenied):
                 d.dispatch(AGENT, "rm", {"path": "app/v1.2"})
             d.dispatch(AGENT, "rm", {"path": "app/notes.txt"})
@@ -479,7 +493,7 @@ class TestLow9McpReference:
             def w(path: str) -> str:
                 return path
 
-            d.register("w", w, path_params={"path"})
+            d.register("w", w, path_params={"path"}, merge_capable=False)
 
             async def list_tools(ctx: Any, params: Any) -> types.ListToolsResult:
                 tool = types.Tool(name="w", description="w", input_schema={"type": "object"})

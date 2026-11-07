@@ -1,0 +1,344 @@
+{
+  "$defs": {
+    "ActionTier": {
+      "description": "Irreversibility / blast-radius scale (higher is more dangerous).",
+      "enum": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "title": "ActionTier",
+      "type": "integer"
+    },
+    "BreakerOpenStop": {
+      "additionalProperties": false,
+      "description": "Stop while the dispatching trigger's circuit breaker is not CLOSED.",
+      "properties": {
+        "kind": {
+          "const": "breaker_open",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "BreakerOpenStop",
+      "type": "object"
+    },
+    "BudgetFractionStop": {
+      "additionalProperties": false,
+      "description": "Stop once the principal has used >= *max_fraction* of its iteration budget.",
+      "properties": {
+        "kind": {
+          "const": "budget_fraction",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_fraction": {
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Max Fraction",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "max_fraction"
+      ],
+      "title": "BudgetFractionStop",
+      "type": "object"
+    },
+    "ErrorRateStop": {
+      "additionalProperties": false,
+      "description": "Stop once failures/executions >= *max_rate* (after *min_samples*).",
+      "properties": {
+        "kind": {
+          "const": "error_rate",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_rate": {
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Max Rate",
+          "type": "number"
+        },
+        "min_samples": {
+          "minimum": 1,
+          "title": "Min Samples",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "max_rate",
+        "min_samples"
+      ],
+      "title": "ErrorRateStop",
+      "type": "object"
+    },
+    "ExitCodePredicate": {
+      "additionalProperties": false,
+      "properties": {
+        "equals": {
+          "title": "Equals",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "exit_code",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "equals"
+      ],
+      "title": "ExitCodePredicate",
+      "type": "object"
+    },
+    "ExternalRunPredicate": {
+      "additionalProperties": false,
+      "description": "Success = a run of *workflow* at *provider* validated by the run verifier.",
+      "properties": {
+        "kind": {
+          "const": "external_run",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "pattern": "^[A-Za-z0-9._-]{1,128}$",
+          "title": "Provider",
+          "type": "string"
+        },
+        "workflow": {
+          "pattern": "^[A-Za-z0-9._/@+-]{1,256}$",
+          "title": "Workflow",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "provider",
+        "workflow"
+      ],
+      "title": "ExternalRunPredicate",
+      "type": "object"
+    },
+    "MaxFailuresStop": {
+      "additionalProperties": false,
+      "description": "Stop after *count* failed executions under this runbook.",
+      "properties": {
+        "count": {
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "max_failures",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "count"
+      ],
+      "title": "MaxFailuresStop",
+      "type": "object"
+    },
+    "RateLimit": {
+      "additionalProperties": false,
+      "properties": {
+        "max_executions": {
+          "minimum": 1,
+          "title": "Max Executions",
+          "type": "integer"
+        },
+        "per_seconds": {
+          "minimum": 1,
+          "title": "Per Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_executions",
+        "per_seconds"
+      ],
+      "title": "RateLimit",
+      "type": "object"
+    },
+    "ScopeSelector": {
+      "additionalProperties": false,
+      "description": "What a runbook may touch: tool-name globs (``fnmatch``), repo path globs\n(root-anchored repo-glob semantics, see :func:`~.immutable_core.compile_glob`)\nand the principals (canonical ids) and/or system cohorts it is for.",
+      "properties": {
+        "allow_pathless": {
+          "default": false,
+          "title": "Allow Pathless",
+          "type": "boolean"
+        },
+        "paths": {
+          "items": {
+            "pattern": "^[^\\x00-\\x1f\\x7f]{1,512}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Paths",
+          "type": "array"
+        },
+        "principals": {
+          "default": [],
+          "items": {
+            "pattern": "^[A-Za-z0-9._@:-]{1,256}$",
+            "type": "string"
+          },
+          "title": "Principals",
+          "type": "array"
+        },
+        "system_ids": {
+          "default": [],
+          "items": {
+            "pattern": "^[A-Za-z0-9._@:-]{1,256}$",
+            "type": "string"
+          },
+          "title": "System Ids",
+          "type": "array"
+        },
+        "tools": {
+          "items": {
+            "pattern": "^[^\\x00-\\x1f\\x7f]{1,512}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Tools",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tools",
+        "paths"
+      ],
+      "title": "ScopeSelector",
+      "type": "object"
+    }
+  },
+  "$id": "https://acgs.ai/schemas/control-plane/runbook.schema.json",
+  "additionalProperties": false,
+  "description": "One approved, machine-checkable procedure. Every field is required.",
+  "properties": {
+    "action_tier": {
+      "$ref": "#/$defs/ActionTier"
+    },
+    "last_tested": {
+      "format": "date",
+      "title": "Last Tested",
+      "type": "string"
+    },
+    "max_blast_radius": {
+      "minimum": 1,
+      "title": "Max Blast Radius",
+      "type": "integer"
+    },
+    "owner": {
+      "pattern": "^[A-Za-z0-9._@:-]{1,256}$",
+      "title": "Owner",
+      "type": "string"
+    },
+    "rate_limit": {
+      "$ref": "#/$defs/RateLimit"
+    },
+    "required_approver_role": {
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+      "title": "Required Approver Role",
+      "type": "string"
+    },
+    "rollback_command": {
+      "items": {
+        "pattern": "^[^\\x00]{1,4096}$",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Rollback Command",
+      "type": "array"
+    },
+    "runbook_id": {
+      "pattern": "^[A-Za-z0-9._-]{1,128}$",
+      "title": "Runbook Id",
+      "type": "string"
+    },
+    "scope_selector": {
+      "$ref": "#/$defs/ScopeSelector"
+    },
+    "stop_conditions": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "breaker_open": "#/$defs/BreakerOpenStop",
+            "budget_fraction": "#/$defs/BudgetFractionStop",
+            "error_rate": "#/$defs/ErrorRateStop",
+            "max_failures": "#/$defs/MaxFailuresStop"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/MaxFailuresStop"
+          },
+          {
+            "$ref": "#/$defs/ErrorRateStop"
+          },
+          {
+            "$ref": "#/$defs/BudgetFractionStop"
+          },
+          {
+            "$ref": "#/$defs/BreakerOpenStop"
+          }
+        ]
+      },
+      "minItems": 1,
+      "title": "Stop Conditions",
+      "type": "array"
+    },
+    "success_predicate": {
+      "discriminator": {
+        "mapping": {
+          "exit_code": "#/$defs/ExitCodePredicate",
+          "external_run": "#/$defs/ExternalRunPredicate"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ExternalRunPredicate"
+        },
+        {
+          "$ref": "#/$defs/ExitCodePredicate"
+        }
+      ],
+      "title": "Success Predicate"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "runbook_id",
+    "version",
+    "action_tier",
+    "scope_selector",
+    "max_blast_radius",
+    "rate_limit",
+    "required_approver_role",
+    "rollback_command",
+    "success_predicate",
+    "stop_conditions",
+    "owner",
+    "last_tested"
+  ],
+  "title": "Runbook",
+  "type": "object"
+}

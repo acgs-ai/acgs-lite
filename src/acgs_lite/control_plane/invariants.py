@@ -16,7 +16,11 @@ Evidence:
   distinct human-only change class (INV-HUMAN-ONLY-CHANGE-CLASS).
 * METR (Mar 2026): maintainer merge rates ran ~24pp below the SWE-bench
   grader on 296 AI-written patches, i.e. automated graders over-approve.
-  Noted here; addressed by later phases (independent review gates).
+  Phase 5: the grader is not the merger -- no AGENT or SERVICE may merge or
+  approve a change (INV-AGENT-NO-MERGE).
+* Phase 5 tiers grade irreversibility, not confidence: a request carrying an
+  ``action_profile`` may not claim a tier below the profile's floor
+  (INV-TIER-FLOOR; T3 for irreversible/data-destroying, T1 otherwise).
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ from acgs_lite.control_plane.change_class import (
     ChangeClass,
     classify_category,
 )
+from acgs_lite.control_plane.change_ownership import AGENT_NO_MERGE_ACTIONS
 from acgs_lite.control_plane.context import DecisionContext, DecisionRequest, is_write_action
 from acgs_lite.control_plane.immutable_core import CoreCategory, ImmutableCoreRegistry
 from acgs_lite.control_plane.policy import PolicyEffect, PolicyStatement
@@ -253,6 +258,57 @@ def _tool_touches_core(ctx: DecisionContext) -> bool:
     return any(ctx.registry.is_core(path) for path in paths)
 
 
+def _merge_by_non_human(ctx: DecisionContext) -> bool:
+    request = ctx.request
+    if request.principal.kind is PrincipalKind.HUMAN:
+        return False
+    names = {request.action.lower()}
+    if request.action.lower() == "tool.call":
+        names.add(request.resource.lower())
+    via_tool = request.attributes.get("via_tool")
+    if isinstance(via_tool, str):
+        names.add(via_tool.lower())
+    tool_call = request.attributes.get("tool_call")
+    flagged = request.attributes.get("merge_capable") is True or (
+        isinstance(tool_call, Mapping) and tool_call.get("merge_capable") is True
+    )
+    return flagged or bool(names & AGENT_NO_MERGE_ACTIONS)
+
+
+_PROFILE_KEYS = frozenset(
+    {"reversible", "data_destroying", "blast_radius", "novel", "has_verified_backup", "read_only"}
+)
+
+
+def _profile_floor(raw: object) -> ActionTier:
+    """Lowest tier an action profile can ever classify to (raises if malformed,
+    which the PDP turns into a deny). The PDP cannot see the runbook, so a
+    reversible write floors at T1, never T2."""
+    if not isinstance(raw, Mapping) or set(raw) != _PROFILE_KEYS:
+        raise ValueError("malformed action_profile")
+    for key in _PROFILE_KEYS - {"blast_radius"}:
+        if not isinstance(raw[key], bool):
+            raise ValueError("malformed action_profile")
+    if raw["data_destroying"] or not raw["reversible"]:
+        return ActionTier.T3
+    if raw["read_only"]:
+        return ActionTier.T0
+    return ActionTier.T1
+
+
+def _tier_below_profile_floor(ctx: DecisionContext) -> bool:
+    # TODO(control-plane-gap): a host that builds a DecisionRequest without an
+    # action_profile still asserts its tier; only the dispatcher path is bound.
+    attributes = ctx.request.attributes
+    raw = attributes.get("action_profile")
+    tool_call = attributes.get("tool_call")
+    if raw is None and isinstance(tool_call, Mapping):
+        raw = tool_call.get("action_profile")
+    if raw is None:
+        return False
+    return ctx.request.tier < _profile_floor(raw)
+
+
 def _invariant(statement_id: str, description: str, condition: Any) -> PolicyStatement:
     return PolicyStatement(
         id=statement_id,
@@ -306,5 +362,15 @@ CONSTITUTION_INVARIANTS: tuple[PolicyStatement, ...] = (
         "Core changes need a HUMAN at tier >= T2, a content_digest, and an attested "
         "approval from another human.",
         _core_change_without_attested_second_human,
+    ),
+    _invariant(
+        "INV-AGENT-NO-MERGE",
+        "No AGENT or SERVICE may merge or approve a change (grader != merger).",
+        _merge_by_non_human,
+    ),
+    _invariant(
+        "INV-TIER-FLOOR",
+        "A request may not claim a tier below its action profile's floor.",
+        _tier_below_profile_floor,
     ),
 )

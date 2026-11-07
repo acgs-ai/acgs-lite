@@ -14,7 +14,14 @@ whose file writes go only through :class:`CoreChangeWriter`
 (:mod:`.core_write`). Phase 4: oversight telemetry -- override rate,
 approval latency, verifier precision/recall and post-merge rework, segmented
 agent vs human (:mod:`.telemetry`, :mod:`.telemetry_api`) -- feeding the
-error budget, plus a per-trigger circuit breaker (:mod:`.breaker`).
+error budget, plus a per-trigger circuit breaker (:mod:`.breaker`). Phase 5:
+tiers computed from irreversibility and blast radius (:mod:`.tier_policy`),
+machine-readable runbooks gating T1 (:mod:`.runbook`), explicit roles
+(:mod:`.roles`), single writer per change (:mod:`.change_ownership`), a
+deterministic evaluator outside mutation scope (:mod:`.evaluator`), an
+independent artifact-anchored verifier (:mod:`.verifier`), the incident
+mutation lock (:mod:`.incident`) and one wiring constructor
+(:mod:`.facade`); :mod:`.demo_loop` is the self-improvement demo.
 
 Mutating agents must never be able to write to the things that judge them.
 The immutable core is protected twice, by independent code paths:
@@ -63,6 +70,7 @@ from acgs_lite.control_plane.budgets import (
     BudgetState,
 )
 from acgs_lite.control_plane.change_class import ChangeClass, classify_change
+from acgs_lite.control_plane.change_ownership import ChangeOwnershipRegistry, OwnershipDenied
 from acgs_lite.control_plane.context import (
     READ_ONLY_ACTIONS,
     WRITE_VERBS,
@@ -78,6 +86,11 @@ from acgs_lite.control_plane.credentials import (
     ScopedCredential,
 )
 from acgs_lite.control_plane.dispatcher import GovernedToolDispatcher, ToolDenied, ToolResult
+from acgs_lite.control_plane.evaluator import (
+    DeterministicEvaluator,
+    EvaluationResult,
+    EvaluatorService,
+)
 from acgs_lite.control_plane.evidence import (
     DEFAULT_EVIDENCE_POLICY,
     CompositeRunVerifier,
@@ -89,6 +102,12 @@ from acgs_lite.control_plane.evidence import (
     RunRegistrationRejected,
     RunValidation,
     TrustedRunRegistry,
+)
+from acgs_lite.control_plane.facade import (
+    ControlPlane,
+    ControlPlaneConfig,
+    ControlPlaneConfigError,
+    build_control_plane,
 )
 from acgs_lite.control_plane.iam import (
     IAMGrantRejected,
@@ -103,6 +122,7 @@ from acgs_lite.control_plane.immutable_core import (
     ImmutableCoreRegistry,
     normalize_path,
 )
+from acgs_lite.control_plane.incident import IncidentLockError, IncidentMutationLock
 from acgs_lite.control_plane.invariants import CONSTITUTION_INVARIANTS
 from acgs_lite.control_plane.killswitch import KillSwitch, KillSwitchOperationRejected
 from acgs_lite.control_plane.pdp import (
@@ -138,6 +158,15 @@ from acgs_lite.control_plane.receipts import (
     ReceiptKind,
     SignedControlPlaneReceipt,
 )
+from acgs_lite.control_plane.roles import Role, RoleAssignments, RoleConflict
+from acgs_lite.control_plane.runbook import (
+    Runbook,
+    RunbookDenied,
+    RunbookRegistry,
+    RunbookRejected,
+    runbook_hash,
+    runbook_json_schema,
+)
 from acgs_lite.control_plane.telemetry import (
     AgentTelemetryRejected,
     InMemoryTelemetryStore,
@@ -148,17 +177,23 @@ from acgs_lite.control_plane.telemetry import (
     TelemetryRecorder,
     TelemetryStore,
 )
+from acgs_lite.control_plane.tier_policy import (
+    ActionProfile,
+    PostHocReviewItem,
+    ReviewQueue,
+    classify_tier,
+)
 from acgs_lite.control_plane.tiers import ActionTier
+from acgs_lite.control_plane.verifier import (
+    IndependentVerifier,
+    ReplayVerifier,
+    VerifierPolicy,
+    VerifierRejected,
+    VerifierVerdict,
+)
 
 __all__ = [
-    "CONSTITUTION_INVARIANTS",
-    "DEFAULT_EVIDENCE_POLICY",
-    "DEFAULT_IMMUTABLE_CORE",
-    "DEFAULT_QUORUM_POLICIES",
-    "DEFAULT_RECEIPT_STORE_PATH",
-    "GENESIS_RECEIPT_HASH",
-    "READ_ONLY_ACTIONS",
-    "WRITE_VERBS",
+    "ActionProfile",
     "ActionTier",
     "AgentTelemetryRejected",
     "ApprovalAuthority",
@@ -177,24 +212,37 @@ __all__ = [
     "BudgetLedger",
     "BudgetLimits",
     "BudgetState",
+    "CONSTITUTION_INVARIANTS",
     "ChangeClass",
+    "ChangeOwnershipRegistry",
     "CompositeRunVerifier",
+    "ControlPlane",
+    "ControlPlaneConfig",
+    "ControlPlaneConfigError",
     "ControlPlaneReceipt",
+    "CoreCategory",
     "CoreChangeWriter",
     "CoreWriteRejected",
-    "CoreCategory",
     "CredentialInvalid",
     "CredentialIssuanceRefused",
     "CredentialIssuer",
+    "DEFAULT_EVIDENCE_POLICY",
+    "DEFAULT_IMMUTABLE_CORE",
+    "DEFAULT_QUORUM_POLICIES",
+    "DEFAULT_RECEIPT_STORE_PATH",
     "Decision",
     "DecisionContext",
     "DecisionRequest",
+    "DeterministicEvaluator",
     "ErrorBudget",
+    "EvaluationResult",
+    "EvaluatorService",
     "EvidencePolicy",
     "EvidenceSource",
     "ExternalRunRef",
     "ExternalRunVerifier",
     "FailureKind",
+    "GENESIS_RECEIPT_HASH",
     "GitHubActionsRunVerifier",
     "GovernedToolDispatcher",
     "IAMGrantRejected",
@@ -202,23 +250,29 @@ __all__ = [
     "ImmutableCoreRegistry",
     "InMemoryReceiptStore",
     "InMemoryTelemetryStore",
+    "IncidentLockError",
+    "IncidentMutationLock",
+    "IndependentVerifier",
     "JSONLReceiptStore",
     "JSONLTelemetryStore",
     "KillSwitch",
     "KillSwitchOperationRejected",
     "OversightEvent",
     "OversightMetrics",
+    "OwnershipDenied",
     "PolicyDecisionPoint",
     "PolicyEffect",
     "PolicyParseError",
     "PolicySet",
     "PolicyStatement",
+    "PostHocReviewItem",
     "Principal",
     "PrincipalKind",
     "PromotionGate",
     "PromotionRejected",
     "QuorumPolicy",
     "QuorumResult",
+    "READ_ONLY_ACTIONS",
     "ReceiptCapabilityError",
     "ReceiptConflict",
     "ReceiptEmissionError",
@@ -227,9 +281,18 @@ __all__ = [
     "ReceiptStore",
     "ReceiptStoreCorrupted",
     "ReceiptVerification",
+    "ReplayVerifier",
     "RepositoryPermissions",
+    "ReviewQueue",
+    "Role",
+    "RoleAssignments",
+    "RoleConflict",
     "RunRegistrationRejected",
     "RunValidation",
+    "Runbook",
+    "RunbookDenied",
+    "RunbookRegistry",
+    "RunbookRejected",
     "ScopedCredential",
     "SignedApproval",
     "SignedControlPlaneReceipt",
@@ -240,12 +303,20 @@ __all__ = [
     "ToolResult",
     "TriggerCircuitBreaker",
     "TrustedRunRegistry",
+    "VerifierPolicy",
+    "VerifierRejected",
+    "VerifierVerdict",
+    "WRITE_VERBS",
     "WriteGrant",
     "action_hash",
+    "build_control_plane",
     "classify_change",
+    "classify_tier",
     "is_write_action",
     "normalize_path",
     "render_codeowners",
+    "runbook_hash",
+    "runbook_json_schema",
     "verify_chain",
     "verify_receipt",
 ]

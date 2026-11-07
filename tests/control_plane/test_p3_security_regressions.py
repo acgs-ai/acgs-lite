@@ -140,7 +140,7 @@ class TestM3AtomicBudget:
             with lock:
                 calls.append(path)
 
-        d.register("w", w, path_params={"path"})
+        d.register("w", w, path_params={"path"}, merge_capable=False)
 
         def run(i: int) -> None:
             with contextlib.suppress(ToolDenied):
@@ -225,7 +225,7 @@ class TestM5OriginalRequester:
         def edit(path: str) -> None:
             calls.append(path)
 
-        d.register("edit", edit, path_params={"path"})
+        d.register("edit", edit, path_params={"path"}, merge_capable=False)
         args = {"path": "workspace/a"}
         digest = d.action_hash_for(AGENT, "edit", args, requested_by="carol")
         with pytest.raises(ToolDenied):
@@ -326,7 +326,7 @@ class TestKillSwitchToctouAndPaths:
         def w(path: str) -> None:
             calls.append(path)
 
-        d.register("w", w, path_params={"path"})
+        d.register("w", w, path_params={"path"}, merge_capable=False)
         if engage_during_auth:
             original = d._authorize
 
@@ -381,8 +381,8 @@ def _edit_dispatcher(
     def edit(path: str) -> None:
         calls.append(path)
 
-    d.register("edit", edit, path_params={"path"})
-    d.register("w", edit, path_params={"path"})
+    d.register("edit", edit, path_params={"path"}, merge_capable=False)
+    d.register("w", edit, path_params={"path"}, merge_capable=False)
     return d, calls
 
 

@@ -439,7 +439,7 @@ class TestDispatchGrouping:
             def write(paths: list[str]) -> str:
                 return "ok"
 
-            d.register("write", write, path_params={"paths"})
+            d.register("write", write, path_params={"paths"}, merge_capable=False)
             result = d.dispatch(AGENT, "write", {"paths": ["workspace/a", "workspace/b"]})
             d.authorize_without_consuming(AGENT, "write", {"paths": ["workspace/c"]})
         decisions = [e for e in store.read_all() if isinstance(e, DecisionObserved)]
@@ -625,7 +625,13 @@ def latency_setup(
             DEFAULT_IMMUTABLE_CORE, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
         )
         d = GovernedToolDispatcher(pdp, permissions=permissions, tool_tiers={"edit": ActionTier.T2})
-        d.register("edit", Calls().tool, path_params={"path"}, opaque_params={"content"})
+        d.register(
+            "edit",
+            Calls().tool,
+            path_params={"path"},
+            opaque_params={"content"},
+            merge_capable=False,
+        )
         yield d, clock, store, approver_factory("bob"), gate
 
 
@@ -738,7 +744,13 @@ class TestApprovalLatencyThroughDispatcher:
                 pdp, permissions=permissions, tool_tiers={"edit": ActionTier.T2}
             )
             calls = Calls()
-            d.register("edit", calls.tool, path_params={"path"}, opaque_params={"content"})
+            d.register(
+                "edit",
+                calls.tool,
+                path_params={"path"},
+                opaque_params={"content"},
+                merge_capable=False,
+            )
             args = {"path": "workspace/a", "content": "v1"}
             action = d.action_hash_for(AGENT, "edit", args, requested_by=REQ)
             bob = approver_factory("bob")
@@ -803,8 +815,8 @@ def _autonomy_dispatcher(
         calls.append("write:" + path)
         return "ok"
 
-    d.register("read", read, path_params={"path"})
-    d.register("write", write, path_params={"path"})
+    d.register("read", read, path_params={"path"}, merge_capable=False)
+    d.register("write", write, path_params={"path"}, merge_capable=False)
     return d, calls
 
 
