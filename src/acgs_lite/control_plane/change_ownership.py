@@ -185,7 +185,7 @@ class ChangeOwnershipRegistry:
 
 
 def _inside(root: str, path: str) -> bool:
-    return path.lower() == root.lower() or path.lower().startswith(root.lower() + "/")
+    return path == root or path.startswith(root + "/")
 
 
 def _overlaps(a: str, b: str) -> bool:
