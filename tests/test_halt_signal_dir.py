@@ -636,6 +636,29 @@ def test_cli_halt_accepts_symlinked_ancestor_into_trusted_dir(tmp_path: Path) ->
     assert (real / "mine" / "acgs-halt-sys-okanc").is_file()
 
 
+@pytest.mark.parametrize("relative", [False, True])
+def test_intermediate_symlink_target_cannot_redirect_halt(tmp_path: Path, relative: bool) -> None:
+    shared = tmp_path / "writable"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for tree in (first, second):
+        (tree / "signals").mkdir(parents=True)
+    pivot = shared / "pivot"
+    pivot.symlink_to(Path("../first") if relative else first)
+    link = tmp_path / "operator-link"
+    link.symlink_to(pivot.relative_to(tmp_path) if relative else pivot)
+    (first / "signals" / "acgs-halt-pivot").write_text("halted")
+    breaker = GovernanceCircuitBreaker(system_id="pivot", signal_dir=link / "signals")
+    assert breaker.is_tripped
+    pivot.unlink()
+    pivot.symlink_to(Path("../second") if relative else second)
+    assert breaker.is_tripped
+    with pytest.raises(GovernanceHaltError):
+        breaker.check()
+
+
 def test_cli_halt_creates_intermediate_dirs_0700_under_loose_umask(tmp_path: Path) -> None:
     signal_dir = tmp_path / "a" / "b" / "c"
     old = os.umask(0o002)

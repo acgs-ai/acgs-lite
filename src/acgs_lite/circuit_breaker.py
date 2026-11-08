@@ -129,8 +129,8 @@ def _signal_dir_problem(path: Path) -> str | None:
 def _signal_dir_ancestors_problem(path: Path, uid: int) -> str | None:
     """Check that no other user can rename or replace an ancestor of ``path``.
 
-    Both the ancestors as spelled (symlinks included) and the ancestors of the
-    resolved path must be owned by a trusted uid, and directories must not be
+    Inspect spelled and resolved ancestors, including every intermediate
+    symlink target. Directories must have trusted owners and cannot be
     group/world-writable without the sticky bit.
     """
     try:
@@ -140,17 +140,31 @@ def _signal_dir_ancestors_problem(path: Path, uid: int) -> str | None:
         return f"invalid {HALT_TRUSTED_UIDS_ENV} value: {extra!r}"
     try:
         resolved = Path(os.path.realpath(path, strict=True))
-        entries = [(p, os.lstat(p)) for p in path.parents]
-        entries += [(p, os.stat(p)) for p in resolved.parents]
+        pending = [*path.parents, *resolved.parents]
+        visited: set[Path] = set()
+        while pending:
+            ancestor = pending.pop()
+            if ancestor in visited:
+                continue
+            visited.add(ancestor)
+            if len(visited) > 256:
+                return f"too many ancestors or symlink targets for signal dir {path}"
+            st = os.lstat(ancestor)
+            if st.st_uid not in trusted:
+                return f"signal dir ancestor {ancestor} is owned by uid {st.st_uid}"
+            if stat.S_ISLNK(st.st_mode):
+                target = Path(os.readlink(ancestor))
+                if not target.is_absolute():
+                    target = ancestor.parent / target
+                # realpath() alone hides mutable intermediate pivots. Inspect
+                # each link destination and all its parents before following
+                # the next link, preserving relative '..' path components.
+                pending.extend((target, *target.parents))
+                continue
+            if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH) and not st.st_mode & stat.S_ISVTX:
+                return f"signal dir ancestor {ancestor} is group/world-writable without the sticky bit"
     except OSError as exc:
         return f"cannot inspect ancestors of signal dir {path}: {exc}"
-    for ancestor, st in entries:
-        if st.st_uid not in trusted:
-            return f"signal dir ancestor {ancestor} is owned by uid {st.st_uid}"
-        if stat.S_ISLNK(st.st_mode):
-            continue
-        if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH) and not st.st_mode & stat.S_ISVTX:
-            return f"signal dir ancestor {ancestor} is group/world-writable without the sticky bit"
     return None
 
 
