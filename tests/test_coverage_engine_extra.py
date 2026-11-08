@@ -297,6 +297,27 @@ class TestRustPatternCaseParity:
         assert [v.rule_id for v in result.violations] == ["PAT-AWS"]
 
     @pytest.mark.skipif(not _HAS_RUST, reason="Rust extension not available")
+    @pytest.mark.parametrize("text", ["send CONTRASEÑA now", "send contraseña now"])
+    def test_binding_lowercases_non_ascii(self, text: str) -> None:
+        """The binding accepts any-case text; non-ASCII capitals must fold too."""
+        c = Constitution.from_rules(
+            [
+                Rule(
+                    id="U",
+                    text="No passwords",
+                    severity=Severity.HIGH,
+                    keywords=["contraseña"],
+                    category="security",
+                )
+            ],
+            name="unicode",
+        )
+        rv = _make_engine(c, strict=False)._rust_validator
+        assert rv is not None
+        assert rv.validate_hot(text)[0] != 0
+        assert rv.validate_full(text, None)[0] != 0
+
+    @pytest.mark.skipif(not _HAS_RUST, reason="Rust extension not available")
     def test_rust_still_allows_non_matching_action(self) -> None:
         engine = _make_engine(_make_uppercase_pattern_constitution(), strict=False)
         assert engine._rust_validator is not None
