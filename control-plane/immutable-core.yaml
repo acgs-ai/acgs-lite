@@ -52,6 +52,7 @@ categories:
   - Makefile
   - scripts/check_critical_coverage.py
   - scripts/check_links.py
+  - scripts/check_release_coherence.py
   - scripts/qualify_wheel.py
   - scripts/release_candidate.py
   - scripts/run_governance_regression.py

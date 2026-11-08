@@ -12,6 +12,7 @@ from acgs_lite.control_plane import (
     ActionTier,
     GovernedToolDispatcher,
     IAMGrantRejected,
+    ImmutableCoreRegistry,
     PolicyDecisionPoint,
     PolicySet,
     Principal,
@@ -47,9 +48,9 @@ TIERS = {
 }
 
 
-def grants() -> RepositoryPermissions:
+def grants(registry: ImmutableCoreRegistry = DEFAULT_IMMUTABLE_CORE) -> RepositoryPermissions:
     return RepositoryPermissions(
-        DEFAULT_IMMUTABLE_CORE,
+        registry,
         [
             WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",)),
             WriteGrant("alice", PrincipalKind.HUMAN, ("**",)),
@@ -76,7 +77,7 @@ def _dispatcher(
     recorder = Recorder()
     dispatcher = GovernedToolDispatcher(
         pdp,
-        permissions=permissions or grants(),
+        permissions=permissions or grants(pdp.registry),
         tool_tiers=TIERS,
         read_only_tools=frozenset({"read_file", "unlisted_reader"}),
     )
@@ -275,7 +276,7 @@ class TestCoreBoundaryViaDispatcher:
         for prefix in ("evaluator/", ".", "../x"):
             with pytest.raises(ValueError):
                 GovernedToolDispatcher(
-                    pdp, permissions=grants(), tool_tiers={}, scratch_prefixes=(prefix,)
+                    pdp, permissions=grants(pdp.registry), tool_tiers={}, scratch_prefixes=(prefix,)
                 )
 
     def test_sync_dispatch_refuses_async_tool(
@@ -405,7 +406,7 @@ class TestDeniedByBothLayers:
         self, pdp: PolicyDecisionPoint, agent: Principal
     ) -> None:
         # PDP permits scratch writes, but this principal has no IAM grants.
-        dispatcher, recorder = _dispatcher(pdp, RepositoryPermissions(DEFAULT_IMMUTABLE_CORE))
+        dispatcher, recorder = _dispatcher(pdp, RepositoryPermissions(pdp.registry))
         with pytest.raises(ToolDenied) as excinfo:
             dispatcher.dispatch(agent, "write_file", {"path": "workspace/notes.md"})
         assert "repository permissions deny" in excinfo.value.decision.reason
@@ -414,7 +415,7 @@ class TestDeniedByBothLayers:
     def test_iam_grant_exists_pdp_denies_core(
         self, pdp: PolicyDecisionPoint, agent: Principal
     ) -> None:
-        perms = grants()
+        perms = grants(pdp.registry)
         assert perms.can_write(agent, "workspace/x.py")
         dispatcher, recorder = _dispatcher(pdp, perms)
         with pytest.raises(ToolDenied) as excinfo:
