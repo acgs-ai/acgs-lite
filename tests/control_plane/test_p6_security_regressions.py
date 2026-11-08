@@ -366,6 +366,8 @@ ENTRY_POINTS: dict[str, str] = {
 }
 # Human-kind gates that are not entry points, each with the reason.
 ALLOWLIST: dict[str, str] = {
+    "runbook.py:RunbookRegistry._check_scope": "checks the attested dispatch principal against "
+    "the immutable, human-approved runbook kind selector",
     "telemetry.py:OversightMetrics.approval_latency": "read-only segmentation of recorded "
     "requester kind, not a caller authorization gate",
     "approvals.py:_require_human": "helper; every caller is an entry point",
