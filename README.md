@@ -863,6 +863,9 @@ acgs serve --port 8080
 # --signal-dir) when agents may run with a different TMPDIR than the operator.
 # GovernedAgent builds a default breaker only when ACGS_HALT_SIGNAL_DIR or
 # ACGS_HALT_WEBHOOK_URL is set (opt-in); otherwise pass circuit_breaker=.
+# GovernedCallable also honors ACGS_HALT_SIGNAL_DIR or circuit_breaker=.
+# Pre-create the trusted directory before starting agents: a missing or
+# untrusted directory fails closed on every operation, including async calls.
 # If agents run as a different user than the operator, pre-create the dir so
 # both can read it (acgs halt creates new dirs as 0700, and an agent that cannot
 # read the dir treats itself as halted until access is fixed):

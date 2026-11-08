@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import stat
@@ -21,7 +22,8 @@ from acgs_lite.circuit_breaker import (
     WebhookNotificationChannel,
     _signal_dir_ancestors_problem,
 )
-from acgs_lite.governed import GovernedAgent
+from acgs_lite.constitution import Constitution, Rule, Severity
+from acgs_lite.governed import GovernedAgent, GovernedCallable
 from acgs_lite.maci import MACIRole
 
 _WORKTREE_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -108,7 +110,8 @@ def test_cli_flag_beats_env(
     out = capsys.readouterr().out
     assert f"Signal dir: {flag_dir} (from --signal-dir)" in out
 
-    # Status via env only does not see it; via flag it does.
+    # An existing env directory has no signal; the flag directory does.
+    env_dir.mkdir()
     assert _run_cli(["breaker-status", "--system-id", "sys-flag"]) == 0
     assert (
         _run_cli(["breaker-status", "--system-id", "sys-flag", "--signal-dir", str(flag_dir)]) == 1
@@ -765,7 +768,151 @@ def test_untrusted_env_signal_dir_counts_as_tripped(
     assert breaker.is_tripped is False
 
 
-def test_missing_explicit_signal_dir_is_not_tripped(tmp_path: Path) -> None:
-    # An agent may start before `acgs halt` creates the dir.
+def test_missing_explicit_signal_dir_fails_closed(tmp_path: Path) -> None:
+    # A configured kill switch must be inspectable before execution.
     breaker = GovernanceCircuitBreaker(system_id="sys-later", signal_dir=tmp_path / "later")
-    assert breaker.is_tripped is False
+    assert breaker.is_tripped is True
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership required")
+def test_cli_halt_rejects_foreign_signal_in_sticky_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tmp_path.chmod(0o1777)
+    signal = tmp_path / "acgs-halt-planted"
+    signal.write_text("planted")
+    _fake_owner(monkeypatch, signal, _FOREIGN_UID)
+
+    assert _run_cli(["halt", "--system-id", "planted", "--signal-dir", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert "already halted" not in captured.err
+    assert "NOT halted" in captured.err
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership required")
+def test_cli_halt_rejects_foreign_signal_after_failed_publication(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tmp_path.chmod(0o1777)
+    signal = tmp_path / "acgs-halt-race"
+    _fake_owner(monkeypatch, signal, _FOREIGN_UID)
+
+    def replace_fails(*args: object) -> None:
+        signal.write_text("planted during publication")
+        raise PermissionError("sticky directory protects foreign inode")
+
+    monkeypatch.setattr(os, "replace", replace_fails)
+    assert _run_cli(["halt", "--system-id", "race", "--signal-dir", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert "HALTED system" not in captured.out
+    assert "NOT halted" in captured.err
+
+
+def test_fallback_signal_directory_trust_rechecked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    breaker = GovernanceCircuitBreaker(system_id="fallback")
+    assert not breaker.is_tripped
+    tmp_path.chmod(0o777)
+    assert breaker.is_tripped
+
+
+@pytest.mark.usefixtures("_no_halt_webhook")
+def test_async_agent_honors_shared_halt_before_side_effect(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(HALT_SIGNAL_DIR_ENV, str(tmp_path))
+    calls: list[str] = []
+
+    async def action(prompt: str) -> str:
+        calls.append(prompt)
+        return prompt
+
+    agent = GovernedAgent(action, agent_id="async-agent", maci_role=MACIRole.EXECUTOR)
+    assert _run_cli(["halt", "--system-id", "async-agent"]) == 0
+    with pytest.raises(GovernanceHaltError):
+        asyncio.run(agent.arun("hello", governance_action="execute"))
+    assert calls == []
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_governed_callable_honors_shared_halt_before_side_effect(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, asynchronous: bool, explicit: bool
+) -> None:
+    monkeypatch.setenv(HALT_SIGNAL_DIR_ENV, str(tmp_path))
+    calls: list[str] = []
+    breaker = (
+        GovernanceCircuitBreaker(system_id="halt-callable", signal_dir=tmp_path)
+        if explicit
+        else None
+    )
+    guard = GovernedCallable(agent_id="halt-callable", circuit_breaker=breaker)
+    if explicit:
+        assert guard._circuit_breaker is breaker
+
+    async def async_action(prompt: str) -> str:
+        calls.append(prompt)
+        return prompt
+
+    def sync_action(prompt: str) -> str:
+        calls.append(prompt)
+        return prompt
+
+    target = guard(async_action if asynchronous else sync_action)
+    grant = guard.issue_grant(target, "hello")
+    assert _run_cli(["halt", "--system-id", "halt-callable"]) == 0
+    with pytest.raises(GovernanceHaltError):
+        if asynchronous:
+            asyncio.run(target("hello", execution_grant=grant))
+        else:
+            target("hello", execution_grant=grant)
+    assert calls == []
+
+    # A refused call must not consume the authorization; resume can use it once.
+    assert _run_cli(["resume", "--system-id", "halt-callable"]) == 0
+    if asynchronous:
+        assert asyncio.run(target("hello", execution_grant=grant)) == "hello"
+    else:
+        assert target("hello", execution_grant=grant) == "hello"
+    assert calls == ["hello"]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_agent_rechecks_halt_before_output_retry(tmp_path: Path, asynchronous: bool) -> None:
+    breaker = GovernanceCircuitBreaker(system_id="retry-agent", signal_dir=tmp_path)
+    calls: list[str] = []
+    constitution = Constitution.from_rules(
+        [
+            Rule(
+                id="RETRY-DENY",
+                text="No forbiddenword",
+                keywords=["forbiddenword"],
+                severity=Severity.CRITICAL,
+            )
+        ]
+    )
+
+    def action(prompt: str) -> str:
+        calls.append(prompt)
+        breaker.trip("stop before retry")
+        return "forbiddenword"
+
+    async def async_action(prompt: str) -> str:
+        return action(prompt)
+
+    agent = GovernedAgent(
+        async_action if asynchronous else action,
+        constitution=constitution,
+        agent_id="retry-agent",
+        maci_role=MACIRole.EXECUTOR,
+        circuit_breaker=breaker,
+        max_retries=1,
+    )
+    with pytest.raises(GovernanceHaltError, match="stop before retry"):
+        if asynchronous:
+            asyncio.run(agent.arun("hello", governance_action="execute"))
+        else:
+            agent.run("hello", governance_action="execute")
+    assert calls == ["hello"]

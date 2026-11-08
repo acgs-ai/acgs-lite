@@ -374,13 +374,11 @@ class GovernanceCircuitBreaker:
         return _signal_entry_state(self.signal_path)[0] or self._untrusted_dir() is not None
 
     def _untrusted_dir(self) -> str | None:
-        """Why an existing explicit/env signal dir is untrusted, or None.
+        """Fail closed when the configured signal directory cannot be trusted.
 
-        Another user could remove a signal from such a dir, so it counts as
-        tripped. The tempdir fallback and a not-yet-created dir are exempt.
+        Missing directories cannot carry a halt, and even the tempdir fallback
+        may become writable by another user after construction.
         """
-        if self.signal_dir_source == "tempdir" or not os.path.lexists(self._signal_dir):
-            return None
         return _signal_dir_problem(self._signal_dir)
 
     @property

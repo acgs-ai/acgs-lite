@@ -49,9 +49,11 @@ def _make_breaker(args: argparse.Namespace) -> GovernanceCircuitBreaker | None:
 
 def _is_regular_signal_file(path: Path) -> bool:
     try:
-        return stat.S_ISREG(os.lstat(path).st_mode)
+        entry = os.lstat(path)
     except OSError:
         return False
+    getuid = getattr(os, "getuid", None)
+    return stat.S_ISREG(entry.st_mode) and (getuid is None or entry.st_uid in (getuid(), 0))
 
 
 def _print_signal_dir(breaker: GovernanceCircuitBreaker) -> None:
@@ -130,7 +132,7 @@ def cmd_halt(args: argparse.Namespace) -> int:
     if breaker is None:
         return 2
 
-    _present, entry_error = _signal_entry_state(breaker.signal_path)
+    present, entry_error = _signal_entry_state(breaker.signal_path)
     if entry_error:
         print(
             f"error: {entry_error} ({breaker.signal_path}). "
@@ -139,12 +141,19 @@ def cmd_halt(args: argparse.Namespace) -> int:
         )
         return 2
 
-    if breaker.is_tripped:
+    if present:
         # An existing signal in an untrusted dir can be removed by another user.
         problem = _signal_dir_problem(breaker.signal_dir)
         if problem:
             print(
                 f"error: untrusted halt signal dir: {problem}. "
+                f"System '{system_id}' was NOT halted by this command.",
+                file=sys.stderr,
+            )
+            return 2
+        if not _is_regular_signal_file(breaker.signal_path):
+            print(
+                f"error: halt signal {breaker.signal_path} is not a trusted regular file. "
                 f"System '{system_id}' was NOT halted by this command.",
                 file=sys.stderr,
             )

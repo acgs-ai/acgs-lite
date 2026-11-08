@@ -43,11 +43,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extra ancestor-owner uids (e.g. the user-namespace overflow uid 65534) must be opted
   in via `ACGS_HALT_TRUSTED_UIDS` (comma-separated; never applies to the signal dir
   itself).
-- **Behaviour change:** a breaker whose explicit or env signal dir exists but fails these
-  checks now counts as tripped (`check()` raises `GovernanceHaltError("halted (untrusted
-  signal dir: ...)")`, `breaker-status` reports HALTED, `resume` exits 2), in addition to
-  logging at CRITICAL on construction. The `tempdir` fallback and a not-yet-created dir
-  are exempt.
+- **Behaviour change:** a breaker whose signal dir is missing or fails these checks
+  counts as tripped (`check()` raises `GovernanceHaltError("halted (untrusted signal
+  dir: ...)")`, `breaker-status` reports HALTED, `resume` exits 2). This includes the
+  `tempdir` fallback. Pre-create a trusted signal directory before starting agents.
+- `acgs halt` confirms that an existing or newly published signal is a regular file
+  owned by the operator or root before reporting success. A foreign-owned file in a
+  sticky shared directory cannot masquerade as a durable operator halt.
+- Async `GovernedAgent.arun()` now checks the breaker before execution, like `run()`.
+  Both agent modes recheck before output retries so a newly raised halt stops retries.
+  Both sync and async `GovernedCallable` wrappers also honor `ACGS_HALT_SIGNAL_DIR`
+  or an explicit `circuit_breaker`, before consuming authorization or executing.
 - Relative signal dirs (argument or env) are made absolute against the cwd once, at
   construction, without following symlinks.
 - `acgs resume` exits 2 and reports the system as still HALTED if the signal file is still
