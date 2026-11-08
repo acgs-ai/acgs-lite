@@ -231,7 +231,12 @@ class GovernedToolDispatcher:
             raise TypeError("breaker must be a TriggerCircuitBreaker")
         if breaker is not None and breaker.registry is None:
             raise ValueError("a breaker needs a TriggerRegistry (trigger bindings)")
-        if autonomy is None and breaker is not None and breaker.autonomy is not None:
+        if breaker is not None and breaker.autonomy is not None:
+            if autonomy is not None and autonomy is not breaker.autonomy:
+                # The breaker would demote one controller while dispatch
+                # enforces another, so a breaker reset would silently restore
+                # autonomy the breaker's controller still withholds.
+                raise ValueError("autonomy must be the breaker's AutonomyController")
             # The demotions a breaker makes must be enforced here too.
             autonomy = breaker.autonomy
         if autonomy is not None and autonomy.budgets is not budgets:
@@ -378,6 +383,7 @@ class GovernedToolDispatcher:
             resource=tool_name if isinstance(tool_name, str) else "",
             error="dispatch_denied",
             telemetry=telemetry,
+            principal_kind=principal.kind if isinstance(principal, Principal) else None,
         )
         return ToolDenied(decision)
 
@@ -595,6 +601,45 @@ class GovernedToolDispatcher:
         if not breaker.allow_autonomous(trigger_id, consume=consume):
             raise _Denied(f"trigger {trigger_id} autonomous mode suspended (circuit breaker open)")
 
+    def _autonomy_check(self, principal: Principal, spec: _ToolSpec) -> None:
+        if principal.kind is PrincipalKind.HUMAN or self._autonomy is None:
+            return
+        level = self._autonomy.level(principal)
+        if level is AutonomyLevel.SUSPENDED:
+            raise _Denied("autonomy suspended")
+        if level is AutonomyLevel.P0_ONLY and not (spec.read_only and spec.tier == ActionTier.T0):
+            raise _Denied("autonomy demoted to P0_ONLY: read-only T0 tools only")
+
+    def _final_admission(
+        self,
+        principal: Principal,
+        tool_name: str,
+        spec: _ToolSpec,
+        trigger_id: str | None,
+        session: ScopedCredential | None,
+    ) -> None:
+        """Re-admit after the PDP: a failure observed meanwhile may have
+        tripped the breaker, suspended the cohort or demoted the agent. Only
+        here is the half-open probe spent (atomically, if still available)."""
+        try:
+            autonomy = self._autonomy
+            if (
+                autonomy is not None
+                and principal.kind is not PrincipalKind.HUMAN
+                and autonomy.is_demoted(principal)
+                and not (spec.read_only and spec.tier == ActionTier.T0)
+            ):
+                # is_demoted(), not level(): level() would also demote on the
+                # budget this very call was just charged against.
+                raise _Denied("autonomy demoted to P0_ONLY: read-only T0 tools only")
+            self._breaker_check(principal, trigger_id, session, consume=True)
+        except _Denied as exc:
+            raise self._pre_denial(principal, tool_name, str(exc)) from exc
+        except Exception as exc:
+            raise self._pre_denial(
+                principal, tool_name, f"harness check failed: {type(exc).__name__}"
+            ) from exc
+
     def _harness_checks(
         self,
         principal: Principal,
@@ -619,15 +664,11 @@ class GovernedToolDispatcher:
                     )
                 if self._autonomy is None or not (spec.read_only and spec.tier == ActionTier.T0):
                     raise _Denied("budget exhausted: " + ", ".join(state.exhausted))
-        if governed and self._autonomy is not None:
-            level = self._autonomy.level(principal)
-            if level is AutonomyLevel.SUSPENDED:
-                raise _Denied("autonomy suspended")
-            if level is AutonomyLevel.P0_ONLY and not (
-                spec.read_only and spec.tier == ActionTier.T0
-            ):
-                raise _Denied("autonomy demoted to P0_ONLY: read-only T0 tools only")
-        self._breaker_check(principal, trigger_id, session, consume)
+        self._autonomy_check(principal, spec)
+        # Availability only: the half-open probe is spent in _final_admission,
+        # once the call has passed every other check (a denied call must not
+        # burn the trigger's only probe).
+        self._breaker_check(principal, trigger_id, session, consume=False)
         if governed and budgets is not None:
             # Atomic check-and-charge, after every other harness gate passed,
             # so concurrent calls cannot overshoot and a call never trips the
@@ -761,6 +802,8 @@ class GovernedToolDispatcher:
                         f"repository permissions deny write to {path!r}",
                         telemetry=consume,
                     )
+        if consume:
+            self._final_admission(principal, tool_name, spec, trigger_id, session)
         return spec, args, decisions
 
     def _recheck_kill_switch(self, principal: Principal, tool_name: str) -> None:

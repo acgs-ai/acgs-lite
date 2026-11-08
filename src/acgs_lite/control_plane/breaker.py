@@ -167,9 +167,15 @@ class TriggerRegistry:
                 return False
             if cid in self._principals.get(trigger_id, {}):
                 return True
-            return principal.system_id is not None and principal.system_id in self._systems.get(
+            admitted = principal.system_id is not None and principal.system_id in self._systems.get(
                 trigger_id, set()
             )
+            if admitted and principal.kind is not PrincipalKind.HUMAN:
+                # First cohort admission pins the identity to that system, so
+                # it cannot later present another system_id to slip into a
+                # different cohort's trigger (and out of a suspension).
+                self._pins.setdefault(cid, principal.system_id)
+            return admitted
 
     def cohorts_of(self, principal: Principal) -> tuple[str, ...]:
         """The bound (pinned) system cohort of *principal*, else its own."""

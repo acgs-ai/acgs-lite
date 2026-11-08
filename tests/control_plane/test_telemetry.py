@@ -132,7 +132,7 @@ class TestApprovalLatency:
         store, rec = _recorder()
         rec.record_approval_requested(h("1"), at=0)
         rec.record_approval_granted(h("1"), "bob", at=10)
-        rec.record_approval_granted(h("1"), "carol", at=20)  # only the first counts
+        rec.record_approval_granted(h("1"), "carol", at=20)  # quorum completes here
         rec.record_approval_requested(h("2"), at=5)
         rec.record_approval_requested(h("2"), at=7)  # first request wins
         rec.record_approval_denied(h("2"), ALICE, at=65)
@@ -141,9 +141,9 @@ class TestApprovalLatency:
         rec.record_approval_requested(h("5"), at=200)
         rec.record_approval_granted(h("5"), "bob", at=150)  # before request: ignored
         latency = OversightMetrics(store).approval_latency()
-        # latencies [10, 60]; nearest-rank p50 -> 10, p90/p99 -> 60
+        # latencies [20, 60] (quorum completion); nearest-rank p50 -> 20, p90/p99 -> 60
         assert latency.count == 2
-        assert (latency.p50_s, latency.p90_s, latency.p99_s, latency.max_s) == (10, 60, 60, 60)
+        assert (latency.p50_s, latency.p90_s, latency.p99_s, latency.max_s) == (20, 60, 60, 60)
         assert latency.pending == 2
         windowed = OversightMetrics(store).approval_latency(since=50)
         assert (windowed.count, windowed.p50_s, windowed.max_s, windowed.pending) == (

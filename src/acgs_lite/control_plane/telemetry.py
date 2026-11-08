@@ -879,7 +879,8 @@ class RateMetric:
 
 @dataclass(frozen=True)
 class LatencyMetric:
-    """Seconds from first APPROVAL_REQUESTED to first GRANTED/DENIED."""
+    """Seconds from first APPROVAL_REQUESTED to quorum completion (the last
+    recorded grant) or the first DENIED, whichever is earlier."""
 
     count: int
     p50_s: float | None
@@ -998,16 +999,27 @@ class OversightMetrics:
         for event in self._events(ApprovalRequested):
             if event.action_hash not in requested or event.at < requested[event.action_hash]:
                 requested[event.action_hash] = event.at
-        resolved: dict[str, float] = {}
+        # Grants are emitted only for the counted approvals of a *satisfied*
+        # quorum, so the quorum completed at the latest of them (a T3 request
+        # approved at +10s and +90s took 90s, not 10s). A denial resolves at
+        # the first denial.
+        completed: dict[str, float] = {}
+        denied: dict[str, float] = {}
         for event in self._store.read_all():
             if not isinstance(event, (ApprovalGranted, ApprovalDenied)):
                 continue
             start = requested.get(event.action_hash)
             if start is None or event.at < start:
                 continue
-            previous = resolved.get(event.action_hash)
-            if previous is None or event.at < previous:
-                resolved[event.action_hash] = event.at
+            if isinstance(event, ApprovalGranted):
+                completed[event.action_hash] = max(
+                    event.at, completed.get(event.action_hash, event.at)
+                )
+            else:
+                denied[event.action_hash] = min(event.at, denied.get(event.action_hash, event.at))
+        resolved: dict[str, float] = dict(completed)
+        for action_hash, at in denied.items():
+            resolved[action_hash] = min(at, resolved.get(action_hash, at))
         latencies: list[float] = []
         pending = pre_approved = 0
         for action_hash, start in requested.items():

@@ -582,9 +582,12 @@ class PolicyDecisionPoint:
         resource: str = "",
         error: str = "dispatch_denied",
         telemetry: bool = True,
+        principal_kind: PrincipalKind | None = None,
     ) -> Decision:
         """In-package (dispatcher): :meth:`record_denial`, optionally without
-        telemetry for dry runs. It can still only record a deny."""
+        telemetry for dry runs. It can still only record a deny.
+        ``principal_kind`` (the dispatcher's validated Principal) feeds only
+        the telemetry segment; the receipt stays unattributed."""
         decision = Decision.denied(
             reason,
             constitution_hash=self._constitution_hash,
@@ -604,6 +607,7 @@ class PolicyDecisionPoint:
             origin=ORIGIN_DISPATCHER_PRE_DENIAL,
             receipt=receipted,
             telemetry=telemetry,
+            principal_kind=principal_kind,
         )
 
     def _pre_denial_within_limit(self, principal_id: str) -> bool:
@@ -643,6 +647,7 @@ class PolicyDecisionPoint:
         receipt: bool = True,
         telemetry: bool = True,
         group_id: str | None = None,
+        principal_kind: PrincipalKind | None = None,
     ) -> Decision:
         """Audit, emit a receipt and notify listeners. None of them can turn a
         deny into an allow; an allow whose audit write or receipt emission
@@ -661,11 +666,15 @@ class PolicyDecisionPoint:
             except Exception as exc:
                 logger.warning("pdp listener failed: %s", type(exc).__name__)
         if telemetry:
-            self._record_telemetry(decision, request, group_id)
+            self._record_telemetry(decision, request, group_id, principal_kind)
         return decision
 
     def _record_telemetry(
-        self, decision: Decision, request: DecisionRequest | None, group_id: str | None
+        self,
+        decision: Decision,
+        request: DecisionRequest | None,
+        group_id: str | None,
+        principal_kind: PrincipalKind | None = None,
     ) -> None:
         """Phase 4: one DECISION event per published decision, recorded after
         the allow bit is final; ``group_id`` ties a dispatch's per-path
@@ -676,7 +685,7 @@ class PolicyDecisionPoint:
             return
         try:
             principal = getattr(request, "principal", None)
-            kind = principal.kind if isinstance(principal, Principal) else None
+            kind = principal.kind if isinstance(principal, Principal) else principal_kind
             telemetry.record_decision(
                 decision.decision_id, kind, decision.allowed, group_id=group_id
             )
