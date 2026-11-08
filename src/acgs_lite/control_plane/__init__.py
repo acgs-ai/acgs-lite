@@ -41,8 +41,9 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
+from acgs_lite.control_plane.action_hash import action_hash
+
 if TYPE_CHECKING:
-    from acgs_lite.control_plane.action_hash import action_hash
     from acgs_lite.control_plane.approvals import (
         DEFAULT_QUORUM_POLICIES,
         ApprovalAuthority,
