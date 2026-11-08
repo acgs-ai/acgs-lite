@@ -117,19 +117,46 @@ def _signal_dir_problem(path: Path) -> str | None:
             return f"signal dir {path} is owned by uid {st.st_uid}, not {uid} or root"
         if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH) and not st.st_mode & stat.S_ISVTX:
             return f"signal dir {path} is group/world-writable without the sticky bit"
+        return _signal_dir_ancestors_problem(path, uid)
+    return None
+
+
+def _signal_dir_ancestors_problem(path: Path, uid: int) -> str | None:
+    """Check that no other user can rename or replace an ancestor of ``path``.
+
+    Both the ancestors as spelled (symlinks included) and the ancestors of the
+    resolved path must be owned by a trusted uid, and directories must not be
+    group/world-writable without the sticky bit.
+    """
+    # Whoever owns "/" owns the machine; trusting it keeps user-namespaced
+    # sandboxes working, where real root appears as the overflow uid.
+    trusted = {uid, 0, os.lstat("/").st_uid}
+    try:
+        resolved = Path(os.path.realpath(path, strict=True))
+        entries = [(p, os.lstat(p)) for p in path.parents]
+        entries += [(p, os.stat(p)) for p in resolved.parents]
+    except OSError as exc:
+        return f"cannot inspect ancestors of signal dir {path}: {exc}"
+    for ancestor, st in entries:
+        if st.st_uid not in trusted:
+            return f"signal dir ancestor {ancestor} is owned by uid {st.st_uid}"
+        if stat.S_ISLNK(st.st_mode):
+            continue
+        if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH) and not st.st_mode & stat.S_ISVTX:
+            return f"signal dir ancestor {ancestor} is group/world-writable without the sticky bit"
     return None
 
 
 def _signal_entry_state(path: Path) -> tuple[bool, str | None]:
     """Inspect the signal path without following symlinks.
 
-    Returns ``(present, error)``. Missing (or a non-directory parent) is the
-    only "not present" outcome; any other failure is reported as present with
-    an error message so callers fail closed.
+    Returns ``(present, error)``. Missing is the only "not present" outcome;
+    any other failure (including a non-directory parent) is reported as
+    present with an error message so callers fail closed.
     """
     try:
         os.lstat(path)
-    except (FileNotFoundError, NotADirectoryError):
+    except FileNotFoundError:
         return False, None
     except OSError as exc:
         return True, f"halt signal unreadable: {exc}"
@@ -281,19 +308,21 @@ class GovernanceCircuitBreaker:
         # Atomic file write for cross-process signaling: unique temp file in the
         # signal dir (O_EXCL, never follows a planted symlink), fsync, replace.
         try:
-            fd, tmp_name = tempfile.mkstemp(
-                dir=self._signal_dir, prefix=f".acgs-halt-{self.system_id}."
-            )
+            # Fixed short prefix: embedding system_id could exceed NAME_MAX for
+            # IDs whose final signal filename still fits.
+            fd, tmp_name = tempfile.mkstemp(dir=self._signal_dir, prefix=".acgs-halt.")
+            replaced = False
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
                     fh.write(reason or "halted")
                     fh.flush()
                     os.fsync(fh.fileno())
                 os.replace(tmp_name, self.signal_path)
-            except BaseException:
-                with contextlib.suppress(OSError):
-                    os.unlink(tmp_name)
-                raise
+                replaced = True
+            finally:
+                if not replaced:
+                    with contextlib.suppress(OSError):
+                        os.unlink(tmp_name)
             logger.warning(
                 "circuit breaker tripped: system=%s reason=%s",
                 self.system_id,

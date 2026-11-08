@@ -140,6 +140,15 @@ def cmd_halt(args: argparse.Namespace) -> int:
         return 2
 
     if breaker.is_tripped:
+        # An existing signal in an untrusted dir can be removed by another user.
+        problem = _signal_dir_problem(breaker.signal_dir)
+        if problem:
+            print(
+                f"error: untrusted halt signal dir: {problem}. "
+                f"Cannot guarantee System '{system_id}' stays halted.",
+                file=sys.stderr,
+            )
+            return 2
         existing_reason = breaker.trip_reason
         print(
             f"System '{system_id}' is already halted: {existing_reason}",
@@ -149,7 +158,12 @@ def cmd_halt(args: argparse.Namespace) -> int:
         return 0
 
     try:
-        breaker.signal_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # Create each missing component 0700 (mkdir(parents=True) would give
+        # intermediates the umask default, which the ancestor check may reject).
+        signal_dir = breaker.signal_dir
+        missing = [d for d in (signal_dir, *signal_dir.parents) if not os.path.lexists(d)]
+        for directory in reversed(missing):
+            directory.mkdir(mode=0o700, exist_ok=True)
     except OSError as exc:
         print(
             f"error: cannot create halt signal dir {breaker.signal_dir}: {exc}. "

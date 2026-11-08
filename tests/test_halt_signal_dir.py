@@ -535,3 +535,111 @@ def test_governed_agent_has_no_default_breaker_without_env(
     assert GovernedAgent(lambda prompt: prompt, agent_id="ga-none")._circuit_breaker is None
     monkeypatch.delenv(HALT_SIGNAL_DIR_ENV)
     assert GovernedAgent(lambda prompt: prompt, agent_id="ga-none")._circuit_breaker is None
+
+
+# ── PR 236 review follow-ups ─────────────────────────────────────────────────
+
+
+def test_non_directory_signal_dir_parent_counts_as_tripped(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A regular file where the signal dir should be makes the signal path
+    # uninspectable (ENOTDIR); that must fail closed, not read as "absent".
+    blocker = tmp_path / "afile"
+    blocker.write_text("not a directory")
+    signal_dir = blocker / "sub"
+
+    breaker = GovernanceCircuitBreaker(system_id="sys-notdir", signal_dir=signal_dir)
+    assert breaker.is_tripped is True
+    with pytest.raises(GovernanceHaltError, match="halt signal unreadable"):
+        breaker.check()
+    status = _run_cli(
+        ["breaker-status", "--system-id", "sys-notdir", "--signal-dir", str(signal_dir)]
+    )
+    assert status == 1
+    assert "HALTED" in capsys.readouterr().out
+
+
+def test_cli_halt_already_halted_in_untrusted_dir_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    signal_dir = tmp_path / "open"
+    signal_dir.mkdir()
+    (signal_dir / "acgs-halt-sys-pre").write_text("earlier")
+    signal_dir.chmod(0o777)
+
+    rc = _run_cli(["halt", "--system-id", "sys-pre", "--signal-dir", str(signal_dir)])
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "group/world-writable" in err
+    assert "already halted" not in err
+
+
+def test_cli_halt_refuses_world_writable_ancestor(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o777)
+    signal_dir = shared / "mine"
+
+    rc = _run_cli(["halt", "--system-id", "sys-anc", "--signal-dir", str(signal_dir)])
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert f"ancestor {shared} is group/world-writable" in err
+    assert "was NOT halted" in err
+    assert not (signal_dir / "acgs-halt-sys-anc").exists()
+
+
+def test_cli_halt_refuses_symlinked_ancestor_into_world_writable_dir(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o777)
+    link = tmp_path / "link"
+    link.symlink_to(shared)
+    signal_dir = link / "mine"
+
+    rc = _run_cli(["halt", "--system-id", "sys-symanc", "--signal-dir", str(signal_dir)])
+
+    assert rc == 2
+    assert f"ancestor {shared} is group/world-writable" in capsys.readouterr().err
+    assert not (shared / "mine" / "acgs-halt-sys-symanc").exists()
+
+
+def test_cli_halt_accepts_symlinked_ancestor_into_trusted_dir(tmp_path: Path) -> None:
+    # Like macOS /var -> /private/var: a trusted symlink ancestor is fine.
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    signal_dir = link / "mine"
+
+    assert _run_cli(["halt", "--system-id", "sys-okanc", "--signal-dir", str(signal_dir)]) == 0
+    assert (real / "mine" / "acgs-halt-sys-okanc").is_file()
+
+
+def test_cli_halt_creates_intermediate_dirs_0700_under_loose_umask(tmp_path: Path) -> None:
+    signal_dir = tmp_path / "a" / "b" / "c"
+    old = os.umask(0o002)
+    try:
+        rc = _run_cli(["halt", "--system-id", "sys-umask", "--signal-dir", str(signal_dir)])
+    finally:
+        os.umask(old)
+    assert rc == 0
+    for directory in (tmp_path / "a", tmp_path / "a" / "b", signal_dir):
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+
+
+def test_trip_works_for_system_id_near_name_max(tmp_path: Path) -> None:
+    name_max = os.pathconf(tmp_path, "PC_NAME_MAX")
+    system_id = "x" * (name_max - len("acgs-halt-"))
+    breaker = GovernanceCircuitBreaker(system_id=system_id, signal_dir=tmp_path)
+
+    breaker.trip("long")
+
+    assert breaker.signal_path.read_text() == "long"
+    assert [p.name for p in tmp_path.iterdir()] == [breaker.signal_path.name]

@@ -34,9 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   symlink, and dotted ids such as `a.v1` / `a.v2` / `a.tmp` no longer share a temp file.
 - `GovernanceCircuitBreaker` rejects a `system_id` that is empty, `.`/`..`, or contains a
   path separator or NUL (`ValueError`).
-- `acgs halt` creates the signal dir with mode `0o700` and refuses (exit 2, "NOT halted")
-  a signal dir that is a symlink, not a directory, owned by another non-root user, or
-  group/world-writable without the sticky bit. A breaker constructed with an explicit or
+- `acgs halt` creates the signal dir (and any missing parents) with mode `0o700` and
+  refuses (exit 2, "NOT halted") a signal dir that is a symlink, not a directory, owned by
+  another non-root user, or group/world-writable without the sticky bit, or whose
+  ancestors (as spelled or resolved) fail the same ownership/writability rules. The check
+  also runs when the system is already halted. A signal path under a non-directory
+  (`ENOTDIR`) counts as tripped. A breaker constructed with an explicit or
   env signal dir that fails these checks logs at CRITICAL (it does not raise).
 - Relative signal dirs (argument or env) are made absolute against the cwd once, at
   construction, without following symlinks.
