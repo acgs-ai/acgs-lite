@@ -253,7 +253,7 @@ def evaluate_evidence(
       bound to an artifact (``artifact_digest`` or ``head_sha``), so one run
       cannot certify an unrelated artifact, and at least
       ``policy.min_external_runs`` distinct accepted runs must validate.
-    * With *bind_digest* (promotion ``candidate_digest``) every external ref's
+    * With *bind_digest* (a receipt's ``candidate_digest``) every external ref's
       ``artifact_digest`` must equal it.
     """
     reasons: list[str] = []

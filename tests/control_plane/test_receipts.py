@@ -135,7 +135,7 @@ def _allowed_receipt(
     evidence: tuple[ExternalRunRef, ...],
     principal: Principal = ALICE,
 ) -> SignedControlPlaneReceipt:
-    attributes = {"external_runs": [ref.to_dict() for ref in evidence]}
+    attributes = {"external_runs": [ref.to_dict() for ref in evidence], "candidate_digest": DIGEST}
     decision = pdp.decide(_req(principal, action, "cand-1", attributes=attributes))
     assert decision.allowed, decision.reason
     return ledger.receipts()[-1]
@@ -813,7 +813,7 @@ class TestIndependentVerification:
         plain = _allowed_receipt(wired_pdp, ledger, "file.write", ())
         assert not verify_receipt(plain, require_external_evidence=True, **kw).valid
         claim = _allowed_receipt(wired_pdp, ledger, "eval.report", (AGENT_LOG,))
-        assert verify_receipt(claim, require_external_evidence=False, **kw).valid
+        assert not verify_receipt(claim, require_external_evidence=False, **kw).valid
         wired_pdp.decide(
             _req(
                 ALICE,
@@ -1213,3 +1213,111 @@ class TestR4OriginAndAttribution:
         assert not verify_receipt(tampered, **kw).attributed
         with pytest.raises(ValueError):
             dataclasses.replace(decided.receipt, origin="agent")
+
+
+@pytest.mark.parametrize("action", ["file.write", "eval.report"])
+@pytest.mark.parametrize("candidate", [None, "sha256:" + "b" * 64])
+@pytest.mark.parametrize("override", [None, False])
+def test_success_claim_rejects_unrelated_valid_run(
+    wired_pdp: PolicyDecisionPoint,
+    ledger: ReceiptLedger,
+    signer: Ed25519ReceiptSigner,
+    runs: TrustedRunRegistry,
+    agent: Principal,
+    action: str,
+    candidate: str | None,
+    override: bool | None,
+) -> None:
+    decision = wired_pdp.decide(
+        _req(
+            agent,
+            action=action,
+            attributes={
+                "claims_success": action == "file.write",
+                "candidate_digest": candidate,
+                "external_runs": [CI_RUN.to_dict()],
+            },
+        )
+    )
+    assert decision.allowed
+    signed = ledger.receipts()[-1]
+    result = verify_receipt(
+        signed,
+        trusted_public_keys=_keys(signer),
+        run_verifier=runs,
+        require_external_evidence=override,
+    )
+    assert not result.valid
+    assert any("candidate" in reason for reason in result.reasons)
+
+
+def test_ordinary_success_claim_binds_signed_candidate(
+    wired_pdp: PolicyDecisionPoint,
+    ledger: ReceiptLedger,
+    signer: Ed25519ReceiptSigner,
+    runs: TrustedRunRegistry,
+    agent: Principal,
+) -> None:
+    assert wired_pdp.decide(
+        _req(
+            agent,
+            attributes={
+                "claims_success": True,
+                "candidate_digest": DIGEST,
+                "external_runs": [CI_RUN.to_dict()],
+            },
+        )
+    ).allowed
+    signed = ledger.receipts()[-1]
+    assert signed.receipt.candidate_digest == DIGEST
+    assert verify_receipt(signed, trusted_public_keys=_keys(signer), run_verifier=runs).valid
+
+
+@pytest.mark.parametrize("action", ["eval.report", "ci.result", "promotion.result"])
+def test_independent_success_prefix_requires_candidate(
+    signer: Ed25519ReceiptSigner,
+    runs: TrustedRunRegistry,
+    action: str,
+) -> None:
+    signed = _issuer_signed_promotion(
+        signer,
+        kind=ReceiptKind.POLICY_DECISION,
+        action=action,
+        claims_success=False,
+        candidate_digest=None,
+    )
+    result = verify_receipt(
+        signed,
+        trusted_public_keys=_keys(signer),
+        run_verifier=runs,
+        require_external_evidence=False,
+    )
+    assert not result.valid
+    assert "success-claim receipt has no candidate_digest" in result.reasons
+
+
+def test_head_sha_alone_does_not_attest_success_candidate(
+    signer: Ed25519ReceiptSigner,
+    runs: TrustedRunRegistry,
+) -> None:
+    ref = ExternalRunRef("ci", "head-only", EvidenceSource.CI_SYSTEM, head_sha="b" * 40)
+    runs.register_run(CI_SERVICE, ref, conclusion="success", head_sha=ref.head_sha)
+    signed = _issuer_signed_promotion(
+        signer, kind=ReceiptKind.POLICY_DECISION, action="eval.report", external_runs=(ref,)
+    )
+    result = verify_receipt(signed, trusted_public_keys=_keys(signer), run_verifier=runs)
+    assert not result.valid
+    assert any("does not match the candidate" in reason for reason in result.reasons)
+
+
+def test_malformed_success_candidate_withdraws_allow_but_preserves_deny(
+    wired_pdp: PolicyDecisionPoint,
+    ledger: ReceiptLedger,
+    agent: Principal,
+) -> None:
+    attrs = {"claims_success": True, "candidate_digest": "bad"}
+    decision = wired_pdp.decide(_req(agent, attributes=attrs))
+    assert not decision.allowed and decision.error == "receipt_failed"
+    denied = wired_pdp.decide(_req(agent, resource="evaluator/x", attributes=attrs))
+    assert not denied.allowed
+    assert ledger.receipts()[-1].receipt.candidate_digest is None
