@@ -22,9 +22,13 @@ import posixpath
 import re
 import threading
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from acgs_lite.control_plane.immutable_core import ImmutableCoreRegistry
 from acgs_lite.control_plane.principal import Principal, PrincipalKind
+
+if TYPE_CHECKING:
+    from acgs_lite.control_plane.identity import AdminAttestor
 
 __all__ = [
     "AGENT_NO_MERGE_ACTIONS",
@@ -65,7 +69,17 @@ class ChangeOwnership:
 class ChangeOwnershipRegistry:
     """Harness-side change -> (writer, worktree, branch) table."""
 
-    def __init__(self, registry: ImmutableCoreRegistry, *, admin: Principal) -> None:
+    def __init__(
+        self,
+        registry: ImmutableCoreRegistry,
+        *,
+        admin: Principal,
+        admin_attestor: AdminAttestor | None = None,
+    ) -> None:
+        """Bound to the configured HUMAN *admin*; with *admin_attestor*
+        assign/release also need a verified ``admin_credential=``."""
+        from acgs_lite.control_plane.identity import checked_attestor
+
         if not isinstance(registry, ImmutableCoreRegistry):
             raise TypeError("registry must be an ImmutableCoreRegistry")
         if not isinstance(admin, Principal) or admin.kind is not PrincipalKind.HUMAN:
@@ -73,6 +87,7 @@ class ChangeOwnershipRegistry:
         # Bound like RoleAssignments: "a HUMAN" is not "the admin"; any other
         # human could otherwise release a change and re-assign (or widen) it.
         self._admin = admin
+        self._attestor = checked_attestor(admin_attestor)
         self._registry = registry
         self._lock = threading.Lock()
         self._changes: dict[str, ChangeOwnership] = {}
@@ -93,10 +108,21 @@ class ChangeOwnershipRegistry:
         ):
             raise OwnershipDenied(f"only the configured HUMAN admin {verb} change ownership")
 
+    def _attest(self, admin: Principal, credential: str | None) -> None:
+        if self._attestor is not None:
+            self._attestor.require(admin, credential, error=OwnershipDenied)
+
     def assign(
-        self, admin: Principal, change_id: str, writer: Principal, worktree_root: str
+        self,
+        admin: Principal,
+        change_id: str,
+        writer: Principal,
+        worktree_root: str,
+        *,
+        admin_credential: str | None = None,
     ) -> ChangeOwnership:
         self._require_admin(admin, "assigns")
+        self._attest(admin, admin_credential)
         if not isinstance(writer, Principal):
             raise OwnershipDenied("writer must be a Principal")
         if not isinstance(change_id, str) or not _CHANGE_ID.fullmatch(change_id):
@@ -119,8 +145,11 @@ class ChangeOwnershipRegistry:
             self._changes[change_id] = ownership
         return ownership
 
-    def release(self, admin: Principal, change_id: str) -> bool:
+    def release(
+        self, admin: Principal, change_id: str, *, admin_credential: str | None = None
+    ) -> bool:
         self._require_admin(admin, "releases")
+        self._attest(admin, admin_credential)
         with self._lock:
             return self._changes.pop(change_id, None) is not None
 

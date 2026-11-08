@@ -529,6 +529,7 @@ class ReceiptLedger:
                     candidate_digest=candidate_digest,
                     approvers=approvers,
                     external_runs=tuple(external_runs),
+                    credential_id=decision.credential_id,
                 )
                 signed = sign_control_plane_receipt(receipt, self._signer)
                 self._store.append(signed)

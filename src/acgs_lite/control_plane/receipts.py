@@ -59,6 +59,7 @@ GENESIS_RECEIPT_HASH = "sha256:" + "0" * 64
 _HASH = re.compile(r"sha256:[0-9a-f]{64}")
 _HEX = re.compile(r"[0-9a-f]+")
 _LEDGER_ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+_CREDENTIAL_ID = re.compile(r"[0-9a-f]{32}")
 
 ORIGIN_PDP = "pdp"
 ORIGIN_DISPATCHER_PRE_DENIAL = "dispatcher_pre_denial"
@@ -221,6 +222,10 @@ class ControlPlaneReceipt:
     approvers: tuple[ApproverRef, ...]
     external_runs: tuple[ExternalRunRef, ...]
     receipt_hash: str
+    credential_id: str | None = None
+    """Phase 6b: id of the verified credential the call was attested by
+    (``None`` without one). Hashed (and so signed) only when set, so
+    receipts without a credential hash exactly as before."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "kind", ReceiptKind(self.kind))
@@ -239,8 +244,10 @@ class ControlPlaneReceipt:
             "reason",
         ):
             _str(getattr(self, name), name)
-        for name in ("principal_kind", "system_id", "error"):
+        for name in ("principal_kind", "system_id", "error", "credential_id"):
             _opt_str(getattr(self, name), name)
+        if self.credential_id is not None and not _CREDENTIAL_ID.fullmatch(self.credential_id):
+            raise ValueError("credential_id must be 32 lowercase hex characters or None")
         if self.origin not in RECEIPT_ORIGINS:
             raise ValueError(f"origin must be one of {sorted(RECEIPT_ORIGINS)}")
         for name in ("principal_id", "action", "resource", "principal_kind", "system_id", "error"):
@@ -297,7 +304,7 @@ class ControlPlaneReceipt:
         return cls(**{**fields, "receipt_hash": draft.compute_hash()})
 
     def _payload(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "ledger_id": self.ledger_id,
             "origin": self.origin,
             "receipt_id": self.receipt_id,
@@ -325,6 +332,9 @@ class ControlPlaneReceipt:
             "approvers": [a.to_dict() for a in self.approvers],
             "external_runs": [r.to_dict() for r in self.external_runs],
         }
+        if self.credential_id is not None:
+            payload["credential_id"] = self.credential_id
+        return payload
 
     def compute_hash(self) -> str:
         canonical = json.dumps(
@@ -341,16 +351,21 @@ class ControlPlaneReceipt:
         return self.compute_hash() == self.receipt_hash
 
     def to_dict(self) -> dict[str, Any]:
-        return {**self._payload(), "receipt_hash": self.receipt_hash}
+        return {
+            **self._payload(),
+            "credential_id": self.credential_id,
+            "receipt_hash": self.receipt_hash,
+        }
 
     @classmethod
     def from_dict(cls, data: object) -> ControlPlaneReceipt:
         """Strict: the key set must match exactly. Does not check the hash."""
         if not isinstance(data, Mapping):
             raise ValueError("receipt must be a mapping")
-        if set(data) != set(_FIELDS):
-            extra = sorted(map(str, set(data) - set(_FIELDS)))
-            missing = sorted(set(_FIELDS) - set(data))
+        keys = set(data) - {"credential_id"}  # optional (Phase 6b)
+        if keys != set(_FIELDS):
+            extra = sorted(map(str, keys - set(_FIELDS)))
+            missing = sorted(set(_FIELDS) - keys)
             raise ValueError(f"receipt keys mismatch: unknown={extra} missing={missing}")
         for name in ("determining_policies", "approvers", "external_runs"):
             if not isinstance(data[name], list):

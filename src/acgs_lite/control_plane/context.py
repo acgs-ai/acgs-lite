@@ -108,6 +108,10 @@ class DecisionRequest:
     attributes: Mapping[str, Any] = field(default_factory=dict)
     expected_constitution_hash: str | None = None
     approvals: tuple[Any, ...] = ()
+    credential_id: str | None = None
+    """Phase 6b: the verified credential behind the call. Recorded on the
+    receipt but *not* part of :meth:`canonical`, so ``inputs_digest`` and
+    the approval action hash are unchanged."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "approvers", tuple(self.approvers))

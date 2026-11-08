@@ -34,6 +34,7 @@ from acgs_lite._compat import StrEnum
 from acgs_lite.control_plane.principal import Principal, PrincipalKind
 
 if TYPE_CHECKING:
+    from acgs_lite.control_plane.identity import AdminAttestor
     from acgs_lite.control_plane.pdp import PolicyDecisionPoint
 
 __all__ = [
@@ -95,7 +96,13 @@ class RoleAssignments:
     receipt ledger -- no new signing path.
     """
 
-    def __init__(self, admin: Principal, *, pdp: PolicyDecisionPoint | None = None) -> None:
+    def __init__(
+        self,
+        admin: Principal,
+        *,
+        pdp: PolicyDecisionPoint | None = None,
+        admin_attestor: AdminAttestor | None = None,
+    ) -> None:
         if not isinstance(admin, Principal) or admin.kind is not PrincipalKind.HUMAN:
             raise RoleConflict("RoleAssignments needs the configured HUMAN admin")
         if pdp is not None:
@@ -103,6 +110,9 @@ class RoleAssignments:
 
             if not isinstance(pdp, PolicyDecisionPoint):
                 raise TypeError("pdp must be a PolicyDecisionPoint")
+        from acgs_lite.control_plane.identity import checked_attestor
+
+        self._attestor = checked_attestor(admin_attestor)
         self._admin = admin
         self._pdp = pdp
         self._lock = threading.Lock()
@@ -147,11 +157,29 @@ class RoleAssignments:
         if not decision.allowed:
             raise RoleConflict(f"PDP denied {action}: {decision.reason}")
 
-    def grant_capability(self, granter: Principal, capability: str, principal: Principal) -> None:
+    def _attest(self, granter: object, credential: str | None, action: str, resource: str) -> None:
+        """Phase 6a: with an attestor the granter must prove it is the
+        directory human it claims to be (admin or capability_admin)."""
+        if self._attestor is None:
+            return
+        try:
+            self._attestor.require(granter, credential, admin_only=False)
+        except PermissionError as exc:
+            raise self._refuse(granter, action, resource, str(exc)) from exc
+
+    def grant_capability(
+        self,
+        granter: Principal,
+        capability: str,
+        principal: Principal,
+        *,
+        admin_credential: str | None = None,
+    ) -> None:
         """Grant an organisation capability to a HUMAN (receipted)."""
         if not isinstance(capability, str) or not _CAPABILITY.fullmatch(capability):
             raise self._refuse(granter, "roles.grant", "capability/?", "malformed capability")
         resource = f"capability/{capability}/{getattr(principal, 'id', '?')}"
+        self._attest(granter, admin_credential, "roles.grant", resource)
         if not self._may_administer(granter):
             raise self._refuse(
                 granter,
@@ -178,8 +206,16 @@ class RoleAssignments:
         with self._lock:
             self._capabilities.setdefault(capability, {})[principal.canonical_id] = principal
 
-    def revoke_capability(self, granter: Principal, capability: str, principal: Principal) -> bool:
+    def revoke_capability(
+        self,
+        granter: Principal,
+        capability: str,
+        principal: Principal,
+        *,
+        admin_credential: str | None = None,
+    ) -> bool:
         resource = f"capability/{capability}/{getattr(principal, 'id', '?')}"
+        self._attest(granter, admin_credential, "roles.revoke", resource)
         if not self._may_administer(granter):
             raise self._refuse(
                 granter,
@@ -201,8 +237,16 @@ class RoleAssignments:
         return holder is not None and holder.kind is principal.kind
 
     def assign(
-        self, admin: Principal, change_id: str, role: Role | str, principal: Principal
+        self,
+        admin: Principal,
+        change_id: str,
+        role: Role | str,
+        principal: Principal,
+        *,
+        admin_credential: str | None = None,
     ) -> None:
+        if self._attestor is not None:
+            self._attestor.require(admin, admin_credential, admin_only=False, error=RoleConflict)
         if not self._may_administer(admin):
             raise RoleConflict("only the configured admin (or a capability_admin) assigns roles")
         if not isinstance(change_id, str) or not change_id:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from collections.abc import Callable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -181,11 +181,14 @@ class TestScope:
 
 class TestStaleness:
     def test_stale(self, runbook_data: RunbookData) -> None:
-        old = (date.today() - timedelta(days=91)).isoformat()
-        assert is_stale(parse_runbook(runbook_data(last_tested=old)), date.today())
-        assert not is_stale(parse_runbook(runbook_data()), date.today())
-        future = (date.today() + timedelta(days=2)).isoformat()
-        assert is_stale(parse_runbook(runbook_data(last_tested=future)), date.today())
+        # The fixture and production both use the UTC date; local date.today()
+        # disagrees with it for part of every day.
+        today = datetime.now(timezone.utc).date()
+        old = (today - timedelta(days=91)).isoformat()
+        assert is_stale(parse_runbook(runbook_data(last_tested=old)), today)
+        assert not is_stale(parse_runbook(runbook_data()), today)
+        future = (today + timedelta(days=2)).isoformat()
+        assert is_stale(parse_runbook(runbook_data(last_tested=future)), today)
 
 
 class TestApproval:

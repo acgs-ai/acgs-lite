@@ -115,6 +115,19 @@ from acgs_lite.control_plane.iam import (
     WriteGrant,
     render_codeowners,
 )
+from acgs_lite.control_plane.identity import (
+    ADMIN_SCOPE,
+    AdminAttestationFailed,
+    AdminAttestor,
+    HumanAuthenticationFailed,
+    HumanAuthenticator,
+    HumanChallenge,
+    IdentityDirectoryError,
+    IdentityEntry,
+    IdentityProvider,
+    StaticIdentityDirectory,
+    VerifiedHumanSession,
+)
 from acgs_lite.control_plane.immutable_core import (
     DEFAULT_IMMUTABLE_CORE,
     CoreCategory,
@@ -167,6 +180,10 @@ from acgs_lite.control_plane.runbook import (
     runbook_hash,
     runbook_json_schema,
 )
+from acgs_lite.control_plane.service import (
+    ControlPlaneService,
+    ControlPlaneServiceError,
+)
 from acgs_lite.control_plane.telemetry import (
     AgentTelemetryRejected,
     InMemoryTelemetryStore,
@@ -195,6 +212,9 @@ from acgs_lite.control_plane.verifier import (
 __all__ = [
     "ActionProfile",
     "ActionTier",
+    "ADMIN_SCOPE",
+    "AdminAttestationFailed",
+    "AdminAttestor",
     "AgentTelemetryRejected",
     "ApprovalAuthority",
     "ApprovalGate",
@@ -220,6 +240,8 @@ __all__ = [
     "ControlPlaneConfig",
     "ControlPlaneConfigError",
     "ControlPlaneReceipt",
+    "ControlPlaneService",
+    "ControlPlaneServiceError",
     "CoreCategory",
     "CoreChangeWriter",
     "CoreWriteRejected",
@@ -245,7 +267,13 @@ __all__ = [
     "GENESIS_RECEIPT_HASH",
     "GitHubActionsRunVerifier",
     "GovernedToolDispatcher",
+    "HumanAuthenticationFailed",
+    "HumanAuthenticator",
+    "HumanChallenge",
     "IAMGrantRejected",
+    "IdentityDirectoryError",
+    "IdentityEntry",
+    "IdentityProvider",
     "ImmutableCoreError",
     "ImmutableCoreRegistry",
     "InMemoryReceiptStore",
@@ -296,6 +324,7 @@ __all__ = [
     "ScopedCredential",
     "SignedApproval",
     "SignedControlPlaneReceipt",
+    "StaticIdentityDirectory",
     "TelemetryAutonomyBridge",
     "TelemetryRecorder",
     "TelemetryStore",
@@ -303,6 +332,7 @@ __all__ = [
     "ToolResult",
     "TriggerCircuitBreaker",
     "TrustedRunRegistry",
+    "VerifiedHumanSession",
     "VerifierPolicy",
     "VerifierRejected",
     "VerifierVerdict",
