@@ -32,7 +32,7 @@ B = Principal("writer-b", PrincipalKind.AGENT)
 
 
 def _setup(
-    tmp_path: Path, pdp: PolicyDecisionPoint, fn: Any, *, active: bool = True
+    tmp_path: Path, pdp: PolicyDecisionPoint, fn: Any, *, active: bool = True, **options: Any
 ) -> tuple[GovernedToolDispatcher, IncidentMutationLock, IncidentMutationLock]:
     registry = DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
     lock = IncidentMutationLock(registry=registry)
@@ -48,9 +48,41 @@ def _setup(
         ),
         tool_tiers={"write": ActionTier.T1},
         incident_lock=lock,
+        **options,
     )
     dispatcher.register("write", fn, path_params={"path"}, merge_capable=False)
     return dispatcher, lock, other
+
+
+def test_execution_lease_denial_retains_credential_id(
+    tmp_path: Path, pdp: PolicyDecisionPoint
+) -> None:
+    from acgs_lite.control_plane.credentials import CredentialIssuer
+
+    issuer = CredentialIssuer()
+    credential = issuer.issue(A, scopes={"tool:write"})
+    calls: list[str] = []
+
+    def write(path: str) -> None:
+        calls.append(path)
+
+    d, _, other = _setup(
+        tmp_path, pdp, write, active=False, credential_issuer=issuer, require_credential=True
+    )
+
+    def declare(decisions: Any) -> None:
+        other.declare_incident(ADMIN, "during-callback")
+
+    with pytest.raises(ToolDenied, match="incident") as denied:
+        d.dispatch(
+            A,
+            "write",
+            {"path": "workspace/a.txt"},
+            credential=credential.token,
+            on_authorized=declare,
+        )
+    assert calls == []
+    assert denied.value.decision.credential_id == credential.credential_id
 
 
 @pytest.mark.parametrize("active", [False, True])
