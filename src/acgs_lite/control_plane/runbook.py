@@ -127,10 +127,16 @@ class _Frozen(BaseModel):
 class ScopeSelector(_Frozen):
     """What a runbook may touch: tool-name globs (``fnmatch``), repo path globs
     (root-anchored repo-glob semantics, see :func:`~.immutable_core.compile_glob`)
-    and the principals (canonical ids) and/or system cohorts it is for."""
+    and the principals (canonical ids) and/or system cohorts it is for.
+
+    ``principal_kinds`` is required and applies to both identity selectors.
+    Legacy selectors must explicitly choose kinds and be reviewed/reapproved;
+    a bare id cannot establish whether its owner is HUMAN, AGENT or SERVICE.
+    """
 
     tools: Annotated[tuple[_Glob, ...], Field(min_length=1)]
     paths: Annotated[tuple[_Glob, ...], Field(min_length=1)]
+    principal_kinds: Annotated[tuple[PrincipalKind, ...], Field(min_length=1)]
     principals: tuple[_PrincipalId, ...] = ()
     system_ids: tuple[_PrincipalId, ...] = ()
     allow_pathless: bool = False
@@ -600,6 +606,10 @@ class RunbookRegistry:
         selector = runbook.scope_selector
         if not any(fnmatch.fnmatchcase(tool_name, glob) for glob in selector.tools):
             raise RunbookDenied(f"tool {tool_name!r} is outside the runbook scope")
+        if principal.kind not in selector.principal_kinds:
+            raise RunbookDenied(
+                f"principal kind {principal.kind.value!r} is outside the runbook scope"
+            )
         principal_ok = principal.canonical_id in {p.casefold() for p in selector.principals} or (
             principal.system_id is not None
             and principal.system_id in {s.casefold() for s in selector.system_ids}

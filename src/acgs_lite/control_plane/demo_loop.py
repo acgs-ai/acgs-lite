@@ -230,6 +230,7 @@ def _runbook(today: str) -> dict[str, Any]:
             "tools": ["write_file"],
             "paths": [f"{WORKTREE}/**"],
             "principals": [AGENT.id],
+            "principal_kinds": [AGENT.kind.value],
             "system_ids": [],
         },
         "max_blast_radius": 1,
