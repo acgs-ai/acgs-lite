@@ -376,6 +376,33 @@ class TestRepoRootImportShadows:
     def test_ordinary_module_unchanged(self) -> None:
         assert DEFAULT_IMMUTABLE_CORE.classify("src/acgs_lite/foo.py") is None
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "json/__init__.py",
+            "yaml/__init__.pyc",
+            "json/__init__.cpython-310-x86_64-linux-gnu.so",
+            "json/__init__.pyd",
+            "json.cpython-310-x86_64-linux-gnu.so",
+            "json.pyd",
+            "json.pyc",
+        ],
+    )
+    def test_package_and_native_shadows_denied(self, pdp: PolicyDecisionPoint, path: str) -> None:
+        assert DEFAULT_IMMUTABLE_CORE.classify(path) is CoreCategory.CONTROL_PLANE
+        decision = pdp.decide(DecisionRequest(AGENT, "file.write", path, ActionTier.T1))
+        assert not decision.allowed
+
+    def test_path_subclass_cannot_redirect_normalization(self, pdp: PolicyDecisionPoint) -> None:
+        class PathText(str):
+            def replace(self, old: str, new: str, count: int = -1) -> str:
+                return "workspace/ok.txt"
+
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied):
+            dispatcher.dispatch(AGENT, "write", {"path": PathText("evaluator/score.py")})
+        assert sink.calls == []
+
 
 class TestDottedDirectoryTargets:
     @pytest.mark.parametrize("path", ["app/v1.2", "app/v1.2/", "app/report.txt"])
