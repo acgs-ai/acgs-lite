@@ -64,6 +64,7 @@ from acgs_lite.control_plane.tiers import ActionTier
 if TYPE_CHECKING:
     from acgs_lite.control_plane.approvals import SignedApproval
     from acgs_lite.control_plane.context import DecisionRequest
+    from acgs_lite.control_plane.identity import AdminAttestor
     from acgs_lite.control_plane.pdp import PolicyDecisionPoint
     from acgs_lite.control_plane.roles import RoleAssignments
 
@@ -339,7 +340,9 @@ class RunbookRegistry:
         max_runbook_age_days: int = DEFAULT_MAX_RUNBOOK_AGE_DAYS,
         clock: Callable[[], float] = time.monotonic,
         today: Callable[[], date] = _today,
+        admin_attestor: AdminAttestor | None = None,
     ) -> None:
+        from acgs_lite.control_plane.identity import checked_attestor
         from acgs_lite.control_plane.pdp import PolicyDecisionPoint
         from acgs_lite.control_plane.roles import RoleAssignments
 
@@ -353,6 +356,7 @@ class RunbookRegistry:
             raise TypeError("roles must be a RoleAssignments")
         self._pdp = pdp
         self._roles = roles
+        self._attestor = checked_attestor(admin_attestor)
         if (
             isinstance(max_runbook_age_days, bool)
             or not isinstance(max_runbook_age_days, int)
@@ -405,6 +409,7 @@ class RunbookRegistry:
         *,
         approvals: Sequence[SignedApproval],
         source_path: str | Path | None = None,
+        admin_credential: str | None = None,
     ) -> str:
         """Approve *runbook* through the PDP; returns its hash.
 
@@ -416,6 +421,9 @@ class RunbookRegistry:
         execution re-reads and re-hashes the file.
         """
         human = _require_human(requester, "requester")
+        if self._attestor is not None:
+            # Phase 6a: the requester proves it is the directory human it claims.
+            self._attestor.require(human, admin_credential, admin_only=False, error=RunbookRejected)
         parsed = parse_runbook(runbook)
         check_runbook_scope(parsed, self._registry)
         digest = runbook_hash(parsed)
@@ -457,8 +465,12 @@ class RunbookRegistry:
             candidate = Path(self._registry.repo_root) / candidate
         return candidate
 
-    def revoke(self, admin: Principal, runbook_id: str) -> bool:
+    def revoke(
+        self, admin: Principal, runbook_id: str, *, admin_credential: str | None = None
+    ) -> bool:
         _require_human(admin, "admin")
+        if self._attestor is not None:
+            self._attestor.require(admin, admin_credential, error=RunbookRejected)
         with self._lock:
             return self._approved.pop(runbook_id, None) is not None
 

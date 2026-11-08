@@ -35,16 +35,39 @@ from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner  # noqa: E402
 pytestmark = [pytest.mark.unit]
 
 AGENT = Principal("agent-1", PrincipalKind.AGENT, system_id="sys-a")
+ADMIN_KEY = Ed25519ReceiptSigner.from_seed(b"a" * 32)
+IDENTITY_PATH = "iam/identities.yaml"
 
 
-def _config(root: Path, **overrides: Any) -> ControlPlaneConfig:
-    _write_layout(root)
+def _identities(**admin_overrides: Any) -> dict[str, Any]:
+    admin = {
+        "id": "root-admin",
+        "kind": "human",
+        "admin": True,
+        "public_key": ADMIN_KEY.public_key_hex(),
+    }
+    admin.update(admin_overrides)
+    return {
+        "version": 1,
+        "identities": [
+            admin,
+            {"id": "harness", "kind": "service"},
+            {"id": "agent-1", "kind": "agent", "system_id": "sys-a"},
+        ],
+    }
+
+
+def _config(
+    root: Path, identities: dict[str, Any] | None = None, **overrides: Any
+) -> ControlPlaneConfig:
+    _write_layout(root, _identities() if identities is None else identities)
     base: dict[str, Any] = {
         "repo_root": str(root),
         "system_id": "sys-a",
         "constitution": Constitution.default(),
         "policy_path": POLICY_PATH,
         "heldout_suite_path": SUITE_PATH,
+        "identity_path": IDENTITY_PATH,
         "admin": Principal("root-admin", PrincipalKind.HUMAN),
         "harness": Principal("harness", PrincipalKind.SERVICE),
         "ledger_signer": Ed25519ReceiptSigner.from_seed(b"l" * 32, key_id="ledger"),
@@ -83,6 +106,9 @@ def test_builds_every_layer(tmp_path: Path) -> None:
             assert getattr(cp, name) is not None
         assert (tmp_path / "control-plane" / "halt").is_dir()
         assert (tmp_path / "control-plane" / "incident").is_dir()
+        assert cp.credentials.identity is cp.identity
+        assert cp.human_authenticator is cp.credentials.human_authenticator
+        assert cp.admin_attestor.admin == Principal("root-admin", PrincipalKind.HUMAN)
         cp.start_agent_run(AGENT)
         cp.dispatcher.register("noop", lambda path: path, path_params={"path"}, merge_capable=False)
         # Credentials are mandatory: an agent call without a token is denied.
@@ -103,6 +129,7 @@ REQUIRED = [
     "constitution",
     "policy_path",
     "heldout_suite_path",
+    "identity_path",
     "admin",
     "harness",
     "ledger_signer",
@@ -149,6 +176,55 @@ def test_missing_layer_is_a_construction_error(tmp_path: Path, field: str) -> No
 def test_misconfiguration_rejected(tmp_path: Path, overrides: Any, match: str) -> None:
     with pytest.raises(ControlPlaneConfigError, match=match):
         build_control_plane(_config(tmp_path, **overrides))
+
+
+@pytest.mark.parametrize(
+    ("overrides", "identities", "match"),
+    [
+        # config.admin is not the directory admin.
+        ({"admin": Principal("someone", PrincipalKind.HUMAN)}, None, "directory's single admin"),
+        # The identity directory must be IAM core, not an agent-writable path.
+        ({"identity_path": "workspace/identities.yaml"}, None, "identity_path"),
+        ({"identity_path": "policy/control-plane.yaml"}, None, "identity_path"),
+        # The harness must be a SERVICE entry.
+        ({"harness": Principal("ghost", PrincipalKind.SERVICE)}, None, "harness"),
+        (
+            {},
+            {
+                "version": 1,
+                "identities": [
+                    {
+                        "id": "root-admin",
+                        "kind": "human",
+                        "admin": True,
+                        "public_key": ADMIN_KEY.public_key_hex(),
+                    },
+                    {
+                        "id": "root-2",
+                        "kind": "human",
+                        "admin": True,
+                        "public_key": ADMIN_KEY.public_key_hex(),
+                    },
+                    {"id": "harness", "kind": "service"},
+                ],
+            },
+            "exactly one admin",
+        ),
+        ({}, {"version": 1, "identities": "nope"}, "identity directory"),
+    ],
+)
+def test_identity_misconfiguration_rejected(
+    tmp_path: Path, overrides: Any, identities: Any, match: str
+) -> None:
+    with pytest.raises(ControlPlaneConfigError, match=match):
+        build_control_plane(_config(tmp_path, identities, **overrides))
+
+
+def test_harness_kind_must_match_directory(tmp_path: Path) -> None:
+    identities = _identities()
+    identities["identities"][1] = {"id": "harness", "kind": "agent"}
+    with pytest.raises(ControlPlaneConfigError, match="harness"):
+        build_control_plane(_config(tmp_path, identities))
 
 
 def test_shared_signing_key_rejected(tmp_path: Path) -> None:

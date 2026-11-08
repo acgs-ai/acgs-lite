@@ -50,7 +50,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Literal, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, cast, runtime_checkable
 
 from acgs_lite._compat import StrEnum
 from acgs_lite.control_plane.autonomy import AutonomyController, FailureKind
@@ -61,6 +61,9 @@ from acgs_lite.control_plane.evidence import (
 )
 from acgs_lite.control_plane.immutable_core import DEFAULT_IMMUTABLE_CORE, ImmutableCoreRegistry
 from acgs_lite.control_plane.principal import Principal, PrincipalKind
+
+if TYPE_CHECKING:
+    from acgs_lite.control_plane.identity import AdminAttestor
 
 __all__ = [
     "DEFAULT_REWORK_WINDOW_S",
@@ -637,7 +640,14 @@ class TelemetryRecorder:
         recorder: Principal,
         *,
         clock: Callable[[], float] = time.time,
+        admin_attestor: AdminAttestor | None = None,
     ) -> None:
+        """With *admin_attestor* every human-attributed record (approval
+        denied, override, human ground truth) needs the human's verified
+        single-use ``admin_credential=``."""
+        from acgs_lite.control_plane.identity import checked_attestor
+
+        self._attestor = checked_attestor(admin_attestor)
         if not isinstance(store, TelemetryStore):
             raise TypeError("store must implement TelemetryStore")
         if not isinstance(recorder, Principal):
@@ -653,6 +663,14 @@ class TelemetryRecorder:
     @property
     def store(self) -> TelemetryStore:
         return self._store
+
+    def _human(self, principal: object, label: str, credential: str | None) -> Principal:
+        human = _require_human(principal, label)
+        if self._attestor is not None:
+            self._attestor.require(
+                human, credential, admin_only=False, error=AgentTelemetryRejected
+            )
+        return human
 
     @property
     def clock(self) -> Callable[[], float]:
@@ -701,10 +719,15 @@ class TelemetryRecorder:
         )
 
     def record_approval_denied(
-        self, action_hash: str, approver: Principal, *, at: float | None = None
+        self,
+        action_hash: str,
+        approver: Principal,
+        *,
+        at: float | None = None,
+        admin_credential: str | None = None,
     ) -> OversightEvent:
         """A human approver explicitly declined to approve *action_hash*."""
-        human = _require_human(approver, "approver")
+        human = self._human(approver, "approver", admin_credential)
         return self._append(
             ApprovalDenied(action_hash=action_hash, approver_id=human.id, **self._common(at))
         )
@@ -716,9 +739,10 @@ class TelemetryRecorder:
         direction: OverrideDirection | str,
         *,
         at: float | None = None,
+        admin_credential: str | None = None,
     ) -> OversightEvent:
         """*overrider* (HUMAN) reversed the automated decision *decision_id*."""
-        human = _require_human(overrider, "overrider")
+        human = self._human(overrider, "overrider", admin_credential)
         return self._append(
             Override(
                 decision_id=decision_id,
@@ -753,12 +777,13 @@ class TelemetryRecorder:
         run_ref: ExternalRunRef | None = None,
         reviewer: Principal | None = None,
         at: float | None = None,
+        admin_credential: str | None = None,
     ) -> OversightEvent:
         """Ground truth from an external run (*run_ref*) or a HUMAN *reviewer*."""
         if run_ref is not None and reviewer is not None:
             raise ValueError("pass run_ref or reviewer, not both")
         if reviewer is not None:
-            human = _require_human(reviewer, "reviewer")
+            human = self._human(reviewer, "reviewer", admin_credential)
             return self._append(
                 GroundTruth(
                     subject_id=subject_id,

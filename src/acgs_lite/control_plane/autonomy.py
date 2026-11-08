@@ -36,6 +36,7 @@ from acgs_lite.control_plane.principal import Principal, PrincipalKind
 from acgs_lite.control_plane.tiers import ActionTier
 
 if TYPE_CHECKING:
+    from acgs_lite.control_plane.identity import AdminAttestor
     from acgs_lite.control_plane.killswitch import KillSwitch
     from acgs_lite.control_plane.pdp import PolicyDecisionPoint
 
@@ -128,7 +129,11 @@ class AutonomyController:
         clock: Callable[[], float] = time.monotonic,
         demote_system: bool = True,
         demote_unscoped_agents: bool = False,
+        admin_attestor: AdminAttestor | None = None,
     ) -> None:
+        from acgs_lite.control_plane.identity import checked_attestor
+
+        self._attestor = checked_attestor(admin_attestor)
         if not isinstance(error_budget, ErrorBudget):
             raise TypeError("error_budget must be an ErrorBudget")
         if budgets is not None and not isinstance(budgets, BudgetLedger):
@@ -280,7 +285,9 @@ class AutonomyController:
                 return AutonomyLevel.P0_ONLY
         return AutonomyLevel.T1_PREAUTHORIZED
 
-    def restore(self, admin: Principal, principal: Principal) -> None:
+    def restore(
+        self, admin: Principal, principal: Principal, *, admin_credential: str | None = None
+    ) -> None:
         """Lift a demotion and clear the failure windows. HUMAN admin only.
 
         Exhausted resource budgets keep demoting until the harness starts a
@@ -288,6 +295,8 @@ class AutonomyController:
         """
         if not isinstance(admin, Principal) or admin.kind is not PrincipalKind.HUMAN:
             raise AutonomyRestoreRejected("only a HUMAN may restore autonomy")
+        if self._attestor is not None:
+            self._attestor.require(admin, admin_credential, error=AutonomyRestoreRejected)
         with self._lock:
             self._demoted.pop(principal.canonical_id, None)
             cohort = self._cohort(principal)
