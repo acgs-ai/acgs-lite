@@ -333,7 +333,13 @@ def p5(
         ownership = ChangeOwnershipRegistry(registry, admin=ADMIN)
         ownership.assign(ADMIN, "c1", Principal("agent-1", PrincipalKind.AGENT, "sys-a"), worktree)
         incident = IncidentMutationLock(registry=registry)
-        runs = TrustedRunRegistry()
+        from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner
+
+        runs = TrustedRunRegistry(
+            path=tmp_path / "audit" / "runs.jsonl",
+            registry=registry,
+            signer=Ed25519ReceiptSigner.from_seed(b"backup-registry".ljust(32, b"0")),
+        )
         dispatcher = GovernedToolDispatcher(
             pdp,
             permissions=permissions,

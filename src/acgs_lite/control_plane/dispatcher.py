@@ -66,7 +66,9 @@ approved runbook (``runbook_id`` + ``runbook_hash``), validated before the
 tool runs (hash, staleness, scope, blast radius, rate limit, stop
 conditions); each T1 execution is queued for post-hoc human review
 (``review_queue=``). A non-human T3 dispatch needs a backup run
-(``backup_run=``) validated by ``run_verifier=``. With ``ownership=`` every
+(``backup_run=``) validated by ``run_verifier=`` and spent in a persistent
+signing ``backup_consumption_registry=`` (defaults to the run verifier when
+it is a TrustedRunRegistry). With ``ownership=`` every
 write must name the ``change_id`` its writer owns and stay inside that
 change's worktree (and branch, via ``branch_param``). With
 ``incident_lock=`` a declared incident denies every write-class dispatch by
@@ -95,7 +97,6 @@ import inspect
 import os
 import posixpath
 import re
-import threading
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -127,6 +128,7 @@ from acgs_lite.control_plane.evidence import (
     ExternalRunRef,
     ExternalRunVerifier,
     RunValidation,
+    TrustedRunRegistry,
     _attests_digest,
 )
 from acgs_lite.control_plane.iam import RepositoryPermissions
@@ -214,7 +216,7 @@ class _CallPlan:
     runbook_id: str | None
     runbook_hash: str | None
     blast_radius: int
-    backup_key: tuple[str, str] | None = None
+    backup_ref: ExternalRunRef | None = None
     merge_capable: bool = False
 
 
@@ -354,6 +356,7 @@ class GovernedToolDispatcher:
         incident_lock: IncidentMutationLock | None = None,
         run_verifier: ExternalRunVerifier | None = None,
         backup_workflows: Iterable[str] = (),
+        backup_consumption_registry: TrustedRunRegistry | None = None,
         narrow_max_blast_radius: int = DEFAULT_NARROW_MAX_BLAST_RADIUS,
     ) -> None:
         if runbooks is not None:
@@ -390,8 +393,13 @@ class GovernedToolDispatcher:
         # freshness (max age) is not enforced; only allow-listed backup
         # workflows, action-bound digests and single use are.
         self._backup_workflows = frozenset(backup_workflows)
-        self._consumed_backups: set[tuple[str, str]] = set()
-        self._backup_lock = threading.Lock()
+        if backup_consumption_registry is not None and not isinstance(
+            backup_consumption_registry, TrustedRunRegistry
+        ):
+            raise TypeError("backup_consumption_registry must be a TrustedRunRegistry")
+        self._backup_consumption = backup_consumption_registry
+        if self._backup_consumption is None and isinstance(run_verifier, TrustedRunRegistry):
+            self._backup_consumption = run_verifier
         self._narrow = narrow_max_blast_radius
         if not isinstance(pdp, PolicyDecisionPoint):
             raise TypeError("pdp must be a PolicyDecisionPoint")
@@ -888,23 +896,29 @@ class GovernedToolDispatcher:
             return "backup run is not bound to this action's arguments"
         if not _attests_digest(verifier, backup_run):
             return "run verifier cannot attest the backup digest"
-        with self._backup_lock:
-            if (backup_run.provider, backup_run.run_id) in self._consumed_backups:
-                return "backup run already consumed by another action"
         try:
             result = verifier.validate(backup_run)
         except Exception as exc:
             return f"backup run unverifiable: {type(exc).__name__}"
         if not isinstance(result, RunValidation) or result.valid is not True:
             return "backup run not independently validated"
+        registry = self._backup_consumption
+        if registry is None or not registry.supports_durable_backup_consumption:
+            return "backup consumption requires a persistent signing registry"
+        try:
+            if registry.backup_consumed(backup_run):
+                return "backup run already consumed by another action"
+        except Exception:
+            return "backup consumption state unavailable"
         return None
 
-    def _consume_backup(self, key: tuple[str, str]) -> bool:
-        with self._backup_lock:
-            if key in self._consumed_backups:
-                return False
-            self._consumed_backups.add(key)
-            return True
+    def _consume_backup(self, ref: ExternalRunRef) -> bool:
+        try:
+            return self._backup_consumption is not None and self._backup_consumption.consume_backup(
+                ref
+            )
+        except Exception:
+            return False
 
     def _plan(
         self,
@@ -977,7 +991,7 @@ class GovernedToolDispatcher:
                 raise _Denied(
                     f"caller-supplied tier {claimed.name} is lower than the computed tier {tier.name}"
                 )
-        backup_key: tuple[str, str] | None = None
+        backup_ref: ExternalRunRef | None = None
         if tier == ActionTier.T3 and principal.kind is not PrincipalKind.HUMAN:
             ref = backup_run if isinstance(backup_run, ExternalRunRef) else None
             backup_problem = self._backup_problem(ref, tool_name, args)
@@ -988,7 +1002,7 @@ class GovernedToolDispatcher:
                 detail = f" ({backup_problem})" if backup_problem else ""
                 raise _Denied(problem + detail)
             if ref is not None:
-                backup_key = (ref.provider, ref.run_id)
+                backup_ref = ref
         use_runbook = runbook is not None and tier == ActionTier.T1
         return _CallPlan(
             tier=tier,
@@ -996,7 +1010,7 @@ class GovernedToolDispatcher:
             runbook_id=runbook.runbook_id if use_runbook and runbook is not None else None,
             runbook_hash=runbook_hash if use_runbook and isinstance(runbook_hash, str) else None,
             blast_radius=blast_radius,
-            backup_key=backup_key,
+            backup_ref=backup_ref,
             merge_capable=spec.merge_capable,
         )
 
@@ -1428,7 +1442,7 @@ class GovernedToolDispatcher:
             except RunbookDenied as exc:
                 self._record_denial_failure(principal)
                 raise self._pre_denial(principal, tool_name, f"runbook rejected: {exc}") from exc
-        if consume and plan.backup_key is not None and not self._consume_backup(plan.backup_key):
+        if consume and plan.backup_ref is not None and not self._consume_backup(plan.backup_ref):
             self._record_denial_failure(principal)
             raise self._pre_denial(principal, tool_name, "backup run already consumed")
         admission = None
