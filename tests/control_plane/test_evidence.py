@@ -290,6 +290,14 @@ def _gh(fetch: _Fetch, repository: str = "o/r") -> GitHubActionsRunVerifier:
 
 
 class TestGitHubActionsRunVerifier:
+    @pytest.mark.parametrize("required", [False, True])
+    def test_head_sha_does_not_attest_extra_artifact_digest(self, required: bool) -> None:
+        verifier = _gh(_Fetch(_gh_payload()))
+        ref = _gh_ref(artifact_digest=DIGEST)
+        assert verifier.validate(ref).valid
+        reasons = evaluate_evidence((ref,), verifier, EvidencePolicy(), required=required)
+        assert any("attest" in reason for reason in reasons)
+
     def test_success(self) -> None:
         fetch = _Fetch(_gh_payload(repository={"full_name": "acgs-ai/acgs-lite"}))
         assert _gh(fetch, "acgs-ai/acgs-lite").validate(_gh_ref()).valid

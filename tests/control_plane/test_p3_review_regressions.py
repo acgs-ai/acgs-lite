@@ -43,6 +43,16 @@ TARGET = "policies/main.yaml"
 Factory = Callable[..., Callable[..., SignedApproval]]
 
 
+@pytest.mark.parametrize("path", ["control-plane/.env", "policies/.env", "evaluator/.env"])
+def test_overlapping_core_category_requires_attested_approval(
+    constitution: Constitution, permit_all: PolicySet, path: str
+) -> None:
+    with PolicyDecisionPoint.for_constitution(constitution, permit_all) as pdp:
+        decision = pdp.decide(DecisionRequest(ALICE, "file.write", path, tier=ActionTier.T2))
+    assert not decision.allowed
+    assert "INV-HUMAN-ONLY-CHANGE-CLASS" in decision.reason
+
+
 def _switch(tmp_path: Path, state: dict[str, bool], name: str = "halt") -> KillSwitch:
     return KillSwitch("sys-a", signal_dir=tmp_path / name, probe=lambda _p: state["on"])
 

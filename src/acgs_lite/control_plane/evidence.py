@@ -278,8 +278,7 @@ def evaluate_evidence(
             continue
         # A digest only binds if the verifier checks it against its own data;
         # otherwise it is the ref's (i.e. the caller's) unverified assertion.
-        digest_is_the_binding = bind_digest is not None or (required and ref.head_sha is None)
-        if digest_is_the_binding and not _attests_digest(verifier, ref):
+        if ref.artifact_digest is not None and not _attests_digest(verifier, ref):
             reasons.append(f"run {ref.label}: {CANNOT_ATTEST_REASON}")
             continue
         try:

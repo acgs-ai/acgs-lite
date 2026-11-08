@@ -257,6 +257,7 @@ class PromotionGate:
         if self._incident_lock is None:
             try:
                 # The receipt cites the gate-attested approvers, not host input.
+                self._require_not_halted(decision)
                 return self._append_promotion(decision, decided)
             except ReceiptEmissionError as exc:
                 raise PromotionRejected(f"promotion receipt could not be emitted: {exc}") from exc
@@ -272,6 +273,7 @@ class PromotionGate:
                 if denial is not None:
                     raise PromotionRejected(f"incident: {denial}", decision)
                 try:
+                    self._require_not_halted(decision)
                     return self._append_promotion(decision, decided)
                 except ReceiptEmissionError as exc:
                     raise PromotionRejected(
@@ -279,3 +281,14 @@ class PromotionGate:
                     ) from exc
         except IncidentLockError as exc:
             raise PromotionRejected(f"incident lock unavailable: {exc}", decision) from exc
+
+    def _require_not_halted(self, decision: Decision) -> None:
+        switch = self._pdp.kill_switch
+        if switch is None:
+            return
+        try:
+            engaged = bool(switch.is_engaged())
+        except Exception:
+            engaged = True
+        if engaged:
+            raise PromotionRejected("kill switch engaged; promotion not performed", decision)
