@@ -23,7 +23,8 @@ caught only by the lineage archive, so agent-written logs never count):
   canonical id and excluding the requester, a ``candidate_digest`` that every
   external evidence ref carries as its ``artifact_digest`` (no run reuse
   across candidates);
-* success-claim refs must be bound to an artifact (digest or head sha);
+* every allowed success claim names a ``candidate_digest`` and each external
+  run independently attests that exact artifact digest;
 * a chain must carry exactly one ``ledger_id``.
 
 A deny grants nothing, so runs cited on a deny are context and are not
@@ -82,7 +83,12 @@ def verify_receipt(
     require_external_evidence: bool | None = None,
     evidence_policy: EvidencePolicy = DEFAULT_EVIDENCE_POLICY,
 ) -> ReceiptVerification:
-    """Verify one signed receipt. Never raises; any doubt is a rejection."""
+    """Verify one signed receipt. Never raises; any doubt is a rejection.
+
+    ``require_external_evidence=True`` additionally requires runs for ordinary
+    receipts. False never disables evidence or candidate binding for promotions
+    or allowed success claims.
+    """
     if not isinstance(signed, SignedControlPlaneReceipt):
         return ReceiptVerification(False, ("malformed receipt: not a SignedControlPlaneReceipt",))
     reasons: list[str] = []
@@ -106,26 +112,24 @@ def verify_receipt(
         reasons.append("receipt_hash mismatch")
 
     promotion = receipt.kind is ReceiptKind.PROMOTION
+    success_claim = receipt.allowed and (
+        receipt.claims_success or evidence_policy.is_success_claim(receipt.action)
+    )
     if promotion:
         reasons.extend(_promotion_problems(receipt))
+    elif success_claim and receipt.candidate_digest is None:
+        reasons.append("success-claim receipt has no candidate_digest")
     if receipt.allowed and receipt.tier == _T3:
         reasons.extend(_two_person_problems(receipt))
     if receipt.allowed or promotion or require_external_evidence is True:
-        if require_external_evidence is None:
-            required = (
-                promotion
-                or receipt.claims_success
-                or evidence_policy.is_success_claim(receipt.action)
-            )
-        else:
-            required = require_external_evidence
+        required = promotion or success_claim or require_external_evidence is True
         reasons.extend(
             evaluate_evidence(
                 receipt.external_runs,
                 run_verifier,
                 evidence_policy,
                 required=required,
-                bind_digest=receipt.candidate_digest if promotion else None,
+                bind_digest=receipt.candidate_digest if promotion or success_claim else None,
             )
         )
     attributed = (

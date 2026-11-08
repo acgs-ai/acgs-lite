@@ -112,7 +112,11 @@ def normalize_path(path: object, repo_root: str | None = None) -> str | None:
     # rather than guess.
     if unicodedata.normalize("NFKC", path) != path or _PERCENT_ESCAPE.search(path):
         return None
-    candidate = path.replace("\\", "/")
+    # Do not authorize a rewritten spelling while the tool receives the raw
+    # path: backslashes and trailing dots/spaces are distinct names on POSIX.
+    if "\\" in path:
+        return None
+    candidate = path
     if candidate.startswith("~") or _DRIVE_PREFIX.match(candidate) or "://" in candidate:
         return None
     if candidate.startswith("/"):
@@ -126,15 +130,14 @@ def normalize_path(path: object, repo_root: str | None = None) -> str | None:
         if not absolute.startswith(prefix):
             return None
         candidate = absolute[len(prefix) :]
-    # Windows/SMB drop trailing dots and spaces per segment ("evaluator./x",
-    # "evaluator /x" -> "evaluator/x"), so strip them the same way.
+    # Reject ambiguous Windows/SMB aliases instead of rewriting their names.
     segments = []
     for segment in candidate.split("/"):
         if segment in ("", ".", ".."):
             segments.append(segment)
             continue
         stripped = segment.rstrip(". ")
-        if not stripped:
+        if not stripped or stripped != segment:
             return None
         segments.append(stripped)
     normalized = posixpath.normpath("/".join(segments))
@@ -143,8 +146,12 @@ def normalize_path(path: object, repo_root: str | None = None) -> str | None:
     return normalized
 
 
-def compile_glob(pattern: str) -> re.Pattern[str]:
-    """Compile a repo glob into a case-insensitive full-match regex.
+def compile_glob(pattern: str, *, case_sensitive: bool = False) -> re.Pattern[str]:
+    """Compile a repo glob into a full-match regex.
+
+    Core classification defaults to conservative case-insensitive matching;
+    permission grants use case-sensitive matching to avoid widening authority
+    to distinct filesystem paths.
 
     Semantics (deliberately not :mod:`fnmatch`, whose ``*`` crosses ``/``):
 
@@ -199,7 +206,8 @@ def compile_glob(pattern: str) -> re.Pattern[str]:
             continue
         out.append(re.escape(char))
         i += 1
-    return re.compile("".join(out), re.IGNORECASE | re.DOTALL)
+    flags = re.DOTALL if case_sensitive else re.IGNORECASE | re.DOTALL
+    return re.compile("".join(out), flags)
 
 
 def literal_prefix(pattern: str) -> str:
@@ -524,7 +532,7 @@ class ImmutableCoreRegistry:
 # Deployments must supply their own manifest (control-plane/immutable-core.yaml).
 DEFAULT_IMMUTABLE_CORE = ImmutableCoreRegistry(
     {
-        CoreCategory.EVALUATOR: ("evaluator/**", "evals/**"),
+        CoreCategory.EVALUATOR: ("evaluator/**", "evals/**", "src/acgs_lite/evals/**"),
         CoreCategory.TEST_SUITE: ("eval_suites/**", "eval-suites/**", "test_suites/**"),
         CoreCategory.HELDOUT_DATA: (
             "heldout/**",
@@ -554,7 +562,13 @@ DEFAULT_IMMUTABLE_CORE = ImmutableCoreRegistry(
         CoreCategory.PROMOTION_GATE: ("promotion/**",),
         CoreCategory.AUDIT_LOG: ("audit/**", "audit_logs/**"),
         CoreCategory.IAM: ("iam/**", "CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"),
-        CoreCategory.CI_RULES: (".github/**", ".gitlab-ci.yml", ".pre-commit-config.yaml"),
+        CoreCategory.CI_RULES: (
+            ".github/**",
+            ".gitlab-ci.yml",
+            ".pre-commit-config.yaml",
+            "Makefile",
+            "scripts/check_critical_coverage.py",
+        ),
         CoreCategory.CONTROL_PLANE: (
             "control-plane/**",
             "src/acgs_lite/control_plane/**",
