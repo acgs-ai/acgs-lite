@@ -24,6 +24,7 @@ from acgs_lite.circuit_breaker import (
 )
 from acgs_lite.constitution import Constitution, Rule, Severity
 from acgs_lite.governed import GovernedAgent, GovernedCallable
+from acgs_lite.legitimacy import AuthorizationProfile
 from acgs_lite.maci import MACIRole
 
 _WORKTREE_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -861,8 +862,13 @@ def test_async_agent_honors_shared_halt_before_side_effect(
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("production", [False, True])
 def test_governed_callable_honors_shared_halt_before_side_effect(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, asynchronous: bool, explicit: bool
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    asynchronous: bool,
+    explicit: bool,
+    production: bool,
 ) -> None:
     monkeypatch.setenv(HALT_SIGNAL_DIR_ENV, str(tmp_path))
     calls: list[str] = []
@@ -871,7 +877,20 @@ def test_governed_callable_honors_shared_halt_before_side_effect(
         if explicit
         else None
     )
-    guard = GovernedCallable(agent_id="halt-callable", circuit_breaker=breaker)
+    if production:
+        pytest.importorskip("cryptography")
+        from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner
+
+        signer = Ed25519ReceiptSigner.from_seed(bytes(range(32)), key_id="halt-test")
+        guard = GovernedCallable(
+            agent_id="halt-callable",
+            circuit_breaker=breaker,
+            authorization_profile=AuthorizationProfile.PRODUCTION,
+            receipt_signer=signer,
+            trusted_execution_keys={signer.key_id: signer.public_key_hex()},
+        )
+    else:
+        guard = GovernedCallable(agent_id="halt-callable", circuit_breaker=breaker)
     if explicit:
         assert guard._circuit_breaker is breaker
 
