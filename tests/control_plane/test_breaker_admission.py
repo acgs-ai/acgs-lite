@@ -83,7 +83,9 @@ def test_healthy_admission_is_invalidated_by_trip() -> None:
 
 
 @pytest.mark.parametrize("sync_wrapper", [False, True])
-@pytest.mark.parametrize("interruption", ["none", "failure", "reset_retrip", "unbind", "expire"])
+@pytest.mark.parametrize(
+    "interruption", ["none", "failure", "sibling_trip", "reset_retrip", "unbind", "expire"]
+)
 async def test_async_body_uses_its_original_admission(
     pdp: PolicyDecisionPoint,
     monkeypatch: pytest.MonkeyPatch,
@@ -95,6 +97,7 @@ async def test_async_body_uses_its_original_admission(
     agent = Principal("agent", PrincipalKind.AGENT)
     registry = TriggerRegistry()
     registry.bind(admin, "loop", principals=[agent])
+    registry.bind(admin, "sibling", principals=[agent])
     store = InMemoryTelemetryStore()
     breaker = TriggerCircuitBreaker(
         BreakerPolicy(max_rollbacks=1, cooldown_s=1),
@@ -133,6 +136,8 @@ async def test_async_body_uses_its_original_admission(
         result = await original(fn, *args, **kwargs)
         if interruption == "failure":
             recorder.record_rollback("loop", "after-probe")
+        elif interruption == "sibling_trip":
+            recorder.record_rollback("sibling", "sibling-trip")
         elif interruption == "reset_retrip":
             breaker.reset(admin, "loop")
             now[0] = 1000.0

@@ -632,9 +632,12 @@ class GovernedToolDispatcher:
             raise _Denied("invalid trigger_id")
         if not registry.is_bound(trigger_id, principal):
             raise _Denied(f"trigger {trigger_id} not bound to principal")
-        for cohort in registry.cohorts_of(principal):
+        cohorts = registry.cohorts_of(principal)
+        for cohort in cohorts:
             if breaker.cohort_suspended(cohort, probing=trigger_id):
                 raise _Denied(f"system cohort {cohort} suspended (a bound trigger is not closed)")
+        if not cohorts and breaker.principal_suspended(principal, probing=trigger_id):
+            raise _Denied("principal suspended (a bound trigger is not closed)")
         if admission is not None:
             if admission.trigger_id != trigger_id or not breaker._admission_valid(admission):
                 raise _Denied(f"trigger {trigger_id} admission invalidated")

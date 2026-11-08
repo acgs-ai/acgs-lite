@@ -13,6 +13,7 @@ principal and cohort bound to the trigger -- is demoted through the
 :class:`~.dispatcher.GovernedToolDispatcher` with a breaker denies every
 non-HUMAN dispatch that does not name a trigger bound to that principal,
 whose trigger is OPEN, or (``cohort_suspension=True``) whose system cohort
+(or direct principal bindings when unscoped)
 has *any* bound trigger that is not CLOSED -- so switching to another
 trigger does not evade a trip.
 
@@ -190,6 +191,17 @@ class TriggerRegistry:
     def system_ids_for(self, trigger_id: str) -> tuple[str, ...]:
         with self._lock:
             return tuple(sorted(self._systems.get(trigger_id, set())))
+
+    def triggers_for_principal(self, principal: Principal) -> tuple[str, ...]:
+        """Direct trigger bindings for a principal, including unscoped agents."""
+        with self._lock:
+            return tuple(
+                sorted(
+                    trigger
+                    for trigger, members in self._principals.items()
+                    if principal.canonical_id in members
+                )
+            )
 
     def triggers_for_cohort(self, system_id: str) -> tuple[str, ...]:
         """Triggers bound to *system_id* directly or via a member principal."""
@@ -520,7 +532,17 @@ class TriggerCircuitBreaker:
         registry = self._registry
         if not self._policy.cohort_suspension or system_id is None or registry is None:
             return False
-        for trigger_id in registry.triggers_for_cohort(system_id):
+        return self._triggers_suspended(registry.triggers_for_cohort(system_id), probing)
+
+    def principal_suspended(self, principal: Principal, *, probing: str | None = None) -> bool:
+        """Apply cohort suspension to an unscoped principal's bound triggers."""
+        registry = self._registry
+        if not self._policy.cohort_suspension or registry is None:
+            return False
+        return self._triggers_suspended(registry.triggers_for_principal(principal), probing)
+
+    def _triggers_suspended(self, triggers: Iterable[str], probing: str | None) -> bool:
+        for trigger_id in triggers:
             state = self.state(trigger_id)
             if state is BreakerState.CLOSED:
                 continue
