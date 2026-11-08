@@ -57,10 +57,30 @@
 /.pre-commit-config.yaml @acgs-ai/governance-humans
 /Makefile @acgs-ai/governance-humans
 /scripts/check_critical_coverage.py @acgs-ai/governance-humans
+/scripts/check_links.py @acgs-ai/governance-humans
+/scripts/qualify_wheel.py @acgs-ai/governance-humans
+/scripts/release_candidate.py @acgs-ai/governance-humans
+/scripts/run_governance_regression.py @acgs-ai/governance-humans
+/tests/red_team/governance_fail_closed_cases.py @acgs-ai/governance-humans
 # ci_rules: module shadows (package dirs, extensions, pyc)
 /scripts/__pycache__/check_critical_coverage.* @acgs-ai/governance-humans
+/scripts/__pycache__/check_links.* @acgs-ai/governance-humans
+/scripts/__pycache__/qualify_wheel.* @acgs-ai/governance-humans
+/scripts/__pycache__/release_candidate.* @acgs-ai/governance-humans
+/scripts/__pycache__/run_governance_regression.* @acgs-ai/governance-humans
 /scripts/check_critical_coverage.* @acgs-ai/governance-humans
 /scripts/check_critical_coverage/** @acgs-ai/governance-humans
+/scripts/check_links.* @acgs-ai/governance-humans
+/scripts/check_links/** @acgs-ai/governance-humans
+/scripts/qualify_wheel.* @acgs-ai/governance-humans
+/scripts/qualify_wheel/** @acgs-ai/governance-humans
+/scripts/release_candidate.* @acgs-ai/governance-humans
+/scripts/release_candidate/** @acgs-ai/governance-humans
+/scripts/run_governance_regression.* @acgs-ai/governance-humans
+/scripts/run_governance_regression/** @acgs-ai/governance-humans
+/tests/red_team/__pycache__/governance_fail_closed_cases.* @acgs-ai/governance-humans
+/tests/red_team/governance_fail_closed_cases.* @acgs-ai/governance-humans
+/tests/red_team/governance_fail_closed_cases/** @acgs-ai/governance-humans
 
 # control_plane
 /control-plane/** @acgs-ai/governance-humans
