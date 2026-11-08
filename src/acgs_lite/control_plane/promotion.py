@@ -242,14 +242,28 @@ class PromotionGate:
         decision, decided = self._pdp._decide_attested(request)
         if not decision.allowed or decided is None:
             raise PromotionRejected(f"PDP denied promotion: {decision.reason}", decision)
-        if self._incident_lock is not None:
-            # A PDP listener may have declared an incident (or moved the
-            # holder) during the decision: re-check before the receipt.
-            denial = self._incident_lock.write_denial(principal)
-            if denial is not None:
-                raise PromotionRejected(f"incident: {denial}", decision)
+        if self._incident_lock is None:
+            try:
+                # The receipt cites the gate-attested approvers, not host input.
+                return self._append_promotion(decision, decided)
+            except ReceiptEmissionError as exc:
+                raise PromotionRejected(f"promotion receipt could not be emitted: {exc}") from exc
+        from acgs_lite.control_plane.incident import IncidentLockError
+
         try:
-            # The receipt cites the gate-attested approvers, not host input.
-            return self._append_promotion(decision, decided)
-        except ReceiptEmissionError as exc:
-            raise PromotionRejected(f"promotion receipt could not be emitted: {exc}") from exc
+            # Held from the re-check through the receipt append, so an
+            # incident cannot be declared between the check and the commit.
+            with self._incident_lock._locked():
+                # A PDP listener may have declared an incident (or moved the
+                # holder) during the decision: re-check before the receipt.
+                denial = self._incident_lock.write_denial(principal)
+                if denial is not None:
+                    raise PromotionRejected(f"incident: {denial}", decision)
+                try:
+                    return self._append_promotion(decision, decided)
+                except ReceiptEmissionError as exc:
+                    raise PromotionRejected(
+                        f"promotion receipt could not be emitted: {exc}"
+                    ) from exc
+        except IncidentLockError as exc:
+            raise PromotionRejected(f"incident lock unavailable: {exc}", decision) from exc

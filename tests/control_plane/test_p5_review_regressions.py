@@ -350,3 +350,104 @@ def test_demo_write_file_refuses_dotdot(tmp_path: Path) -> None:
     assert not (tmp_path / "workspace" / "other").exists()
     with pytest.raises(ValueError):
         registered["write_file"]("../escape.md", "x")
+
+
+class TestDeclareWriteFailureLiveInstances:
+    """Security re-review (HIGH): a receipted declare whose state write fails
+    must deny writes on live instances, without a restart."""
+
+    def test_live_instances_deny(
+        self, tmp_path: Path, ledger_pdp: PolicyDecisionPoint, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        lock = _lock(tmp_path, pdp=ledger_pdp)
+        lock.declare_incident(COMMANDER, "inc-a")
+        lock.resolve(COMMANDER)
+        other = _lock(tmp_path, pdp=ledger_pdp)  # built before the failed declare
+        assert lock.write_denial(BOB) is None and other.write_denial(BOB) is None
+
+        def crash(payload: Any) -> None:
+            raise OSError("disk gone")
+
+        monkeypatch.setattr(lock, "_write", crash)
+        with pytest.raises(OSError):
+            lock.declare_incident(COMMANDER, "inc-b")
+        assert lock.write_denial(BOB) is not None
+        assert other.write_denial(BOB) is not None
+
+
+def _hold_and_run(lock: IncidentMutationLock, action: Any) -> list[Any]:
+    """Run *action* in a thread while this thread holds the incident lock;
+    return [outcome] once it finishes (it must wait for the lock)."""
+    outcome: list[Any] = []
+    done = threading.Event()
+
+    def run() -> None:
+        try:
+            outcome.append(action())
+        except Exception as exc:
+            outcome.append(exc)
+        done.set()
+
+    with lock._locked():
+        worker = threading.Thread(target=run)
+        worker.start()
+        assert not done.wait(0.3), "commit did not wait for the incident lock"
+    worker.join(5)
+    assert done.is_set()
+    return outcome
+
+
+class TestCommitHoldsIncidentLock:
+    """Security re-review (LOW): recheck and commit run under the lock."""
+
+    def test_core_write_waits(
+        self,
+        tmp_path: Path,
+        constitution: Constitution,
+        permit_all: PolicySet,
+        approval_gate: Any,
+        approver_factory: Any,
+    ) -> None:
+        pytest.importorskip("cryptography")
+        registry = DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
+        lock = _lock(tmp_path)
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, approval_gate=approval_gate, registry=registry
+        ) as pdp:
+            writer = CoreChangeWriter(pdp, incident_lock=lock)
+            approval = approver_factory("dave")(writer.action_hash_for(BOB, "policy/x.yaml", b"x"))
+            outcome = _hold_and_run(
+                lock, lambda: writer.write_core(BOB, "policy/x.yaml", b"x", approvals=[approval])
+            )
+        assert outcome[0].allowed
+        assert (tmp_path / "policy" / "x.yaml").read_bytes() == b"x"
+
+    def test_promotion_waits(
+        self, tmp_path: Path, constitution: Constitution, permit_all: PolicySet
+    ) -> None:
+        pytest.importorskip("cryptography")
+        from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner
+
+        ledger = ReceiptLedger(
+            Ed25519ReceiptSigner.from_seed(b"\x0a" * 32, key_id="gate"),
+            store=InMemoryReceiptStore(),
+        )
+        runs = TrustedRunRegistry()
+        run = ExternalRunRef("ci", "8", EvidenceSource.CI_SYSTEM, artifact_digest=DIGEST)
+        runs.register_run(Principal("ci-bot", PrincipalKind.SERVICE), run, conclusion="success")
+        lock = _lock(tmp_path)
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, receipt_ledger=ledger
+        ) as pdp:
+            gate = PromotionGate(ledger, runs, pdp=pdp, incident_lock=lock)
+            outcome = _hold_and_run(
+                lock,
+                lambda: gate.promote(
+                    Principal("alice", PrincipalKind.HUMAN),
+                    "cand-2",
+                    candidate_digest=DIGEST,
+                    evidence=[run],
+                    approvers=[BOB],
+                ),
+            )
+        assert outcome[0].receipt.kind is ReceiptKind.PROMOTION

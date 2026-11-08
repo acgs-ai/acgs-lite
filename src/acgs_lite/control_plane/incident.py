@@ -172,6 +172,8 @@ class IncidentMutationLock:
             raise ValueError("incident state must live under the immutable core")
         # TODO(control-plane-gap): without a registry the state path is not
         # checked against the core; pass one so no agent tool can write it.
+        self._ledger_seen = 0
+        self._ledger_scan: str | None = None
         self._ledger_incident = self._ledger_unresolved()
         self._ledger_open = self._ledger_incident is not None
         if not self._ledger_open:
@@ -193,8 +195,12 @@ class IncidentMutationLock:
         ledger = None if pdp is None else pdp.receipt_ledger
         if ledger is None:
             return None
-        open_incident: str | None = None
-        for signed in ledger.receipts():
+        # Incremental: only receipts appended since the last scan are read, so
+        # re-checking on every write decision stays cheap.
+        receipts = ledger.receipts()
+        start = self._ledger_seen if self._ledger_seen <= len(receipts) else 0
+        open_incident = self._ledger_scan if start else None
+        for signed in receipts[start:]:
             receipt = signed.receipt
             if not receipt.allowed:
                 continue
@@ -202,6 +208,8 @@ class IncidentMutationLock:
                 open_incident = receipt.resource
             elif receipt.action == RESOLVE_ACTION:
                 open_incident = None
+        self._ledger_seen = len(receipts)
+        self._ledger_scan = open_incident
         return open_incident
 
     @contextlib.contextmanager
@@ -285,6 +293,12 @@ class IncidentMutationLock:
             return None
         state = _parse(json.loads(text))
         self._ever_declared = True
+        if state.status == "resolved" and self._pdp is not None:
+            # Re-read the ledger tail: another instance (or this one, whose
+            # state write failed) may have receipted a declare since.
+            ledger_incident = self._ledger_unresolved()
+            self._ledger_open = ledger_incident is not None
+            self._ledger_incident = ledger_incident
         if self._ledger_open and (
             state.status == "resolved" or state.incident_id != self._ledger_incident
         ):
@@ -373,11 +387,13 @@ class IncidentMutationLock:
             if existing is not None:
                 raise IncidentLockError(f"incident {existing.incident_id!r} is already declared")
             self._decide(commander, DECLARE_ACTION, incident_id)
-            state = IncidentState(incident_id, commander.canonical_id, None, None, self._clock())
-            self._write(self._payload(state, None))
+            # The declare is receipted: deny writes from now on, even if the
+            # state write below fails (state() then disagrees -> denied).
             self._ever_declared = True
             self._ledger_open = self._pdp is not None
             self._ledger_incident = incident_id if self._ledger_open else None
+            state = IncidentState(incident_id, commander.canonical_id, None, None, self._clock())
+            self._write(self._payload(state, None))
             self._log("declare", commander, incident_id=incident_id)
             return state
 
