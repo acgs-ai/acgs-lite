@@ -73,7 +73,7 @@ def _dispatcher(
     return d
 
 
-ARGS = {"path": "workspace/a"}
+ARGS = {"path": "workspace/a.txt"}
 
 
 class TestEnforcement:
@@ -88,7 +88,7 @@ class TestEnforcement:
             d.dispatch(AGENT, "write", ARGS)
         with pytest.raises(ToolDenied):
             d.dispatch(AGENT, "read", ARGS)  # no autonomy controller: everything stops
-        assert calls == ["write:workspace/a", "write:workspace/a"]
+        assert calls == ["write:workspace/a.txt", "write:workspace/a.txt"]
         assert budgets.state(AGENT).iterations == 2
 
     @pytest.mark.parametrize(
@@ -109,7 +109,7 @@ class TestEnforcement:
         budgets.charge(AGENT, reporter=PROXY, **charge)
         with pytest.raises(ToolDenied, match="budget exhausted"):
             d.dispatch(AGENT, "write", ARGS)
-        assert calls == ["write:workspace/a"]
+        assert calls == ["write:workspace/a.txt"]
 
     def test_wall_clock_from_harness_clock(self, pdp: PolicyDecisionPoint) -> None:
         clock = Clock()
@@ -121,7 +121,7 @@ class TestEnforcement:
         clock.now += 30
         with pytest.raises(ToolDenied, match="wall_clock_s"):
             d.dispatch(AGENT, "write", ARGS)
-        assert calls == ["write:workspace/a"]
+        assert calls == ["write:workspace/a.txt"]
         with pytest.raises(BudgetExhausted) as excinfo:
             budgets.check(AGENT)
         assert excinfo.value.exhausted == ("wall_clock_s",)
@@ -143,7 +143,7 @@ class TestEnforcement:
         with pytest.raises(ToolDenied, match="no budget run"):
             d.dispatch(AGENT, "write", ARGS)
         d.dispatch(ALICE, "read", ARGS)
-        assert calls == ["read:workspace/a"]
+        assert calls == ["read:workspace/a.txt"]
 
     def test_validation(self) -> None:
         for bad in ({"spend_usd": -1}, {"tokens": "5"}, {"iterations": float("inf")}):
@@ -177,7 +177,7 @@ class TestDemotion:
         d.dispatch(AGENT, "read", ARGS)  # T0 read still allowed
         with pytest.raises(ToolDenied, match="budget exhausted"):
             d.dispatch(AGENT, "write", ARGS)
-        assert calls == ["write:workspace/a", "read:workspace/a"]
+        assert calls == ["write:workspace/a.txt", "read:workspace/a.txt"]
 
         with pytest.raises(AutonomyRestoreRejected):
             autonomy.restore(AGENT, AGENT)
@@ -188,7 +188,7 @@ class TestDemotion:
         budgets.start_run(AGENT, BudgetLimits(iterations=5))
         assert autonomy.level(AGENT) is AutonomyLevel.T1_PREAUTHORIZED
         d.dispatch(AGENT, "write", ARGS)
-        assert calls[-1] == "write:workspace/a"
+        assert calls[-1] == "write:workspace/a.txt"
 
     def test_level_check_alone_demotes_on_reported_spend(self, pdp: PolicyDecisionPoint) -> None:
         budgets = BudgetLedger(clock=Clock())
@@ -202,4 +202,4 @@ class TestDemotion:
         with pytest.raises(ToolDenied):
             d.dispatch(AGENT, "write", ARGS)
         d.dispatch(AGENT, "read", ARGS)
-        assert calls == ["read:workspace/a"]
+        assert calls == ["read:workspace/a.txt"]
