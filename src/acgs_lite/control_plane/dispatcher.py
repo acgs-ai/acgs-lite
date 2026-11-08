@@ -227,6 +227,8 @@ class _Authorized:
     decisions: tuple[Decision, ...]
     plan: _CallPlan
     admission: _BreakerAdmission | None = None
+    change_id: str | None = None
+    paths: tuple[str, ...] = ()
 
 
 class _Denied(Exception):
@@ -1456,7 +1458,7 @@ class GovernedToolDispatcher:
                 session,
                 decisions[0].decision_id if decisions else None,
             )
-        return _Authorized(spec, args, decisions, plan, admission)
+        return _Authorized(spec, args, decisions, plan, admission, change_id, tuple(paths))
 
     def _after_run(
         self,
@@ -1496,6 +1498,22 @@ class GovernedToolDispatcher:
         from acgs_lite.control_plane.incident import IncidentLockError
 
         with contextlib.ExitStack() as stack:
+            owners = self._ownership
+            if owners is not None and not auth.spec.read_only and auth.change_id is not None:
+                try:
+                    stack.enter_context(owners.execution(principal, auth.change_id))
+                    # Reassignment may have occurred after authorization, even
+                    # to the same writer with different paths or branch.
+                    self._ownership_check(
+                        principal, auth.spec, auth.args, auth.paths, auth.change_id
+                    )
+                except (OwnershipDenied, _Denied) as exc:
+                    raise self._pre_denial(
+                        principal,
+                        tool_name,
+                        f"change ownership: {exc}",
+                        group_id=auth.decisions[0].decision_id if auth.decisions else None,
+                    ) from exc
             lock = self._incident_lock
             if lock is not None and not (auth.spec.read_only and auth.plan.tier == ActionTier.T0):
                 try:
