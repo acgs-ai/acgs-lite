@@ -136,6 +136,11 @@ class TestNormalizeForMatching:
     def test_default_ignorable_non_cf_dropped(self, code_point: int) -> None:
         assert normalize_for_matching(f"de{chr(code_point)}lete") == "delete"
 
+    def test_ascii_hidden_controls_dropped_whitespace_kept(self) -> None:
+        assert normalize_for_matching("de\x00l\x01e\x1bt\x7fe") == "delete"
+        assert normalize_for_matching("a\tb\nc\rd") == "a\tb\nc\rd"
+        assert normalize_for_matching("dé\x00lete") == "délete"
+
     def test_combining_marks_outside_default_ignorable_kept(self) -> None:
         # U+0332 COMBINING LOW LINE (Mn) has no precomposed form and is not ignorable.
         assert normalize_for_matching("x\u0332y") == "x\u0332y"
@@ -218,6 +223,34 @@ class TestEngineValidate:
         assert exc_info.value.rule_id in {"NO-DELETE", "NO-EXFIL"}
         result = _engine(strict=False).validate("exfiltrate and ｄｅｌｅｔｅ it")
         assert {v.rule_id for v in result.violations} == {"NO-DELETE", "NO-EXFIL"}
+
+    @pytest.mark.parametrize(
+        "action",
+        ["please del\x00ete the records", "please de\x01lete the records", "dele\x7fte it"],
+    )
+    @pytest.mark.parametrize("runtime_filtered", [False, True])
+    def test_ascii_control_spliced_keyword_denied(
+        self, backend: str, action: str, runtime_filtered: bool
+    ) -> None:
+        result = _engine(strict=False, runtime_filtered=runtime_filtered).validate(action)
+        assert [v.rule_id for v in result.violations] == ["NO-DELETE"]
+        assert result.violations[0].matched_content == action
+        with pytest.raises(ConstitutionalViolationError):
+            _engine(strict=True, runtime_filtered=runtime_filtered).validate(action)
+
+    @pytest.mark.parametrize(
+        "action",
+        ["send 123-45-6789", "send 123-45-6789 ️", f"send 123-45-6789{ZWSP}"],
+    )
+    def test_pattern_only_constitution_denies(self, backend: str, action: str) -> None:
+        # No keyword rules: no keyword index or anchor, so only the pattern can deny.
+        ssn_only = Constitution.from_rules(
+            [r for r in _rules() if r.id == "NO-SSN"], name="pattern-only"
+        )
+        result = GovernanceEngine(ssn_only, strict=False).validate(action)
+        assert [v.rule_id for v in result.violations] == ["NO-SSN"]
+        with pytest.raises(ConstitutionalViolationError):
+            GovernanceEngine(ssn_only, strict=True).validate(action)
 
     def test_original_and_normalized_hits_are_deduplicated(self, backend: str) -> None:
         result = _engine(strict=False).validate("delete then ｄｅｌｅｔｅ again")

@@ -72,14 +72,33 @@ def normalize_for_matching(text: str) -> str:
     Default_Ignorable_Code_Point (variation selectors, the combining grapheme
     joiner, Hangul fillers), all of which NFKC keeps and none of which render.
     Other combining marks are kept, so accented text is not folded.
-    ASCII text is returned unchanged: it is NFKC-stable and has neither.
+    Non-whitespace control characters (category ``Cc``, e.g. NUL, DEL) are
+    dropped too, so ``del\\x00ete`` matches ``delete``; tab and newline stay.
+    ASCII text without such controls is returned unchanged: it is NFKC-stable.
     """
     if text.isascii():
-        return text
+        return _ASCII_HIDDEN_CONTROL_RE.sub("", text) if _has_ascii_control(text) else text
     folded = unicodedata.normalize("NFKC", text)
-    return "".join(
-        c for c in folded if ord(c) not in _DEFAULT_IGNORABLE and unicodedata.category(c) != "Cf"
-    )
+    return "".join(c for c in folded if not _is_hidden_char(c))
+
+
+_ASCII_HIDDEN_CONTROL_RE = re.compile(r"[\x00-\x08\x0e-\x1b\x7f]")
+
+
+def _has_ascii_control(text: str) -> bool:
+    return _ASCII_HIDDEN_CONTROL_RE.search(text) is not None
+
+
+def _is_hidden_char(c: str) -> bool:
+    if ord(c) in _DEFAULT_IGNORABLE:
+        return True
+    category = unicodedata.category(c)
+    return category == "Cf" or (category == "Cc" and not c.isspace())
+
+
+def _is_plain_ascii(text: str) -> bool:
+    """ASCII with no hidden control characters: matching it needs no second pass."""
+    return text.isascii() and not _has_ascii_control(text)
 
 
 def _match_variants(text: str) -> tuple[str, ...]:
@@ -89,15 +108,15 @@ def _match_variants(text: str) -> tuple[str, ...]:
     normalization can only add matches and never hides one the original text hits.
     """
     lowered = text.lower()
-    if text.isascii():
+    if _is_plain_ascii(text):
         return (lowered,)
     normalized = normalize_for_matching(text).lower()
     return (lowered,) if normalized == lowered else (lowered, normalized)
 
 
 def _has_distinct_normalized_form(text: str) -> bool:
-    """True when matching *text* needs a second, normalized pass (never for ASCII)."""
-    return not text.isascii() and normalize_for_matching(text).lower() != text.lower()
+    """True when matching *text* needs a second, normalized pass (never for plain ASCII)."""
+    return not _is_plain_ascii(text) and normalize_for_matching(text).lower() != text.lower()
 
 
 def _needs_normalized_pass(action: str, context: dict[str, Any] | None) -> bool:
@@ -911,8 +930,10 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                             violations = []
                         violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
             return violations
-        elif self._combined_findall is not None:
-            _m = self._combined_search(text_lower)
+        elif self._combined_findall is not None or self._pattern_rule_idxs:
+            # No keyword index (pattern-only constitution): skip straight to the
+            # pattern fallback below instead of evaluating nothing.
+            _m = self._combined_search(text_lower) if self._combined_search is not None else None
             if _m:
                 fired = 0
                 kw0 = _m.group(0)
@@ -1214,7 +1235,9 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                     True,
                     violations,
                 )
-            elif self._combined_findall is not None:
+            elif self._combined_findall is not None or self._pattern_rule_idxs:
+                # Pattern-only constitutions (no keyword index, no Aho-Corasick)
+                # must still evaluate their patterns, or they fail open.
                 violations = self._validate_python_regex(
                     action,
                     matcher_strict,
