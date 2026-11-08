@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -26,6 +28,8 @@ from acgs_lite.control_plane.breaker import (
     TriggerRegistry,
 )
 from acgs_lite.control_plane.budgets import BudgetLedger
+from acgs_lite.control_plane.incident import IncidentMutationLock
+from acgs_lite.control_plane.killswitch import KillSwitch
 from acgs_lite.control_plane.telemetry import (
     DecisionObserved,
     InMemoryTelemetryStore,
@@ -162,6 +166,80 @@ class TestAdmissionRecheckedBeforeInvoke:
                 d.dispatch(AGENT, "write", {"path": "workspace/a"}, trigger_id="loop-a")
         assert tripped and calls == []
         rec.record_override(denied.value.decision.decision_id, ALICE, "human_overrode_deny")
+        metric = OversightMetrics(store).override_rate("agent")
+        assert metric.denominator == 1
+        assert metric.numerator == 1
+
+    @pytest.mark.parametrize("mode", ["sync", "async_sync", "async_coroutine", "await_resume"])
+    @pytest.mark.parametrize("interruption", ["halt", "incident"])
+    async def test_halt_recheck_retains_dispatch_group(
+        self,
+        constitution: Constitution,
+        permit_all: PolicySet,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        mode: str,
+        interruption: str,
+    ) -> None:
+        store = InMemoryTelemetryStore()
+        recorder = TelemetryRecorder(store, CI)
+        switch = KillSwitch("sys-a", signal_dir=tmp_path / "halt")
+        incident = IncidentMutationLock(
+            registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
+        )
+        calls: list[str] = []
+
+        def interrupt() -> None:
+            if interruption == "halt":
+                switch.engage(ALICE, "halt during dispatch")
+            else:
+                incident.declare_incident(ALICE, "incident-during-dispatch")
+
+        def halt_on_allow(decision: Any) -> None:
+            if decision.allowed and mode != "await_resume":
+                interrupt()
+
+        def write(path: str) -> None:
+            calls.append(path)
+
+        async def awrite(path: str) -> None:
+            calls.append(path)
+
+        original = asyncio.to_thread
+
+        async def halt_after_worker(fn: Any, *args: Any, **kwargs: Any) -> Any:
+            value = await original(fn, *args, **kwargs)
+            interrupt()
+            return value
+
+        if mode == "await_resume":
+            monkeypatch.setattr(asyncio, "to_thread", halt_after_worker)
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, telemetry=recorder, listeners=[halt_on_allow]
+        ) as pdp:
+            d = GovernedToolDispatcher(
+                pdp,
+                permissions=RepositoryPermissions(
+                    DEFAULT_IMMUTABLE_CORE,
+                    [WriteGrant(AGENT.id, PrincipalKind.AGENT, ("workspace/**",))],
+                ),
+                tool_tiers={"write": ActionTier.T1},
+                kill_switch=switch,
+                incident_lock=incident,
+            )
+            d.register(
+                "write",
+                awrite if mode in {"async_coroutine", "await_resume"} else write,
+                path_params={"path"},
+                merge_capable=False,
+            )
+            with pytest.raises(ToolDenied, match="kill switch|incident") as denied:
+                if mode == "sync":
+                    d.dispatch(AGENT, "write", {"path": "workspace/a.txt"})
+                else:
+                    await d.adispatch(AGENT, "write", {"path": "workspace/a.txt"})
+        assert calls == []
+        recorder.record_override(denied.value.decision.decision_id, ALICE, "human_overrode_deny")
         metric = OversightMetrics(store).override_rate("agent")
         assert metric.denominator == 1
         assert metric.numerator == 1
