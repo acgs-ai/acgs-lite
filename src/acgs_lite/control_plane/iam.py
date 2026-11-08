@@ -155,7 +155,10 @@ class RepositoryPermissions:
                 or grant.principal_kind is not principal.kind
             ):
                 continue
-            if any(compile_glob(glob).fullmatch(normalized) for glob in grant.path_globs):
+            if any(
+                compile_glob(glob, case_sensitive=True).fullmatch(normalized)
+                for glob in grant.path_globs
+            ):
                 return True
         return False
 

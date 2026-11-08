@@ -466,6 +466,52 @@ class TestOpaqueSubclassBoundary:
 
 
 class TestFinalReviewBoundaries:
+    def test_grants_preserve_case_but_core_classification_remains_conservative(self) -> None:
+        permissions = RepositoryPermissions(
+            DEFAULT_IMMUTABLE_CORE,
+            [WriteGrant(AGENT.id, PrincipalKind.AGENT, ("Workspace/**",))],
+        )
+        assert permissions.can_write(AGENT, "Workspace/file.txt")
+        assert not permissions.can_write(AGENT, "workspace/file.txt")
+        assert not permissions.can_write(AGENT, "Workspace/.ENV")
+        assert DEFAULT_IMMUTABLE_CORE.is_core("EVALUATOR/score.py")
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "src/acgs_lite/evals/runner.py",
+            "src/acgs_lite/evals/schema.py",
+            "src/acgs_lite/evals/report.py",
+            "scripts/check_critical_coverage.py",
+            "Makefile",
+        ],
+    )
+    def test_real_grader_and_gate_files_are_core(self, pdp: PolicyDecisionPoint, path: str) -> None:
+        assert DEFAULT_IMMUTABLE_CORE.is_core(path)
+        assert not pdp.decide(DecisionRequest(AGENT, "file.write", path, ActionTier.T1)).allowed
+        with pytest.raises(IAMGrantRejected):
+            RepositoryPermissions(
+                DEFAULT_IMMUTABLE_CORE, [WriteGrant(AGENT.id, PrincipalKind.AGENT, (path,))]
+            )
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "workspace./x.py",
+            "workspace../x.py",
+            "workspace\\x.py",
+            "Workspace/x.py",
+            "WORKSPACE/x.py",
+        ],
+    )
+    def test_nonportable_alias_cannot_escape_workspace_grant(
+        self, pdp: PolicyDecisionPoint, path: str
+    ) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied):
+            dispatcher.dispatch(AGENT, "write", {"path": path})
+        assert sink.calls == []
+
     def test_namespaced_read_retains_sensitive_path_category(
         self, pdp: PolicyDecisionPoint
     ) -> None:
