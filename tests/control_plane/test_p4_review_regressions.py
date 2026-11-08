@@ -146,7 +146,7 @@ class TestAdmissionRecheckedBeforeInvoke:
         self, constitution: Constitution, permit_all: PolicySet
     ) -> None:
         calls: list[str] = []
-        breaker, rec, _, _ = _breaker(BreakerPolicy(max_rollbacks=1, cohort_suspension=False))
+        breaker, rec, _, store = _breaker(BreakerPolicy(max_rollbacks=1, cohort_suspension=False))
         tripped: list[bool] = []
 
         def trip_on_allow(decision: Any) -> None:
@@ -155,12 +155,16 @@ class TestAdmissionRecheckedBeforeInvoke:
                 rec.record_rollback("loop-a", "c1", agent=AGENT)
 
         with PolicyDecisionPoint.for_constitution(
-            constitution, permit_all, listeners=[trip_on_allow]
+            constitution, permit_all, listeners=[trip_on_allow], telemetry=rec
         ) as pdp:
             d = _dispatcher(pdp, breaker, calls)
-            with pytest.raises(ToolDenied, match="autonomous mode suspended"):
+            with pytest.raises(ToolDenied, match="autonomous mode suspended") as denied:
                 d.dispatch(AGENT, "write", {"path": "workspace/a"}, trigger_id="loop-a")
         assert tripped and calls == []
+        rec.record_override(denied.value.decision.decision_id, ALICE, "human_overrode_deny")
+        metric = OversightMetrics(store).override_rate("agent")
+        assert metric.denominator == 1
+        assert metric.numerator == 1
 
 
 class TestPreDenialTelemetryKind:

@@ -583,6 +583,7 @@ class PolicyDecisionPoint:
         error: str = "dispatch_denied",
         telemetry: bool = True,
         principal_kind: PrincipalKind | None = None,
+        group_id: str | None = None,
     ) -> Decision:
         """In-package (dispatcher): :meth:`record_denial`, optionally without
         telemetry for dry runs. It can still only record a deny.
@@ -608,6 +609,7 @@ class PolicyDecisionPoint:
             receipt=receipted,
             telemetry=telemetry,
             principal_kind=principal_kind,
+            group_id=group_id,
         )
 
     def _pre_denial_within_limit(self, principal_id: str) -> bool:

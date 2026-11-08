@@ -37,6 +37,7 @@ later phase.
 
 from __future__ import annotations
 
+import bisect
 import dataclasses
 import importlib
 import json
@@ -233,11 +234,13 @@ class DecisionObserved(OversightEvent):
 @dataclass(frozen=True, kw_only=True)
 class _ApprovalEvent(OversightEvent):
     action_hash: str
+    cycle_id: str | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
         if not isinstance(self.action_hash, str) or not _HASH.fullmatch(self.action_hash):
             raise ValueError("action_hash must be 'sha256:<64 lowercase hex>'")
+        _check_optional_id(self.cycle_id, "cycle_id")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -699,28 +702,49 @@ class TelemetryRecorder:
         action_hash: str,
         *,
         principal_kind: PrincipalKind | None = None,
+        cycle_id: str | None = None,
         at: float | None = None,
     ) -> OversightEvent:
         return self._append(
             ApprovalRequested(
-                action_hash=action_hash, principal_kind=principal_kind, **self._common(at)
+                action_hash=action_hash,
+                cycle_id=cycle_id,
+                principal_kind=principal_kind,
+                **self._common(at),
             )
         )
 
     def record_approval_granted(
-        self, action_hash: str, approver_id: str, *, at: float | None = None
+        self,
+        action_hash: str,
+        approver_id: str,
+        *,
+        cycle_id: str | None = None,
+        at: float | None = None,
     ) -> OversightEvent:
         return self._append(
-            ApprovalGranted(action_hash=action_hash, approver_id=approver_id, **self._common(at))
+            ApprovalGranted(
+                action_hash=action_hash,
+                cycle_id=cycle_id,
+                approver_id=approver_id,
+                **self._common(at),
+            )
         )
 
     def record_approval_denied(
-        self, action_hash: str, approver: Principal, *, at: float | None = None
+        self,
+        action_hash: str,
+        approver: Principal,
+        *,
+        cycle_id: str | None = None,
+        at: float | None = None,
     ) -> OversightEvent:
         """A human approver explicitly declined to approve *action_hash*."""
         human = _require_human(approver, "approver")
         return self._append(
-            ApprovalDenied(action_hash=action_hash, approver_id=human.id, **self._common(at))
+            ApprovalDenied(
+                action_hash=action_hash, cycle_id=cycle_id, approver_id=human.id, **self._common(at)
+            )
         )
 
     def record_override(
@@ -1015,32 +1039,50 @@ class OversightMetrics:
         """Latency of requests in the window, segmented by requesting principal.
 
         Legacy requests without attribution and SERVICE requests count only
-        under ``all``. Repeated requests retain the earliest attribution.
+        under ``all``. Requests deduplicate within a cycle; legacy events without a cycle ID
+        retain their original per-action aggregation.
         """
         _check_segment(segment)
-        requested: dict[str, ApprovalRequested] = {}
+        requested: dict[tuple[str, str | None], ApprovalRequested] = {}
         for event in self._events(ApprovalRequested):
-            if event.action_hash not in requested or event.at < requested[event.action_hash].at:
-                requested[event.action_hash] = event
+            key = (event.action_hash, event.cycle_id)
+            if key not in requested or event.at < requested[key].at:
+                requested[key] = event
+        cycles_by_action: dict[str, list[ApprovalRequested]] = {}
+        for cycle_request in requested.values():
+            cycles_by_action.setdefault(cycle_request.action_hash, []).append(cycle_request)
+        starts_by_action: dict[str, list[float]] = {}
+        for action, cycles in cycles_by_action.items():
+            cycles.sort(key=lambda request: request.at)
+            starts_by_action[action] = [request.at for request in cycles]
         # Grants are emitted for the earliest approval prefix satisfying both
         # quorum count and roles, so it completed at the latest (a T3 request
         # approved at +10s and +90s took 90s, not 10s). A denial resolves at
         # the first denial.
-        completed: dict[str, float] = {}
-        denied: dict[str, float] = {}
+        completed: dict[tuple[str, str | None], float] = {}
+        denied: dict[tuple[str, str | None], float] = {}
         for event in self._read_all():
             if not isinstance(event, (ApprovalGranted, ApprovalDenied)):
                 continue
-            request = requested.get(event.action_hash)
+            key = (event.action_hash, event.cycle_id)
+            request = requested.get(key)
+            if event.cycle_id is None:
+                request = None
+                # Public legacy recorders identify only the action. Attribute
+                # them to its latest preceding cycle, unless equal start times
+                # make that correlation ambiguous (then require an explicit ID).
+                starts = starts_by_action.get(event.action_hash, [])
+                index = bisect.bisect_right(starts, event.at) - 1
+                if index >= 0 and (index == 0 or starts[index - 1] != starts[index]):
+                    request = cycles_by_action[event.action_hash][index]
+                    key = (request.action_hash, request.cycle_id)
             if request is None or event.at < request.at:
                 continue
             if isinstance(event, ApprovalGranted):
-                completed[event.action_hash] = max(
-                    event.at, completed.get(event.action_hash, event.at)
-                )
+                completed[key] = max(event.at, completed.get(key, event.at))
             else:
-                denied[event.action_hash] = min(event.at, denied.get(event.action_hash, event.at))
-        resolved: dict[str, float] = dict(completed)
+                denied[key] = min(event.at, denied.get(key, event.at))
+        resolved: dict[tuple[str, str | None], float] = dict(completed)
         for action_hash, at in denied.items():
             resolved[action_hash] = min(at, resolved.get(action_hash, at))
         latencies: list[float] = []

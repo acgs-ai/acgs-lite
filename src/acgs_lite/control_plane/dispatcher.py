@@ -19,7 +19,9 @@ then requires, in order:
    command token may resolve to an immutable-core path;
 3. for write tools: no *directory-like* path outside the scratch prefixes
    while the registry has unanchored (``**/``) patterns, because deleting a
-   parent directory deletes the core files beneath it;
+   parent directory deletes the core files beneath it. Existing directories
+   and symlinks are not exempt even in scratch; OS confinement is still
+   required to prevent filesystem changes racing these checks;
 4. PDP permits for a ``tool.call`` decision (``attributes["paths"]`` = the
    declared paths plus every string leaf, at any depth, that classifies as
    core) and for one ``file.write`` (or ``file.read`` for read-only tools)
@@ -99,7 +101,12 @@ from typing import Any
 from acgs_lite.control_plane.action_hash import arguments_digest
 from acgs_lite.control_plane.approvals import ApprovalGate, SignedApproval
 from acgs_lite.control_plane.autonomy import AutonomyController, AutonomyLevel, FailureKind
-from acgs_lite.control_plane.breaker import BreakerState, TriggerCircuitBreaker, valid_trigger_id
+from acgs_lite.control_plane.breaker import (
+    BreakerState,
+    TriggerCircuitBreaker,
+    _BreakerAdmission,
+    valid_trigger_id,
+)
 from acgs_lite.control_plane.budgets import BudgetLedger
 from acgs_lite.control_plane.change_ownership import (
     AGENT_NO_MERGE_ACTIONS,
@@ -214,6 +221,7 @@ class _Authorized:
     args: dict[str, Any]
     decisions: tuple[Decision, ...]
     plan: _CallPlan
+    admission: _BreakerAdmission | None = None
 
 
 class _Denied(Exception):
@@ -240,8 +248,8 @@ def _string_leaves(value: Any, out: list[str], depth: int = 0) -> None:
     elif value_type is bytes:
         try:
             out.append(value.decode("utf-8"))
-        except UnicodeDecodeError:
-            return
+        except UnicodeDecodeError as exc:
+            raise _Denied("byte arguments must be valid UTF-8 for path inspection") from exc
     elif any(value_type is scalar for scalar in _SCALARS):
         return
     elif value_type is dict:
@@ -641,7 +649,13 @@ class GovernedToolDispatcher:
     # -- authorisation -------------------------------------------------
 
     def _pre_denial(
-        self, principal: object, tool_name: object, reason: str, *, telemetry: bool = True
+        self,
+        principal: object,
+        tool_name: object,
+        reason: str,
+        *,
+        telemetry: bool = True,
+        group_id: str | None = None,
     ) -> ToolDenied:
         decision = self._pdp._record_denial(
             reason,
@@ -651,6 +665,7 @@ class GovernedToolDispatcher:
             error="dispatch_denied",
             telemetry=telemetry,
             principal_kind=principal.kind if isinstance(principal, Principal) else None,
+            group_id=group_id,
         )
         return ToolDenied(decision)
 
@@ -685,11 +700,21 @@ class GovernedToolDispatcher:
         # A host that permits ordinary file updates binds a repository root
         # so the existing target can be checked before authorization.
         root = self._registry.repo_root
-        return root is None or not os.path.isfile(posixpath.join(root, normalized))
+        if root is None:
+            return True
+        target = posixpath.join(root, normalized)
+        return os.path.islink(target) or not os.path.isfile(target)
 
     def _in_scratch(self, raw: str) -> bool:
         normalized = self._registry.normalize(raw)
         if normalized is None:
+            return False
+        # Scratch prefixes still contain globally protected names (.env,
+        # conftest.py, etc.). Never exempt an existing directory or symlink:
+        # a recursive operation could mutate protected descendants. Traversal
+        # is not proof of confinement, so leave directory mutations denied.
+        target = posixpath.join(self._registry.repo_root or os.getcwd(), normalized)
+        if os.path.isdir(target) or os.path.islink(target):
             return False
         candidate = normalized.lower() + "/"
         return any(candidate.startswith(prefix) for prefix in self._scratch_prefixes)
@@ -1033,10 +1058,11 @@ class GovernedToolDispatcher:
         trigger_id: str | None,
         session: ScopedCredential | None,
         consume: bool,
-    ) -> None:
+        admission: _BreakerAdmission | None = None,
+    ) -> _BreakerAdmission | None:
         breaker = self._breaker
         if breaker is None or principal.kind is PrincipalKind.HUMAN:
-            return
+            return None
         registry = breaker.registry
         if registry is None:  # pragma: no cover - refused at construction
             raise _Denied("no trigger registry")
@@ -1055,8 +1081,17 @@ class GovernedToolDispatcher:
         for cohort in registry.cohorts_of(principal):
             if breaker.cohort_suspended(cohort, probing=trigger_id):
                 raise _Denied(f"system cohort {cohort} suspended (a bound trigger is not closed)")
-        if not breaker.allow_autonomous(trigger_id, consume=consume):
-            raise _Denied(f"trigger {trigger_id} autonomous mode suspended (circuit breaker open)")
+        if admission is not None:
+            if admission.trigger_id != trigger_id or not breaker._admission_valid(admission):
+                raise _Denied(f"trigger {trigger_id} admission invalidated")
+            return admission
+        if consume:
+            reserved = breaker._reserve_admission(trigger_id)
+            if reserved is not None:
+                return reserved
+        elif breaker.allow_autonomous(trigger_id, consume=False):
+            return None
+        raise _Denied(f"trigger {trigger_id} autonomous mode suspended (circuit breaker open)")
 
     def _autonomy_check(self, principal: Principal, read_t0: bool) -> None:
         if principal.kind is PrincipalKind.HUMAN or self._autonomy is None:
@@ -1074,7 +1109,9 @@ class GovernedToolDispatcher:
         read_t0: bool,
         trigger_id: str | None,
         session: ScopedCredential | None,
-    ) -> None:
+        group_id: str | None,
+        admission: _BreakerAdmission | None = None,
+    ) -> _BreakerAdmission | None:
         """Re-admit after the PDP: a failure observed meanwhile may have
         tripped the breaker, suspended the cohort or demoted the agent. Only
         here is the half-open probe spent (atomically, if still available)."""
@@ -1089,12 +1126,17 @@ class GovernedToolDispatcher:
                 # is_demoted(), not level(): level() would also demote on the
                 # budget this very call was just charged against.
                 raise _Denied("autonomy demoted to P0_ONLY: read-only T0 tools only")
-            self._breaker_check(principal, trigger_id, session, consume=True)
+            return self._breaker_check(
+                principal, trigger_id, session, consume=True, admission=admission
+            )
         except _Denied as exc:
-            raise self._pre_denial(principal, tool_name, str(exc)) from exc
+            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
         except Exception as exc:
             raise self._pre_denial(
-                principal, tool_name, f"harness check failed: {type(exc).__name__}"
+                principal,
+                tool_name,
+                f"harness check failed: {type(exc).__name__}",
+                group_id=group_id,
             ) from exc
 
     def _harness_checks(
@@ -1350,10 +1392,18 @@ class GovernedToolDispatcher:
         if consume and plan.backup_key is not None and not self._consume_backup(plan.backup_key):
             self._record_denial_failure(principal)
             raise self._pre_denial(principal, tool_name, "backup run already consumed")
+        admission = None
         if consume:
             read_t0 = spec.read_only and plan.tier == ActionTier.T0
-            self._final_admission(principal, tool_name, read_t0, trigger_id, session)
-        return _Authorized(spec, args, decisions, plan)
+            admission = self._final_admission(
+                principal,
+                tool_name,
+                read_t0,
+                trigger_id,
+                session,
+                decisions[0].decision_id if decisions else None,
+            )
+        return _Authorized(spec, args, decisions, plan, admission)
 
     def _after_run(
         self,
@@ -1523,13 +1573,16 @@ class GovernedToolDispatcher:
         tier: ActionTier | None = None,
     ) -> ToolResult:
         """Authorise (off the event loop) then invoke a sync or async tool."""
-        auth = await asyncio.to_thread(
-            lambda: self._authorize(
+        approver_tuple = tuple(approvers)
+        approval_tuple = tuple(approvals)
+
+        def invoke() -> tuple[_Authorized, Any]:
+            auth = self._authorize(
                 principal,
                 tool_name,
                 arguments,
-                approvers=tuple(approvers),
-                approvals=tuple(approvals),
+                approvers=approver_tuple,
+                approvals=approval_tuple,
                 authored_by=authored_by,
                 credential=credential,
                 consume=True,
@@ -1541,14 +1594,47 @@ class GovernedToolDispatcher:
                 change_id=change_id,
                 tier=tier,
             )
-        )
-        self._recheck_kill_switch(principal, tool_name, auth)
-        try:
-            value = auth.spec.fn(**auth.args)
-            if inspect.isawaitable(value):
+            self._recheck_kill_switch(principal, tool_name, auth)
+            try:
+                value = auth.spec.fn(**auth.args)
+            except BaseException:
+                self._after_run(principal, tool_name, auth, success=False)
+                raise
+            if not inspect.isawaitable(value):
+                # Finish synchronous bookkeeping even if the awaiting client
+                # is cancelled while the worker is executing its tool.
+                self._after_run(principal, tool_name, auth, success=True, value=value)
+            return auth, value
+
+        auth, value = await asyncio.to_thread(invoke)
+        if inspect.isawaitable(value):
+            try:
+                self._recheck_kill_switch(principal, tool_name, auth)
+                session = self._verify_credential(principal, tool_name, credential)
+                self._final_admission(
+                    principal,
+                    tool_name,
+                    auth.spec.read_only and auth.plan.tier == ActionTier.T0,
+                    auth.admission.trigger_id if auth.admission is not None else trigger_id,
+                    session,
+                    auth.decisions[0].decision_id if auth.decisions else None,
+                    admission=auth.admission,
+                )
+            except BaseException as exc:
+                if inspect.iscoroutine(value):
+                    value.close()
+                if isinstance(exc, _Denied):
+                    raise self._pre_denial(
+                        principal,
+                        tool_name,
+                        str(exc),
+                        group_id=auth.decisions[0].decision_id if auth.decisions else None,
+                    ) from exc
+                raise
+            try:
                 value = await value
-        except BaseException:
-            self._after_run(principal, tool_name, auth, success=False)
-            raise
-        self._after_run(principal, tool_name, auth, success=True, value=value)
+            except BaseException:
+                self._after_run(principal, tool_name, auth, success=False)
+                raise
+            self._after_run(principal, tool_name, auth, success=True, value=value)
         return ToolResult(tool_name, value, auth.decisions)
