@@ -9,7 +9,7 @@ import os
 import stat
 import threading
 import weakref
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
@@ -30,20 +30,34 @@ from acgs_lite.legitimacy import (
     LegitimacyInvariantError,
     TrustedExecutionContext,
 )
+from acgs_lite.legitimacy.authorization import EngineDecision, build_issue_receipt
 from acgs_lite.legitimacy.invocation import (
+    ArgumentNotDigestible,
     InvocationBinding,
     PolicyBinding,
     bind_invocation,
     bind_policy,
 )
 from acgs_lite.legitimacy.ledger import AttemptStatus, InProcessGrantLedger
+from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner
+from acgs_lite.serialization import GovernancePayloadError
 from acgs_lite.z3_verify import VerificationStatus, Z3VerifyResult
+
+
+def _production_signing() -> dict[str, object]:
+    """Pinned, non-ephemeral Ed25519 execution signer the production profile requires."""
+    signer = Ed25519ReceiptSigner.from_seed(bytes(range(32)))
+    return {
+        "receipt_signer": signer,
+        "trusted_execution_keys": {signer.key_id: signer.public_key_hex()},
+    }
 
 
 def _guard(**kwargs: Any) -> GovernedCallable:
     return GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
         **kwargs,
     )
 
@@ -549,10 +563,22 @@ def test_authentic_grant_without_exact_target_is_not_production_authority() -> N
 
     protected = guard(operation)
     normal = protected.issue_grant(1)
+    invocation = bind_invocation(operation, (1,), {}, include_receiver=True)
+    policy = bind_policy(guard.constitution)
+    # One receipt mints at most one grant, so the issued receipt cannot be re-minted.
+    with pytest.raises(LegitimacyInvariantError, match="already minted"):
+        guard._authority.issue(receipt=normal.receipt, invocation=invocation, policy=policy)
+    # An otherwise authentic grant minted without the exact target still cannot execute.
+    grant_id = guard._authority.allocate_grant_id()
+    fresh = build_issue_receipt(
+        func=operation,
+        invocation=invocation,
+        policy=policy,
+        decision=EngineDecision("ALLOW", (BASELINE_CONSTRAINT_MARKER,), (), None, 1),
+        grant_id=grant_id,
+    )
     unbound = guard._authority.issue(
-        receipt=normal.receipt,
-        invocation=bind_invocation(operation, (1,), {}, include_receiver=True),
-        policy=bind_policy(guard.constitution),
+        receipt=fresh, invocation=invocation, policy=policy, grant_id=grant_id
     )
     with pytest.raises(LegitimacyInvariantError, match="callable identity"):
         protected(1, execution_grant=unbound)
@@ -592,7 +618,8 @@ def test_opaque_result_never_records_completion(tmp_path: Path, asynchronous: bo
     protected = guard(async_operation if asynchronous else operation)
     grant = protected.issue_grant()
     kwargs = {"execution_grant": grant, "execution_attempt_id": "opaque"}
-    with pytest.raises(LegitimacyInvariantError, match="unknown"):
+    # Output governance denies the opaque result before the ledger tries to digest it.
+    with pytest.raises(GovernancePayloadError):
         if asynchronous:
             asyncio.run(protected(**kwargs))
         else:
@@ -738,7 +765,7 @@ def test_missing_required_argument_is_rejected_during_grant_issuance() -> None:
         transfer.issue_grant("acct-1")
 
 
-def test_distinct_enum_types_cannot_substitute_for_granted_argument() -> None:
+def test_enum_arguments_cannot_be_granted_or_substituted() -> None:
     trusted_mode = Enum("Mode", {"READ": "read"}, module="trusted_a")
     untrusted_mode = Enum("Mode", {"READ": "read"}, module="untrusted_b")
     calls: list[object] = []
@@ -749,8 +776,10 @@ def test_distinct_enum_types_cannot_substitute_for_granted_argument() -> None:
         calls.append(mode)
         return "ok"
 
-    grant = execute.issue_grant(trusted_mode.READ)
-    with pytest.raises(LegitimacyInvariantError, match="invocation binding mismatch"):
+    with pytest.raises(GovernancePayloadError):
+        execute.issue_grant(trusted_mode.READ)
+    grant = execute.issue_grant(trusted_mode.READ.value)
+    with pytest.raises(ArgumentNotDigestible):
         execute(untrusted_mode.READ, execution_grant=grant)
     assert calls == []
 
@@ -1029,9 +1058,10 @@ def test_mutated_completed_result_is_not_recovered_as_success() -> None:
 
 
 def test_custom_result_with_constant_repr_is_not_recovered_as_verified() -> None:
+    # A dataclass is not JSON-native: output governance denies it before the digest.
+    @dataclass
     class MutableOpaque:
-        def __init__(self) -> None:
-            self.state = "original"
+        state: str = "original"
 
         def __repr__(self) -> str:
             return "<opaque>"
@@ -1045,7 +1075,7 @@ def test_custom_result_with_constant_repr_is_not_recovered_as_verified() -> None
         return MutableOpaque()
 
     grant = collect.issue_grant(1)
-    with pytest.raises(LegitimacyInvariantError, match="result is unknown"):
+    with pytest.raises(GovernancePayloadError):
         collect(1, execution_grant=grant, execution_attempt_id="opaque-result")
     assert guard._ledger._attempts["opaque-result"].status is AttemptStatus.PARTIAL
     with pytest.raises(LegitimacyInvariantError, match="already partial"):

@@ -12,7 +12,8 @@ Covers three capabilities in sequence:
 
 No API keys required. Runs fully offline.
 
-Run:
+Run (requires the ``crypto`` extra for the Ed25519 receipt signer):
+    pip install -e ".[crypto]"
     python examples/agent_quickstart/run.py
 
 Exit code 0 = all assertions passed (ACGS-Lite is correctly installed).
@@ -34,13 +35,22 @@ from acgs_lite import (
     Severity,
 )
 from acgs_lite.audit import AuditEntry, AuditLog
-from acgs_lite.legitimacy import LegitimacyInvariantError
+from acgs_lite.legitimacy import Ed25519ReceiptSigner, LegitimacyInvariantError
 
 _PASS = "✅"
 _FAIL = "❌"
 _BLOCK = "🚫"
 
 _failures: list[str] = []
+
+# The production profile requires a persistent Ed25519 signer whose public key is
+# pinned for execution scope. A real deployment loads the key from a secret store
+# and the pin from deployment config; this fixed seed is for the offline demo only.
+# Per-process keys from Ed25519ReceiptSigner.generate() are refused.
+_SIGNER = Ed25519ReceiptSigner.from_seed(bytes(range(32)), key_id="quickstart")
+_PINNED_EXECUTION_KEYS = {
+    "quickstart": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+}
 
 
 def _assert(condition: bool, label: str) -> None:
@@ -91,6 +101,8 @@ def section_governed_callable() -> None:
     governed = GovernedCallable(
         constitution=constitution,
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        receipt_signer=_SIGNER,
+        trusted_execution_keys=_PINNED_EXECUTION_KEYS,
     )(my_agent)
 
     # Missing authorization is denied before the callable runs.
@@ -103,6 +115,11 @@ def section_governed_callable() -> None:
 
     # A same-instance production grant allows exactly the matching call.
     grant = governed.issue_grant(safe_prompt)  # type: ignore[attr-defined]
+    _assert(
+        grant.signed_receipt is not None
+        and grant.signed_receipt.verify(_PINNED_EXECUTION_KEYS["quickstart"]),
+        "production grant carries a pinned Ed25519 execution signature",
+    )
     result = governed(
         safe_prompt,
         execution_grant=grant,
@@ -139,6 +156,8 @@ def section_governed_callable() -> None:
         yaml_governed = GovernedCallable(
             constitution=yaml_const,
             authorization_profile=AuthorizationProfile.PRODUCTION,
+            receipt_signer=_SIGNER,
+            trusted_execution_keys=_PINNED_EXECUTION_KEYS,
         )(my_agent)
         _assert(len(yaml_const.rules) == 3, f"YAML loads 3 rules (got {len(yaml_const.rules)})")
 
