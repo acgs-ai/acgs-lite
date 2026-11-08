@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Packaging: removed the experimental `gove` optional extra from the package
   metadata and its README section. No runtime or API changes.
 
+### Security
+
+- Rust companion (`acgs_lite_rust`): rule patterns are now compiled
+  case-insensitively, matching the Python engine. Before, a pattern with an
+  uppercase literal (for example `AKIA[0-9A-Z]{16}`) never matched on the Rust
+  path, so an action the Python path denies was allowed when the companion was
+  installed. Affects the companion built from acgs-lite source checkouts up
+  to and including 3.0.1; no `acgs-lite-rust` wheel has been published to PyPI.
+- Rust companion: the Python binding now lowercases non-ASCII text fully, so
+  keywords such as `contraseña` match `CONTRASEÑA` when the binding is called
+  directly. `GovernanceEngine` was not affected.
+
 ## [3.0.1] - 2026-09-21
 
 ### Fixed
