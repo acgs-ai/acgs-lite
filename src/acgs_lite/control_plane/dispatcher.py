@@ -1082,9 +1082,9 @@ class GovernedToolDispatcher:
             # session; a caller-supplied value could name an approver.
             raise _Denied("credential is not bound to an original requester (on_behalf_of)")
         if principal.kind is PrincipalKind.AGENT and tier >= APPROVAL_GATE_MIN_TIER:
-            # TODO(control-plane-gap): without require_credential the original
-            # requester is caller-asserted; it should always be bound from the
-            # credential-issuing session.
+            # Without credentials this is a trusted-host API: the host must
+            # authenticate principal and requested_by, never forward agent
+            # input as an assertion of the original human requester's identity.
             problem = requested_by_problem(principal, requested_by)
             if problem is not None:
                 raise _Denied(problem)
@@ -1639,6 +1639,9 @@ class GovernedToolDispatcher:
         otherwise ignored. Phase 6b: ``on_authorized`` (harness code, e.g. the
         socket service's intent record) runs after authorisation and before
         the tool; if it raises, the call is denied and the tool never runs.
+        Without ``require_credential``, the trusted host must authenticate
+        ``principal`` and ``requested_by``; never forward agent-supplied identity
+        labels. With credentials, AGENT T2+ calls require a requester-bound token.
         """
         auth = self._authorize(
             principal,

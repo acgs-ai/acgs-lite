@@ -115,6 +115,7 @@ def _runbook_data(**overrides: Any) -> dict[str, Any]:
             "tools": ["write_*"],
             "paths": ["workspace/**"],
             "principals": ["agent-1"],
+            "principal_kinds": ["agent"],
             "system_ids": [],
         },
         "max_blast_radius": 3,

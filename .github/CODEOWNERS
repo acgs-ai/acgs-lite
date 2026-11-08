@@ -5,6 +5,7 @@
 # evaluator
 /evals/** @acgs-ai/governance-humans
 /evaluator/** @acgs-ai/governance-humans
+/src/acgs_lite/evals/** @acgs-ai/governance-humans
 
 # test_suite
 /eval-suites/** @acgs-ai/governance-humans
@@ -63,6 +64,12 @@
 /.github/** @acgs-ai/governance-humans
 /.gitlab-ci.yml @acgs-ai/governance-humans
 /.pre-commit-config.yaml @acgs-ai/governance-humans
+/Makefile @acgs-ai/governance-humans
+/scripts/check_critical_coverage.py @acgs-ai/governance-humans
+# ci_rules: module shadows (package dirs, extensions, pyc)
+/scripts/__pycache__/check_critical_coverage.* @acgs-ai/governance-humans
+/scripts/check_critical_coverage.* @acgs-ai/governance-humans
+/scripts/check_critical_coverage/** @acgs-ai/governance-humans
 
 # control_plane
 /control-plane/** @acgs-ai/governance-humans

@@ -149,6 +149,16 @@
       "title": "MaxFailuresStop",
       "type": "object"
     },
+    "PrincipalKind": {
+      "description": "Who is acting. Only ``HUMAN`` may ever change the immutable core.",
+      "enum": [
+        "human",
+        "agent",
+        "service"
+      ],
+      "title": "PrincipalKind",
+      "type": "string"
+    },
     "RateLimit": {
       "additionalProperties": false,
       "properties": {
@@ -172,7 +182,7 @@
     },
     "ScopeSelector": {
       "additionalProperties": false,
-      "description": "What a runbook may touch: tool-name globs (``fnmatch``), repo path globs\n(root-anchored repo-glob semantics, see :func:`~.immutable_core.compile_glob`)\nand the principals (canonical ids) and/or system cohorts it is for.",
+      "description": "What a runbook may touch: tool-name globs (``fnmatch``), repo path globs\n(root-anchored repo-glob semantics, see :func:`~.immutable_core.compile_glob`)\nand the principals (canonical ids) and/or system cohorts it is for.\n\n``principal_kinds`` is required and applies to both identity selectors.\nLegacy selectors must explicitly choose kinds and be reviewed/reapproved;\na bare id cannot establish whether its owner is HUMAN, AGENT or SERVICE.",
       "properties": {
         "allow_pathless": {
           "default": false,
@@ -186,6 +196,14 @@
           },
           "minItems": 1,
           "title": "Paths",
+          "type": "array"
+        },
+        "principal_kinds": {
+          "items": {
+            "$ref": "#/$defs/PrincipalKind"
+          },
+          "minItems": 1,
+          "title": "Principal Kinds",
           "type": "array"
         },
         "principals": {
@@ -218,7 +236,8 @@
       },
       "required": [
         "tools",
-        "paths"
+        "paths",
+        "principal_kinds"
       ],
       "title": "ScopeSelector",
       "type": "object"
