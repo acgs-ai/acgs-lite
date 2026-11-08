@@ -456,6 +456,21 @@ class PolicyDecisionPoint:
         if self._kill_switch is not None and self._kill_switch_engaged():
             return self._deny(typed, "kill switch engaged", error="kill_switch"), typed, None
         quorum: QuorumResult | None = None
+        if typed is not None and _validate_request(typed) is None:
+            try:
+                # Snapshot *before* the gate hashes it: the approval gate and
+                # the evaluation must see the same owned inputs, whatever the
+                # caller does with its request (nested lists included).
+                typed = replace(typed)
+            except Exception as exc:
+                logger.error("pdp request snapshot failed: %s", type(exc).__name__)
+                return (
+                    self._deny(
+                        None, "unparseable request: cannot snapshot", error="invalid_request"
+                    ),
+                    None,
+                    None,
+                )
         if self._approval_gate is not None and typed is not None:
             try:
                 if _validate_request(typed) is None:

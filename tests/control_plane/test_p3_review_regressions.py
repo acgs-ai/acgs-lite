@@ -279,3 +279,57 @@ class TestApproverIdCharset:
         result = approval_gate.evaluate(request, [approval])
         assert result.satisfied, result.rejected
         assert result.counted_approver_ids == ("bob@example.com",)
+
+
+class TestGatedSnapshot:
+    """Security re-review (MEDIUM): the gate and the PDP see one snapshot."""
+
+    def test_mutation_after_gate_hash_does_not_reach_evaluation(
+        self,
+        constitution: Constitution,
+        permit_all: PolicySet,
+        approval_gate: ApprovalGate,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from acgs_lite.control_plane import PolicyEffect, PolicyStatement
+
+        seen: list[Any] = []
+
+        def observe(ctx: Any) -> bool:
+            seen.append(list(ctx.request.attributes["paths"]))
+            return True
+
+        policy = PolicySet(
+            (
+                *permit_all.statements,
+                PolicyStatement(
+                    id="observe",
+                    effect=PolicyEffect.PERMIT,
+                    principal_kinds=None,
+                    actions=("*",),
+                    resources=("**",),
+                    condition=observe,
+                ),
+            ),
+            source_digest="observe",
+        )
+        request = DecisionRequest(
+            ALICE, "tool.call", "write", ActionTier.T1, attributes={"paths": ["workspace/a"]}
+        )
+        hashed: list[Any] = []
+        original = approval_gate.evaluate
+
+        def evaluate(req: Any, approvals: Any, **kw: Any) -> Any:
+            result = original(req, approvals, **kw)
+            hashed.append(list(req.attributes["paths"]))
+            request.attributes["paths"].append("evaluator/x.py")  # caller races
+            return result
+
+        monkeypatch.setattr(approval_gate, "evaluate", evaluate)
+        with PolicyDecisionPoint.for_constitution(
+            constitution, policy, approval_gate=approval_gate
+        ) as pdp:
+            decision = pdp.decide(request)
+        assert hashed == [["workspace/a"]]
+        assert seen == [["workspace/a"]]
+        assert decision.allowed
