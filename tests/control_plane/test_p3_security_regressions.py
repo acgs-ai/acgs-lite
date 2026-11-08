@@ -316,12 +316,25 @@ class TestL10DryRunIsNamedAsSuch:
 
 
 class TestKillSwitchToctouAndPaths:
+    @pytest.mark.parametrize("expire", [False, True])
     async def test_async_body_rechecks_halt_after_worker_returns(
-        self, pdp: PolicyDecisionPoint, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        pdp: PolicyDecisionPoint,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        expire: bool,
     ) -> None:
         switch = KillSwitch("sys-a", signal_dir=tmp_path / "h")
+        now = [1000.0]
+        issuer = CredentialIssuer(clock=lambda: now[0])
+        credential = issuer.issue(AGENT, scopes={"tool:w"}, ttl_s=1).token
         dispatcher = GovernedToolDispatcher(
-            pdp, permissions=_permissions(), tool_tiers={"w": ActionTier.T1}, kill_switch=switch
+            pdp,
+            permissions=_permissions(),
+            tool_tiers={"w": ActionTier.T1},
+            kill_switch=switch,
+            credential_issuer=issuer,
+            require_credential=True,
         )
         calls: list[str] = []
 
@@ -333,12 +346,15 @@ class TestKillSwitchToctouAndPaths:
 
         async def halt_after_worker(fn: Any, *args: Any, **kwargs: Any) -> Any:
             result = await original(fn, *args, **kwargs)
-            switch.engage(ALICE, "after worker")
+            if expire:
+                now[0] += 2
+            else:
+                switch.engage(ALICE, "after worker")
             return result
 
         monkeypatch.setattr(asyncio, "to_thread", halt_after_worker)
-        with pytest.raises(ToolDenied, match="kill switch"):
-            await dispatcher.adispatch(AGENT, "w", {"path": "workspace/a"})
+        with pytest.raises(ToolDenied, match="credential" if expire else "kill switch"):
+            await dispatcher.adispatch(AGENT, "w", {"path": "workspace/a"}, credential=credential)
         assert calls == []
 
     def _dispatcher(
