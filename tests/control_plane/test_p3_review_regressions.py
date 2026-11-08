@@ -33,6 +33,7 @@ from acgs_lite.control_plane.approvals import (
     SignedApproval,
 )
 from acgs_lite.control_plane.core_write import CoreChangeWriter, CoreWriteRejected
+from acgs_lite.control_plane.credentials import CredentialIssuer
 from acgs_lite.control_plane.killswitch import KillSwitch
 
 pytestmark = [pytest.mark.unit, pytest.mark.red_team]
@@ -41,6 +42,41 @@ ADMIN = Principal("admin", PrincipalKind.HUMAN)
 ALICE = Principal("alice", PrincipalKind.HUMAN)
 TARGET = "policies/main.yaml"
 Factory = Callable[..., Callable[..., SignedApproval]]
+
+
+def test_credentialed_t2_call_cannot_supply_an_unbound_requester(
+    constitution: Constitution,
+    permit_all: PolicySet,
+    approval_gate: ApprovalGate,
+    approver_factory: Factory,
+) -> None:
+    agent = Principal("agent", PrincipalKind.AGENT)
+    issuer = CredentialIssuer()
+    credential = issuer.issue(agent, scopes={"tool:edit"}, ttl_s=60)
+    calls: list[str] = []
+    with PolicyDecisionPoint.for_constitution(
+        constitution, permit_all, approval_gate=approval_gate
+    ) as pdp:
+        dispatcher = GovernedToolDispatcher(
+            pdp,
+            permissions=RepositoryPermissions(DEFAULT_IMMUTABLE_CORE, []),
+            tool_tiers={"edit": ActionTier.T2},
+            credential_issuer=issuer,
+            require_credential=True,
+        )
+        dispatcher.register("edit", lambda: calls.append("ran"))
+        digest = dispatcher.action_hash_for(agent, "edit", {}, requested_by="decoy")
+        approval = approver_factory("bob")(digest)
+        with pytest.raises(ToolDenied, match="not bound to an original requester"):
+            dispatcher.dispatch(
+                agent,
+                "edit",
+                {},
+                requested_by="decoy",
+                credential=credential.token,
+                approvals=[approval],
+            )
+    assert calls == []
 
 
 @pytest.mark.parametrize("path", ["control-plane/.env", "policies/.env", "evaluator/.env"])
