@@ -52,6 +52,9 @@ from acgs_lite.control_plane.pdp import Decision
 from acgs_lite.control_plane.principal import Principal, PrincipalKind
 from acgs_lite.control_plane.receipts import (
     GENESIS_RECEIPT_HASH,
+    MAX_APPROVERS,
+    MAX_EXTERNAL_RUNS,
+    MAX_FIELD_CHARS,
     ORIGIN_DISPATCHER_PRE_DENIAL,
     ORIGIN_PDP,
     ORIGIN_PROMOTION_GATE,
@@ -154,11 +157,11 @@ class JSONLReceiptStore:
     """One signed receipt per line in the core AUDIT_LOG area.
 
     The tail (byte offset + last receipt hash) is scanned once on open and
-    cached. Each append takes ``flock(LOCK_EX)``, stats the file and reads
-    only bytes appended since the cached offset (another writer's lines), so
-    an append costs O(new bytes), not O(file). It then requires the tail to
-    be the new receipt's predecessor, writes, fsyncs and rolls back a partial
-    write. A shrunk file or an unparsable new tail fails closed.
+    cached; an unterminated final record is refused. Each append takes
+    ``flock(LOCK_EX)`` and stats the file: a file that shrank *or grew*
+    since this store's last write fails closed (bytes from another writer
+    are never trusted). It then requires the tail to be the new receipt's
+    predecessor, writes, fsyncs and rolls back a partial write.
     """
 
     def __init__(
@@ -174,12 +177,20 @@ class JSONLReceiptStore:
         self._tail = GENESIS_RECEIPT_HASH
         if self._path.exists():
             data = self._path.read_bytes()
+            self._require_terminated(data)
             self._end = len(data)
             self._tail = self._last_hash(data, GENESIS_RECEIPT_HASH)
 
     @property
     def path(self) -> Path:
         return self._path
+
+    @staticmethod
+    def _require_terminated(data: bytes) -> None:
+        # A final record without "\n" would be glued to the next append and
+        # make the whole store unreadable, so refuse it up front.
+        if data and not data.endswith(b"\n"):
+            raise ReceiptStoreCorrupted("store tail is not newline-terminated")
 
     @staticmethod
     def _last_hash(chunk: bytes, default: str) -> str:
@@ -204,9 +215,12 @@ class JSONLReceiptStore:
                 if size < self._end:
                     raise ReceiptConflict("receipt store shrank since it was opened")
                 if size > self._end:
-                    handle.seek(self._end)
-                    self._tail = self._last_hash(handle.read(size - self._end), self._tail)
-                    self._end = size
+                    # This store's ledger is its only writer; bytes it did not
+                    # write are unverified (a copy of the head would pass the
+                    # tail check and duplicate a sequence), so refuse them.
+                    raise ReceiptConflict(
+                        "receipt store grew since the last append (concurrent writer?)"
+                    )
                 if self._tail != signed.receipt.prev_receipt_hash:
                     raise ReceiptConflict("store tail is not the ledger head (concurrent writer?)")
                 try:
@@ -435,12 +449,27 @@ class ReceiptLedger:
             if not bound:
                 raise ReceiptEmissionError("decision inputs_digest does not match the request")
         raw_approvers = getattr(request, "approvers", ())
-        approvers = (
-            tuple(ApproverRef(a.id, a.kind.value) for a in raw_approvers)
-            if isinstance(raw_approvers, tuple)
-            and all(isinstance(a, Principal) for a in raw_approvers)
-            else ()
-        )
+        approvers: tuple[ApproverRef, ...] = ()
+        oversized = len(tuple(external_runs)) > MAX_EXTERNAL_RUNS
+        if isinstance(raw_approvers, tuple) and all(
+            isinstance(a, Principal) for a in raw_approvers
+        ):
+            if len(raw_approvers) > MAX_APPROVERS or any(
+                len(a.id) > MAX_FIELD_CHARS for a in raw_approvers
+            ):
+                oversized = True
+            else:
+                approvers = tuple(ApproverRef(a.id, a.kind.value) for a in raw_approvers)
+        if principal is not None and len(principal.system_id or "") > MAX_FIELD_CHARS:
+            oversized = True
+        if oversized:
+            if decision.allowed:
+                raise ReceiptEmissionError("receipt evidence exceeds the size limits")
+            # A deny grants nothing: record it without the oversized evidence.
+            logger.warning("dropping oversized evidence from a deny receipt")
+            approvers, external_runs = (), ()
+            if principal is not None and len(principal.system_id or "") > MAX_FIELD_CHARS:
+                principal = None
         attributes = getattr(request, "attributes", None)
         claims_success = (
             kind is ReceiptKind.PROMOTION

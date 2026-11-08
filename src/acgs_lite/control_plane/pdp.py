@@ -408,9 +408,17 @@ class PolicyDecisionPoint:
         now = time.monotonic()
         horizon = now - self._pre_denial_window_s
         with self._receipt_failures_lock:
-            if len(self._pre_denials) > _MAX_TRACKED_PRE_DENIAL_KEYS:
+            if (
+                principal_id not in self._pre_denials
+                and len(self._pre_denials) >= _MAX_TRACKED_PRE_DENIAL_KEYS
+            ):
                 for key in [k for k, q in self._pre_denials.items() if not q or q[-1] < horizon]:
                     del self._pre_denials[key]
+                if len(self._pre_denials) >= _MAX_TRACKED_PRE_DENIAL_KEYS:
+                    # Unvalidated labels are attacker-chosen: at capacity a new
+                    # label gets no receipt budget (the call still denies and
+                    # is counted), so the map and the prune scan stay bounded.
+                    return False
             window = self._pre_denials.setdefault(principal_id, collections.deque())
             while window and window[0] < horizon:
                 window.popleft()

@@ -22,6 +22,7 @@ an invalid :class:`RunValidation` (fail closed).
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -415,6 +416,9 @@ class TrustedRunRegistry:
         self._records: dict[tuple[str, str], _RunRecord] = {}
         self._signer = signer
         self._path: Path | None = None
+        self._keys: dict[str, str] = {}
+        self._end = 0
+        self._lines = 0
         if path is None:
             return
         keys = dict(trusted_public_keys or {})
@@ -422,17 +426,34 @@ class TrustedRunRegistry:
             keys.setdefault(signer.key_id, signer.public_key_hex())
         if not keys:
             raise ValueError("a persisted run registry needs a signer or trusted_public_keys")
+        self._keys = keys
         self._path = require_audit_store_path(path, registry)
         if not self._path.exists():
             return
-        for number, line in enumerate(self._path.read_text(encoding="utf-8").splitlines(), 1):
+        data = self._path.read_bytes()
+        self._ingest(data)
+        self._end = len(data)
+
+    def _ingest(self, data: bytes) -> None:
+        """Verify and add the signed lines in *data* (bytes after ``_end``)."""
+        if data and not data.endswith(b"\n"):
+            # A complete record without "\n" would be glued to the next line.
+            raise ValueError("run registry tail is not newline-terminated")
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("run registry is not UTF-8") from exc
+        added: dict[tuple[str, str], _RunRecord] = {}
+        for line in text.splitlines():
+            self._lines += 1
+            number = self._lines
             if not line.strip():
                 continue
             try:
                 envelope = json.loads(line)
                 if not isinstance(envelope, Mapping) or set(envelope) != _LINE_KEYS:
                     raise ValueError("unsigned or malformed registry line")
-                key = keys.get(envelope["key_id"])
+                key = self._keys.get(envelope["key_id"])
                 signature = envelope["signature"]
                 if not isinstance(key, str) or not isinstance(signature, str):
                     raise ValueError("registry line signed by an untrusted key")
@@ -444,9 +465,10 @@ class TrustedRunRegistry:
             except (ValueError, TypeError) as exc:
                 raise ValueError(f"run registry line {number}: {exc}") from exc
             run_key = (record.provider, record.run_id)
-            if run_key in self._records:
+            if run_key in self._records or run_key in added:
                 raise ValueError(f"duplicate run in registry: {run_key}")
-            self._records[run_key] = record
+            added[run_key] = record
+        self._records.update(added)
 
     def __len__(self) -> int:
         with self._lock:
@@ -497,23 +519,70 @@ class TrustedRunRegistry:
             head_sha=(sha if sha is not None else ref.head_sha),
             registered_by=principal.id,
         )
+        try:
+            # What is written must load again (e.g. registered_by length).
+            _record_from_dict(record.to_dict())
+        except (ValueError, TypeError) as exc:
+            raise RunRegistrationRejected(f"run record would not reload: {exc}") from exc
         key = (ref.provider, ref.run_id)
         with self._lock:
-            if key in self._records:
-                raise RunRegistrationRejected(f"run {ref.label} is already registered")
-            if self._path is not None and self._signer is not None:
-                payload = record.to_dict()
-                line = {
+            if self._path is None or self._signer is None:
+                if key in self._records:
+                    raise RunRegistrationRejected(f"run {ref.label} is already registered")
+                self._records[key] = record
+                return
+            self._append_persisted(key, record, ref.label)
+
+    def _append_persisted(self, key: tuple[str, str], record: _RunRecord, label: str) -> None:
+        """Read/check/append as one transaction under an exclusive file lock,
+        so registries sharing the file cannot both register one run."""
+        if self._path is None or self._signer is None:
+            raise RunRegistrationRejected("not a persisted, signing registry")
+        try:
+            fcntl: Any = importlib.import_module("fcntl")
+        except ImportError as exc:  # pragma: no cover - non-POSIX only
+            raise RunRegistrationRejected("persisted run registry needs POSIX flock") from exc
+        payload = record.to_dict()
+        line = (
+            json.dumps(
+                {
                     "record": payload,
                     "key_id": self._signer.key_id,
                     "signature": self._signer.sign(_record_message(payload)),
-                }
-                self._path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self._path, "a", encoding="utf-8") as handle:
-                    handle.write(json.dumps(line, sort_keys=True) + "\n")
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("utf-8")
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._path, "a+b") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                size = os.fstat(handle.fileno()).st_size
+                if size < self._end:
+                    raise RunRegistrationRejected("run registry shrank since it was opened")
+                if size > self._end:
+                    handle.seek(self._end)
+                    try:
+                        self._ingest(handle.read(size - self._end))
+                    except ValueError as exc:
+                        raise RunRegistrationRejected(f"run registry changed: {exc}") from exc
+                    self._end = size
+                if key in self._records:
+                    raise RunRegistrationRejected(f"run {label} is already registered")
+                try:
+                    handle.write(line)
                     handle.flush()
                     os.fsync(handle.fileno())
-            self._records[key] = record
+                except BaseException:
+                    # Leave no half-registered line behind for a retry to
+                    # duplicate (fsync may fail after the bytes are written).
+                    handle.truncate(size)
+                    raise
+                self._end = size + len(line)
+                self._records[key] = record
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def validate(self, ref: ExternalRunRef) -> RunValidation:
         def invalid(reason: str) -> RunValidation:

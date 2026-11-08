@@ -16,6 +16,8 @@ caught only by the lineage archive, so agent-written logs never count):
   ``min_external_runs`` validated external runs; a receipt whose only
   evidence is AGENT_LOG refs is rejected with "only agent-written logs".
 
+* allowed T3 receipts re-assert the two-person rule: at least two distinct
+  human approvers, none of them the requester;
 * PROMOTION receipts are re-checked independently of the issuer: decision
   allowed, requester ``principal_kind == "human"``, approvers distinct by
   canonical id and excluding the requester, a ``candidate_digest`` that every
@@ -53,6 +55,11 @@ from acgs_lite.control_plane.receipts import (
 from acgs_lite.legitimacy.signing import ReceiptSigningUnavailable, verify_signature
 
 __all__ = ["ReceiptVerification", "verify_chain", "verify_receipt"]
+
+# Mirrors ActionTier.T3 / invariants.T3_MIN_APPROVERS; duplicated on purpose
+# so this module stays importable without the PDP side.
+_T3 = 3
+_T3_MIN_APPROVERS = 2
 
 
 @dataclass(frozen=True)
@@ -101,6 +108,8 @@ def verify_receipt(
     promotion = receipt.kind is ReceiptKind.PROMOTION
     if promotion:
         reasons.extend(_promotion_problems(receipt))
+    if receipt.allowed and receipt.tier == _T3:
+        reasons.extend(_two_person_problems(receipt))
     if receipt.allowed or promotion or require_external_evidence is True:
         if require_external_evidence is None:
             required = (
@@ -125,6 +134,23 @@ def verify_receipt(
         and receipt.origin in (ORIGIN_PDP, ORIGIN_PROMOTION_GATE)
     )
     return ReceiptVerification(not reasons, tuple(reasons), attributed)
+
+
+def _two_person_problems(receipt: ControlPlaneReceipt) -> list[str]:
+    """Re-assert INV-T3-TWO-PERSON from the receipt alone (no PDP import):
+    >= 2 approvers, distinct canonical ids, all human, none the requester."""
+    requester = canonical_principal_id(receipt.principal_id)
+    ids = [canonical_principal_id(a.principal_id) for a in receipt.approvers]
+    problems: list[str] = []
+    if len(ids) < _T3_MIN_APPROVERS:
+        problems.append(f"T3 receipt has fewer than {_T3_MIN_APPROVERS} approvers")
+    if len(set(ids)) != len(ids):
+        problems.append("T3 approvers are not distinct")
+    if any(a.kind != "human" for a in receipt.approvers):
+        problems.append("T3 approvers must all be human")
+    if requester in ids:
+        problems.append("T3 requester is among its own approvers")
+    return problems
 
 
 def _promotion_problems(receipt: ControlPlaneReceipt) -> list[str]:

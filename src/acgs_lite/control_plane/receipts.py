@@ -32,6 +32,9 @@ from acgs_lite.legitimacy.signing import ReceiptSigner
 
 __all__ = [
     "GENESIS_RECEIPT_HASH",
+    "MAX_APPROVERS",
+    "MAX_DETERMINING_POLICIES",
+    "MAX_EXTERNAL_RUNS",
     "MAX_FIELD_CHARS",
     "MAX_REASON_CHARS",
     "ORIGIN_DISPATCHER_PRE_DENIAL",
@@ -64,6 +67,11 @@ RECEIPT_ORIGINS = frozenset({ORIGIN_PDP, ORIGIN_DISPATCHER_PRE_DENIAL, ORIGIN_PR
 # Bound per-receipt size so a flood of (pre-)denials cannot balloon the store.
 MAX_FIELD_CHARS = 512
 MAX_REASON_CHARS = 1024
+# Collection bounds: hashing, signing and the synchronous store write are
+# linear in these, so they are capped like the scalar fields.
+MAX_APPROVERS = 32
+MAX_EXTERNAL_RUNS = 64
+MAX_DETERMINING_POLICIES = 64
 TRUNCATION_MARKER = "...[truncated]"
 # TODO(control-plane-gap): issued_at is the issuer's wall clock and is not
 # validated or anchored (no trusted timestamping); treat it as informational.
@@ -84,6 +92,8 @@ class ApproverRef:
             raise ValueError("approver principal_id must be a non-empty string")
         if not isinstance(self.kind, str) or not self.kind:
             raise ValueError("approver kind must be a non-empty string")
+        if len(self.principal_id) > MAX_FIELD_CHARS or len(self.kind) > MAX_FIELD_CHARS:
+            raise ValueError(f"approver fields exceed {MAX_FIELD_CHARS} characters")
 
     def to_dict(self) -> dict[str, str]:
         return {"principal_id": self.principal_id, "kind": self.kind}
@@ -197,8 +207,9 @@ class ControlPlaneReceipt:
             _opt_str(getattr(self, name), name)
         if self.origin not in RECEIPT_ORIGINS:
             raise ValueError(f"origin must be one of {sorted(RECEIPT_ORIGINS)}")
-        for name in ("principal_id", "action", "resource"):
-            if len(getattr(self, name)) > MAX_FIELD_CHARS:
+        for name in ("principal_id", "action", "resource", "principal_kind", "system_id", "error"):
+            value = getattr(self, name)
+            if value is not None and len(value) > MAX_FIELD_CHARS:
                 raise ValueError(f"{name} exceeds {MAX_FIELD_CHARS} characters")
         if len(self.reason) > MAX_REASON_CHARS:
             raise ValueError(f"reason exceeds {MAX_REASON_CHARS} characters")
@@ -223,16 +234,22 @@ class ControlPlaneReceipt:
             if not isinstance(value, str) or not _HASH.fullmatch(value):
                 raise ValueError(f"{name} must be 'sha256:<64 hex>'")
         policies = tuple(self.determining_policies)
-        if not all(isinstance(p, str) for p in policies):
-            raise ValueError("determining_policies must be strings")
+        if not all(isinstance(p, str) and len(p) <= MAX_FIELD_CHARS for p in policies):
+            raise ValueError(f"determining_policies must be strings <= {MAX_FIELD_CHARS} chars")
+        if len(policies) > MAX_DETERMINING_POLICIES:
+            raise ValueError(f"more than {MAX_DETERMINING_POLICIES} determining_policies")
         object.__setattr__(self, "determining_policies", policies)
         approvers = tuple(self.approvers)
         if not all(isinstance(a, ApproverRef) for a in approvers):
             raise ValueError("approvers must be ApproverRef")
+        if len(approvers) > MAX_APPROVERS:
+            raise ValueError(f"more than {MAX_APPROVERS} approvers")
         object.__setattr__(self, "approvers", approvers)
         runs = tuple(self.external_runs)
         if not all(isinstance(r, ExternalRunRef) for r in runs):
             raise ValueError("external_runs must be ExternalRunRef")
+        if len(runs) > MAX_EXTERNAL_RUNS:
+            raise ValueError(f"more than {MAX_EXTERNAL_RUNS} external_runs")
         object.__setattr__(self, "external_runs", runs)
 
     @classmethod
