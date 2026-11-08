@@ -162,7 +162,9 @@ def _signal_dir_ancestors_problem(path: Path, uid: int) -> str | None:
                 pending.extend((target, *target.parents))
                 continue
             if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH) and not st.st_mode & stat.S_ISVTX:
-                return f"signal dir ancestor {ancestor} is group/world-writable without the sticky bit"
+                return (
+                    f"signal dir ancestor {ancestor} is group/world-writable without the sticky bit"
+                )
     except OSError as exc:
         return f"cannot inspect ancestors of signal dir {path}: {exc}"
     return None
