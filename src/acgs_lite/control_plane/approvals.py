@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, cast
 
-from acgs_lite.control_plane.action_hash import action_hash, canonical_json
+from acgs_lite.control_plane.action_hash import action_hash, approval_subject, canonical_json
 from acgs_lite.control_plane.context import DecisionRequest
 from acgs_lite.control_plane.principal import Principal, PrincipalKind, canonical_principal_id
 from acgs_lite.control_plane.tiers import ActionTier
@@ -73,6 +73,8 @@ DEFAULT_CLOCK_SKEW_S = 30.0
 _HASH = re.compile(r"sha256:[0-9a-f]{64}")
 _PUBLIC_KEY = re.compile(r"[0-9a-f]{64}")
 _TOKEN = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+# Tiers whose requests need a configured quorum (mirrors dispatcher.APPROVAL_GATE_MIN_TIER).
+_GATED_MIN_TIER = ActionTier.T2
 
 
 class ApprovalRegistrationRejected(ValueError):
@@ -375,6 +377,17 @@ class ApprovalGate:
     def _evaluate(self, request: DecisionRequest, approvals: Sequence[object]) -> QuorumResult:
         policy = self.policy_for(request.tier) if isinstance(request.tier, ActionTier) else None
         required = policy.min_approvals if policy is not None else 0
+        if policy is None and (
+            not isinstance(request.tier, ActionTier) or request.tier >= _GATED_MIN_TIER
+        ):
+            # An approval-gated tier without a configured quorum is a
+            # misconfiguration, not a zero-approval quorum.
+            return QuorumResult(
+                satisfied=False,
+                action_hash="",
+                required=0,
+                rejected=(("*", f"no quorum policy configured for tier {request.tier!r}"),),
+            )
         try:
             expected = action_hash(request)
         except Exception as exc:
@@ -390,9 +403,13 @@ class ApprovalGate:
             )
         now = float(self._clock())
         requester = request.principal
-        author = request.attributes.get("authored_by")
+        # Exclusions come from the same subject the action hash binds: a path
+        # sub-request is approved as its parent tool call, so its author and
+        # original requester are the parent's.
+        subject_attributes = approval_subject(request).attributes
+        author = subject_attributes.get("authored_by")
         author_id = canonical_principal_id(author) if isinstance(author, str) and author else None
-        original = request.attributes.get("requested_by")
+        original = subject_attributes.get("requested_by")
         requested_by = (
             canonical_principal_id(original) if isinstance(original, str) and original else None
         )
@@ -440,10 +457,15 @@ class ApprovalGate:
         """Return the registered approver Principal, or a rejection reason."""
         if type(approval) is not SignedApproval:
             return "not a SignedApproval"
-        for name in ("approval_id", "approver_id", "approver_kind", "nonce", "key_id"):
+        for name in ("approval_id", "approver_kind", "nonce", "key_id"):
             value = getattr(approval, name)
             if not isinstance(value, str) or not _TOKEN.fullmatch(value):
                 return f"malformed {name}"
+        try:
+            # approver_id is a principal id ("bob@example.com"), not a token.
+            Principal(approval.approver_id, PrincipalKind.HUMAN)
+        except (TypeError, ValueError):
+            return "malformed approver_id"
         if not isinstance(approval.signature, str) or not approval.signature:
             return "missing signature"
         if not isinstance(approval.action_hash, str) or not _HASH.fullmatch(approval.action_hash):

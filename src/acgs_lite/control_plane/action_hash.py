@@ -107,7 +107,14 @@ def approval_subject(request: DecisionRequest) -> DecisionRequest:
         and isinstance(tool_call, Mapping)
     ):
         paths = tool_call.get("paths")
-        if isinstance(paths, list) and request.resource in paths:
+        # The child must be the operation the approved tool performs: a
+        # read-only tool's approval never covers a write (and vice versa).
+        expected_child = "file.read" if tool_call.get("tool_read_only") is True else "file.write"
+        if (
+            isinstance(paths, list)
+            and request.resource in paths
+            and request.action.lower() == expected_child
+        ):
             return DecisionRequest(
                 principal=request.principal,
                 action="tool.call",

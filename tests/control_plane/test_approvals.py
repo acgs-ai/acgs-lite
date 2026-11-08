@@ -145,16 +145,21 @@ class TestRegistration:
     ) -> None:
         d, calls = setup
         bob = approver_factory("bob")
+        digest = _hash(d, AGENT, "edit", "workspace/a", requested_by=REQ)
+        # Control: before revocation the identical call is allowed, so the
+        # denial below can only come from the revoked key.
+        d.dispatch(
+            AGENT, "edit", {"path": "workspace/a"}, requested_by=REQ, approvals=[bob(digest)]
+        )
+        assert calls.paths == ["workspace/a"]
         assert approval_authority.revoke_approver(ADMIN, "key-bob")
         assert not approval_authority.revoke_approver(ADMIN, "key-bob")
-        with pytest.raises(ToolDenied):
+        with pytest.raises(ToolDenied) as excinfo:
             d.dispatch(
-                AGENT,
-                "edit",
-                {"path": "workspace/a"},
-                approvals=[bob(_hash(d, AGENT, "edit", "workspace/a", requested_by=REQ))],
+                AGENT, "edit", {"path": "workspace/a"}, requested_by=REQ, approvals=[bob(digest)]
             )
-        assert calls.paths == []
+        assert "INV-APPROVAL-QUORUM" in excinfo.value.decision.determining_policies
+        assert calls.paths == ["workspace/a"]
 
 
 class TestAgentCannotSatisfyItsOwnGate:
@@ -206,22 +211,34 @@ class TestAgentCannotSatisfyItsOwnGate:
         self, setup: tuple[GovernedToolDispatcher, Calls], approver_factory: Factory
     ) -> None:
         d, calls = setup
-        digest = _hash(d, AGENT, "edit", "workspace/a", authored_by="dave")
-        with pytest.raises(ToolDenied):
+        digest = _hash(d, AGENT, "edit", "workspace/a", authored_by="dave", requested_by=REQ)
+        call = {"authored_by": "dave", "requested_by": REQ}
+        erin = approver_factory("erin")
+        with pytest.raises(ToolDenied) as excinfo:
             d.dispatch(
                 AGENT,
                 "edit",
                 {"path": "workspace/a"},
-                authored_by="dave",
+                **call,
                 approvals=[approver_factory("dave")(digest)],
             )
+        assert "INV-APPROVAL-QUORUM" in excinfo.value.decision.determining_policies
         assert calls.paths == []
         # The same approval cannot be laundered by dropping authored_by: the
         # author is part of the hash.
-        with pytest.raises(ToolDenied):
+        with pytest.raises(ToolDenied) as excinfo:
             d.dispatch(
-                AGENT, "edit", {"path": "workspace/a"}, approvals=[approver_factory("erin")(digest)]
+                AGENT,
+                "edit",
+                {"path": "workspace/a"},
+                requested_by=REQ,
+                approvals=[erin(digest)],
             )
+        assert "INV-APPROVAL-QUORUM" in excinfo.value.decision.determining_policies
+        assert calls.paths == []
+        # Control: a non-author approving the exact call is accepted.
+        d.dispatch(AGENT, "edit", {"path": "workspace/a"}, **call, approvals=[erin(digest)])
+        assert calls.paths == ["workspace/a"]
 
     def test_sibling_of_agent_system_does_not_count(
         self,
@@ -427,7 +444,9 @@ class TestAgentCannotSatisfyItsOwnGate:
 def _tool_request(
     d: GovernedToolDispatcher, who: Principal, tool: str, path: str
 ) -> DecisionRequest:
-    args = {"path": path}
+    # The dispatcher authorises the effective arguments, defaults included
+    # (Calls.tool has content=""), so the digest must cover them too.
+    args = {"path": path, "content": ""}
     return DecisionRequest(
         who,
         "tool.call",

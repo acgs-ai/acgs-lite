@@ -572,13 +572,17 @@ class GovernedToolDispatcher:
                 raise _Denied("budget exhausted")
 
     def _kill_switch_engaged(self) -> bool:
-        switch = self._kill_switch
-        if switch is None:
-            return False
-        try:
-            return bool(switch.is_engaged())
-        except Exception:
-            return True
+        # The dispatcher may hold a different switch than its PDP; either one
+        # engaged (or unreadable) halts execution.
+        for switch in (self._kill_switch, self._pdp.kill_switch):
+            if switch is None:
+                continue
+            try:
+                if switch.is_engaged():
+                    return True
+            except Exception:
+                return True
+        return False
 
     def _record_denial_failure(self, principal: object) -> None:
         autonomy = self._autonomy
