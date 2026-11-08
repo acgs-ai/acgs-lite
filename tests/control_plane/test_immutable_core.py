@@ -65,7 +65,7 @@ class TestNormalize:
         ("raw", "expected"),
         [
             ("./evaluator/x.py", "evaluator/x.py"),
-            ("ok/../evaluator/x.py", "evaluator/x.py"),
+            ("ok/../evaluator/x.py", None),
             ("a//b/./c", "a/b/c"),
             ("evaluator\\x.py", None),
             ("workspace./x.py", None),
@@ -92,7 +92,7 @@ class TestNormalize:
     def test_absolute_inside_root_is_relativised(self) -> None:
         assert normalize_path("/repo/evaluator/x.py", "/repo") == "evaluator/x.py"
         assert normalize_path("/repo", "/repo") == "."
-        assert normalize_path("/repo/../repo/a", "/repo") == "a"
+        assert normalize_path("/repo/../repo/a", "/repo") is None
 
     def test_absolute_outside_root_is_unresolvable(self) -> None:
         assert normalize_path("/repository/a", "/repo") is None
@@ -123,7 +123,7 @@ class TestClassify:
             ("src/acgs_lite/control_plane/pdp.py", CoreCategory.CONTROL_PLANE),
             ("control-plane/immutable-core.yaml", CoreCategory.CONTROL_PLANE),
             ("Evaluator/Score.PY", CoreCategory.EVALUATOR),
-            ("ok/../evaluator/x.py", CoreCategory.EVALUATOR),
+            ("ok/../evaluator/x.py", CoreCategory.CONTROL_PLANE),
         ],
     )
     def test_core_paths(self, path: str, category: CoreCategory) -> None:

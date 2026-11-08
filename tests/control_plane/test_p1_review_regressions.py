@@ -455,6 +455,35 @@ class TestOpaqueSubclassBoundary:
 
 
 class TestFinalReviewBoundaries:
+    @pytest.mark.parametrize("absolute", [False, True])
+    def test_parent_segments_cannot_create_outside_grant(
+        self, constitution: Constitution, permit_all: PolicySet, tmp_path: Path, absolute: bool
+    ) -> None:
+        registry = DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
+        permissions = RepositoryPermissions(
+            registry, [WriteGrant(AGENT.id, PrincipalKind.AGENT, ("workspace/**",))]
+        )
+        raw = "outside/../workspace/file.txt"
+        if absolute:
+            raw = str(tmp_path / raw)
+
+        def write(path: str) -> None:
+            target = tmp_path / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("written")
+
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, registry=registry
+        ) as pdp:
+            dispatcher = GovernedToolDispatcher(
+                pdp, permissions=permissions, tool_tiers={"write": ActionTier.T1}
+            )
+            dispatcher.register("write", write, path_params={"path"})
+            with pytest.raises(ToolDenied):
+                dispatcher.dispatch(AGENT, "write", {"path": raw})
+        assert not (tmp_path / "outside").exists()
+        assert not (tmp_path / "workspace").exists()
+
     def test_grants_preserve_case_but_core_classification_remains_conservative(self) -> None:
         permissions = RepositoryPermissions(
             DEFAULT_IMMUTABLE_CORE,

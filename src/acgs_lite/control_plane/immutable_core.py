@@ -115,6 +115,10 @@ def normalize_path(path: object, repo_root: str | None = None) -> str | None:
     # path: backslashes and trailing dots/spaces are distinct names on POSIX.
     if "\\" in path:
         return None
+    # A tool may create raw parent directories before resolving '..'. Deny
+    # traversal before absolute normalization can erase the outside prefix.
+    if ".." in path.split("/"):
+        return None
     candidate = path
     if candidate.startswith("~") or _DRIVE_PREFIX.match(candidate) or "://" in candidate:
         return None
@@ -132,7 +136,7 @@ def normalize_path(path: object, repo_root: str | None = None) -> str | None:
     # Reject ambiguous Windows/SMB aliases instead of rewriting their names.
     segments = []
     for segment in candidate.split("/"):
-        if segment in ("", ".", ".."):
+        if segment in ("", "."):
             segments.append(segment)
             continue
         stripped = segment.rstrip(". ")
