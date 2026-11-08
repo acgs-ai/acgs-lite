@@ -32,12 +32,6 @@ def _has_hidden_json_control(text: str) -> bool:
     return _HIDDEN_JSON_CONTROL.search(text) is not None
 
 
-# Characters json.dumps escapes in otherwise-valid text. Inside the JSON blob a tab
-# or newline becomes the two characters ``\t``/``\n``, which defeats ``\s+``/``\b``
-# rules and multi-word keywords, so any text containing one is also validated raw.
-_JSON_ESCAPED_TEXT = re.compile(r'[\t\n\r"\\]')
-
-
 class GovernancePayloadError(ConstitutionalViolationError):
     """A governed payload could not be evaluated in full, so the call is denied."""
 
@@ -246,8 +240,10 @@ def _enforcement_payloads(value: Any, index: int, *, max_chars: int) -> list[str
     """Project one value for enforcement; an empty list means nothing to evaluate.
 
     The first payload is the whole value (raw text, or its JSON blob). It is
-    followed by every distinct text leaf or key whose JSON form differs from its
-    raw form, so whitespace-sensitive rules see ``"drop\\ttable"`` as written.
+    followed by every distinct non-empty text leaf and key as raw text. Inside the
+    blob a tab or newline is the two characters ``\\t``/``\\n`` and every leaf sits
+    after a quote, so ``\\s+``/``\\b`` rules and ``^``/``$`` anchors only see the
+    text as written when it is evaluated on its own.
     """
     if value is None:
         return []
@@ -271,7 +267,7 @@ def _enforcement_payloads(value: Any, index: int, *, max_chars: int) -> list[str
     except (TypeError, ValueError):
         # ValueError includes Python's int-to-str digit limit for huge integers.
         raise _unevaluable(value, index) from None
-    leaves = dict.fromkeys(text for text in projector.texts if _JSON_ESCAPED_TEXT.search(text))
+    leaves = dict.fromkeys(text for text in projector.texts if text)
     return [blob, *leaves]
 
 
@@ -291,8 +287,8 @@ def governance_payloads_for_enforcement(
     ``tuple`` (evaluated as a list); ``dict`` whose keys are all exact ``str``.
     Text and keys containing C0 controls other than tab, newline and carriage
     return deny: JSON escaping would conceal them from rule matching. Tab,
-    newline, carriage return, ``"`` and ``\\`` stay valid, so any nested text or
-    key containing one is returned again raw, after its value's JSON payload.
+    newline and carriage return stay valid. Every distinct non-empty nested text
+    and key is also returned raw, after its value's JSON payload.
 
     Everything else denies with ``GOVERNANCE-PAYLOAD-UNEVALUABLE`` at any depth:
     ``Enum`` members, dataclasses, pydantic models, ``datetime``/``date``/``time``,

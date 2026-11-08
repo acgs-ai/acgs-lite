@@ -624,9 +624,10 @@ def _benign() -> dict[str, Any]:
 
 
 def test_benign_payload_projects_tuple_and_bytes_as_json() -> None:
-    # The whitespace leaf is JSON-escaped in the blob, so it is also returned raw.
-    payload, raw_leaf = governance_payloads_for_enforcement(_benign())
-    assert raw_leaf == "ordinary\ttext\nwith\rline endings"
+    # The JSON blob comes first; every text leaf and key follows it raw.
+    payload, *leaves = governance_payloads_for_enforcement(_benign())
+    assert "ordinary\ttext\nwith\rline endings" in leaves
+    assert {"note", "hello", "plain bytes", "more"} <= set(leaves)
     assert '"pair": ["a", 1]' in payload
     assert '"raw": "plain bytes"' in payload
     assert '"buf": "more"' in payload

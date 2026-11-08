@@ -14,6 +14,7 @@ Every case is driven through the real entry points (``GovernedAgent.run``/``arun
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -208,7 +209,9 @@ def test_projection_returns_raw_text_for_json_escaped_whitespace(codepoint: int)
 def test_projection_returns_raw_text_for_quote_and_backslash() -> None:
     assert governance_payloads_for_enforcement({"q": 'say "x"', "p": "a\\b"}) == [
         '{"p": "a\\\\b", "q": "say \\"x\\""}',
+        "q",
         'say "x"',
+        "p",
         "a\\b",
     ]
 
@@ -220,9 +223,15 @@ def test_projection_deduplicates_raw_leaves() -> None:
     ]
 
 
-def test_projection_without_escaped_text_is_unchanged() -> None:
-    assert governance_payloads_for_enforcement({"k": "v", "n": [1, "x y"]}) == [
-        '{"k": "v", "n": [1, "x y"]}'
+def test_projection_returns_every_text_leaf_and_key_raw() -> None:
+    # Plain leaves too: inside the blob every leaf follows a quote, so ``^``/``$``
+    # anchored rules only see it when it is evaluated on its own.
+    assert governance_payloads_for_enforcement({"k": "v", "n": [1, "x y", ""]}) == [
+        '{"k": "v", "n": [1, "x y", ""]}',
+        "k",
+        "v",
+        "n",
+        "x y",
     ]
 
 
@@ -256,3 +265,137 @@ def test_engine_alternation_pattern_is_never_anchor_gated() -> None:
     engine = GovernanceEngine(Constitution.from_rules([rule]), strict=False)
     assert engine._pat_anchor_dispatch == ()
     assert [ri for ri, _ in engine._no_anchor_patterns] == [0]
+
+
+# --- anchored rules see every leaf as written -------------------------------------
+
+
+def _anchored_agent(stub: _Stub) -> GovernedAgent:
+    rule = Rule(id="NO-RMRF-START", text="r", patterns=[r"^rm\s+-rf"], severity=Severity.CRITICAL)
+    return GovernedAgent(
+        stub, constitution=Constitution.from_rules([rule]), maci_role=MACIRole.EXECUTOR
+    )
+
+
+@pytest.mark.parametrize("mode", ["run", "arun"])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"q": "rm -rf /"}, id="plain"),
+        pytest.param({"q": "rm\t-rf /"}, id="tab"),
+        pytest.param({"q": ["ok", {"cmd": "rm -rf /"}]}, id="nested"),
+        pytest.param({"q": {"rm -rf /": 1}}, id="key"),
+    ],
+)
+def test_agent_start_anchored_rule_sees_plain_leaves(mode: str, kwargs: dict[str, Any]) -> None:
+    stub = _Stub()
+    with pytest.raises(ConstitutionalViolationError) as excinfo:
+        _invoke(mode, _anchored_agent(stub), **kwargs)
+    assert excinfo.value.rule_id == "NO-RMRF-START"
+    assert stub.calls == []
+
+
+@pytest.mark.parametrize("mode", ["run", "arun"])
+def test_agent_start_anchored_rule_allows_mid_text(mode: str) -> None:
+    stub = _Stub()
+    assert _invoke(mode, _anchored_agent(stub), q="never rm -rf /") == "ok"
+
+
+# --- anchor soundness: the anchor is in every text the regex matches --------------
+
+_REVIEW_CASES = [
+    (r"\bdrops?\b", "please drop it"),
+    (r"secrets?", "a secret"),
+    (r"colou?r", "color"),
+    (r"pass(word){0,1}", "pass"),
+    (r"(dangerous)?payload", "payload"),
+    (r"(?:please\s+)?delete\s+all", "delete all"),
+    (r"(?<!not )allowed", "allowed"),
+    (r"(?!xyz)abcdef", "abcdef"),
+    (r"\bdrop\s+table\b", "drop\ttable"),
+    (r"\b(?:drop|truncate)\s+table\b", "truncate table"),
+    (r"secret", "a secret"),
+    (r"disk", "disk"),
+    (r"kill", "kill"),
+]
+
+_SAMPLE_TEXTS = [
+    "123-45-6789",
+    "token sk-" + "a" * 24,
+    "ghp_" + "b" * 36,
+    "glpat-" + "c" * 20,
+    "x UNION   SELECT y",
+    "<script src=x>",
+    "eval (1)",
+    "4111111111111111",
+    "123456789",
+    "A" * 40,
+]
+
+
+def _fold_variants(text: str) -> list[str]:
+    """Case and Unicode-fold variants that re.IGNORECASE still matches."""
+    return [
+        text,
+        text.upper(),
+        text.replace("s", "ſ"),  # long s
+        text.replace("i", "ı"),  # dotless i
+        text.replace("i", "İ"),  # I with dot
+        text.replace("k", "K"),  # Kelvin sign
+    ]
+
+
+def _repo_patterns() -> list[str]:
+    patterns = [p for r in Constitution.default().rules for p in r.patterns]
+    for domain in ("gitlab", "healthcare", "finance", "security", "general"):
+        patterns += [p for r in Constitution.from_template(domain).rules for p in r.patterns]
+    return list(dict.fromkeys(patterns))
+
+
+def test_anchor_is_substring_of_every_match() -> None:
+    from acgs_lite.engine.core import _match_variants, _required_literal_anchor
+
+    patterns = [p for p, _ in _REVIEW_CASES] + _repo_patterns()
+    corpus = [v for t in [t for _, t in _REVIEW_CASES] + _SAMPLE_TEXTS for v in _fold_variants(t)]
+    checked = 0
+    for pattern in patterns:
+        compiled = re.compile(pattern, re.IGNORECASE)
+        anchor = _required_literal_anchor(pattern)
+        rule = Rule(id="R", text="r", patterns=[pattern], severity=Severity.CRITICAL)
+        engine = GovernanceEngine(Constitution.from_rules([rule]), strict=False)
+        for text in corpus:
+            variants = _match_variants(text)
+            if not any(compiled.search(v) for v in variants):
+                continue
+            checked += 1
+            if anchor is not None:
+                assert any(anchor in v for v in variants if compiled.search(v)), (
+                    pattern,
+                    text,
+                    anchor,
+                )
+            assert not engine.validate(text).valid, (pattern, text, anchor)
+    assert checked >= len(_REVIEW_CASES) * 3  # the corpus really exercises the patterns
+
+
+@pytest.mark.parametrize(
+    ("pattern", "anchor"),
+    [
+        (r"\bdrops?\b", "drop"),
+        (r"colou?r", "colo"),
+        (r"(?:please\s+)?delete\s+all", "delete"),
+        (r"(?<!not )allowed", "allowed"),
+        (r"(?!xyz)abcdef", "abcdef"),
+        (r"(dangerous)?payload", "payload"),
+        (r"secrets?", "ecret"),  # "s" can match U+017F, which survives lower()
+        (r"pass(word){0,1}", None),
+        (r"drop|truncate", None),
+        (r"café", "caf"),  # a non-ASCII literal ends the run
+        ("été", None),
+        (r"[", None),  # unparseable
+    ],
+)
+def test_required_literal_anchor(pattern: str, anchor: str | None) -> None:
+    from acgs_lite.engine.core import _required_literal_anchor
+
+    assert _required_literal_anchor(pattern) == anchor
