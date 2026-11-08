@@ -31,13 +31,13 @@ One entry per term: definition, boundaries, one resolved ambiguity. Agents write
 - Resolved ambiguity: a receipt records a decision and grants nothing. Execution authority comes from an ExecutionGrant that embeds the receipt.
 
 ## SignedReceipt
-- Definition: `SignedReceipt` (`src/acgs_lite/legitimacy/signing.py`) wraps a DecisionReceipt in an asymmetric signature. Its `signature_scope` is either `"receipt"` (the default) or `"execution"`. Execution scope requires `authorization_json`, which is signed as opaque bytes and never parsed.
+- Definition: `SignedReceipt` (`src/acgs_lite/legitimacy/signing.py`) wraps a DecisionReceipt in an asymmetric signature. Its `signature_scope` is either `"receipt"` (the default) or `"execution"`. Execution scope requires `authorization_json`, which signing treats as opaque bytes. The production gate (`_verify_signed_production`, `src/acgs_lite/governed.py`) parses it after the signature check and compares its method, argument digest, policy digest, scope and subjects with the invocation, so an arbitrary signed string is not executable.
 - Boundary: it is a signature over a receipt. Under scope `"receipt"` it is not an authorization.
 - Avoid: signed decision, attestation, signed grant.
 - Resolved ambiguity: `signed_envelope_identity()` hashes `key_id` and `signed_at`, which the signature does not cover. An envelope identity is therefore an evidence reference, not proof of authenticity.
 
 ## ExecutionGrant
-- Definition: `ExecutionAuthority.issue()` (`src/acgs_lite/legitimacy/authorization.py`) mints an `ExecutionGrant` binding the receipt, method, argument digest, policy digest, scope, subjects, context and expiry. It is single-use by default and authenticated by a `binding_mac` keyed with a per-instance secret.
+- Definition: `ExecutionAuthority.issue()` (`src/acgs_lite/legitimacy/authorization.py`) mints an `ExecutionGrant` binding the receipt, method, argument digest, policy digest, scope, subjects, context and expiry. It is authenticated by a `binding_mac` keyed with a per-instance secret. `single_use=True` is only a flag: `ExecutionAuthority.verify()` does not consume the grant. The production gate requires the flag and consumes through `InProcessGrantLedger`, but the default compatibility branch in `governed.py` verifies without the ledger, so a grant can be reused there.
 - Boundary: it is a process-local capability, verifiable only by the `ExecutionAuthority` instance that issued it. It is not a portable token, and it is not its evidence reference (`local_grant_identity`).
 - Avoid: token, permit, approval, signed grant.
 - Resolved ambiguity: grants do not survive a restart and cannot be verified by a second process. Durable or cross-process authority is not implemented.
@@ -55,7 +55,7 @@ One entry per term: definition, boundaries, one resolved ambiguity. Agents write
 - Resolved ambiguity: `record()` only logs a backend write failure as a warning. Use `record_durable()` for fail-closed persistence. The generic `to_receipt_dict()` projection (`src/acgs_lite/legitimacy/receipt.py`) renames the entry's `constitutional_hash` to `policy_hash`, so the same value appears under two names.
 
 ## external effect
-- Definition: one provider dispatch tracked by `EffectStore` (`src/acgs_lite/legitimacy/effects.py`), an opt-in SQLite lifecycle with the `EffectState` values RESERVED, IN_FLIGHT, UNKNOWN, DONE and NOT_DONE. `send()` commits IN_FLIGHT before calling the provider, and any exception moves the effect to UNKNOWN. `reconcile()` settles only through `EffectProvider.query_and_fence`, and it accepts NOT_DONE only when the effect was fenced (`fenced=True`).
+- Definition: one provider dispatch tracked by `EffectStore` (`src/acgs_lite/legitimacy/effects.py`), an opt-in SQLite lifecycle with the `EffectState` values RESERVED, IN_FLIGHT, UNKNOWN, DONE and NOT_DONE. `send()` commits IN_FLIGHT before calling the provider, and on an exception it tries to move the effect to UNKNOWN. That write is best-effort: if it fails, the effect stays IN_FLIGHT with its budget hold, so recovery must reconcile IN_FLIGHT as well as UNKNOWN effects. `reconcile()` settles only through `EffectProvider.query_and_fence`, and it accepts NOT_DONE only when the effect was fenced (`fenced=True`).
 - Boundary: it is durable evidence that runs from reservation to settlement, for fixed all-or-nothing side effects. It is not authorization: the host validates and consumes authority first, and the store is not wired into decorators.
 - Avoid: transaction, job, "authorized effect".
 - Resolved ambiguity: the in-process `AttemptStatus.PARTIAL` (`src/acgs_lite/legitimacy/ledger.py`) is a different state. PARTIAL is not UNKNOWN, so keep the two separate.
