@@ -101,7 +101,9 @@ def normalize_path(path: object, repo_root: str | None = None) -> str | None:
     # TODO(control-plane-gap): symlinks are not resolved (no filesystem access
     # here); an agent-created symlink into the core must be blocked by the
     # sandbox filesystem layer, which Phase 1 does not provide.
-    if not isinstance(path, str) or not path:
+    # Subclasses can override normalization methods while retaining a different
+    # filesystem spelling when the original argument reaches the tool.
+    if type(path) is not str or not path:
         return None
     if _CONTROL_CHARS.search(path) or path != path.strip():
         return None
@@ -235,6 +237,13 @@ def module_shadow_patterns(pattern: str) -> tuple[str, ...]:
 _STARTUP_HOOKS = frozenset({"sitecustomize", "usercustomize"})
 IMPORT_SHADOW_PATTERNS = (
     "*.py",
+    "*.pyc",
+    "*.so",
+    "*.pyd",
+    "*/__init__.py",
+    "*/__init__.pyc",
+    "*/__init__*.so",
+    "*/__init__*.pyd",
     "**/conftest.py",
     "src/*.py",
     "**/sitecustomize*",
@@ -378,7 +387,7 @@ class ImmutableCoreRegistry:
     def _import_shadow(self, normalized: str) -> bool:
         """Paths that change what the trusted import closure executes:
         ``sitecustomize``/``usercustomize``, ``*.pth`` and ``conftest.py``
-        anywhere, any repo-root ``*.py``, any
+        anywhere, any repo-root module or package initializer, any
         top-level ``src/*.py`` (``src/json.py`` shadows the stdlib under
         PYTHONPATH=src) and any ``src/<entry>`` that is not a trusted package."""
         if self._src_packages is None:
@@ -392,9 +401,13 @@ class ImmutableCoreRegistry:
             # pytest imports every conftest on its collection path; one can
             # neuter `make verify` / CI.
             return True
-        if len(segments) == 1 and segments[0].endswith(".py"):
+        importable = segments[-1].endswith((".py", ".pyc", ".so", ".pyd"))
+        if importable and (
+            len(segments) == 1
+            or (len(segments) == 2 and segments[-1].split(".", 1)[0] == "__init__")
+        ):
             # The repo root is on sys.path (`python -m pytest`, PYTHONPATH=.):
-            # a root json.py / conftest.py shadows the stdlib or the test run.
+            # modules and package initializers can shadow trusted imports.
             return True
         return (
             segments[0] == "src" and len(segments) >= 2 and (segments[1] not in self._src_packages)
