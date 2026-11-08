@@ -203,11 +203,14 @@ def compile_glob(pattern: str, *, case_sensitive: bool = False) -> re.Pattern[st
                 i += 1
                 continue
             body = pattern[i + 1 : close]
+            body = body.replace("\\", "\\\\")
             if body.startswith("!"):
                 body = "^" + body[1:]
+            elif body.startswith("^"):
+                body = "\\" + body
             # Negated classes otherwise include '/', and ranges can include
             # it implicitly. Every class must remain inside one segment.
-            out.append("(?!/)[" + body.replace("\\", "\\\\").replace("/", "") + "]")
+            out.append("(?!/)[" + body + "]")
             i = close + 1
             continue
         out.append(re.escape(char))
@@ -573,6 +576,10 @@ DEFAULT_IMMUTABLE_CORE = ImmutableCoreRegistry(
             ".gitlab-ci.yml",
             ".pre-commit-config.yaml",
             "Makefile",
+            # Directly executed trusted scripts put this directory first on
+            # sys.path. Sibling modules, packages and native extensions can
+            # replace any dependency imported by a release or validation gate.
+            "scripts/**",
             "scripts/check_critical_coverage.py",
             "scripts/release_candidate.py",
             "scripts/qualify_wheel.py",

@@ -57,6 +57,7 @@ categories:
   - .gitlab-ci.yml
   - .pre-commit-config.yaml
   - Makefile
+  - scripts/**
   - scripts/check_critical_coverage.py
   - scripts/check_links.py
   - scripts/check_release_coherence.py
