@@ -378,7 +378,13 @@ class GovernedToolDispatcher:
     # -- authorisation -------------------------------------------------
 
     def _pre_denial(
-        self, principal: object, tool_name: object, reason: str, *, telemetry: bool = True
+        self,
+        principal: object,
+        tool_name: object,
+        reason: str,
+        *,
+        telemetry: bool = True,
+        group_id: str | None = None,
     ) -> ToolDenied:
         decision = self._pdp._record_denial(
             reason,
@@ -388,6 +394,7 @@ class GovernedToolDispatcher:
             error="dispatch_denied",
             telemetry=telemetry,
             principal_kind=principal.kind if isinstance(principal, Principal) else None,
+            group_id=group_id,
         )
         return ToolDenied(decision)
 
@@ -623,6 +630,7 @@ class GovernedToolDispatcher:
         spec: _ToolSpec,
         trigger_id: str | None,
         session: ScopedCredential | None,
+        group_id: str | None,
     ) -> None:
         """Re-admit after the PDP: a failure observed meanwhile may have
         tripped the breaker, suspended the cohort or demoted the agent. Only
@@ -640,10 +648,13 @@ class GovernedToolDispatcher:
                 raise _Denied("autonomy demoted to P0_ONLY: read-only T0 tools only")
             self._breaker_check(principal, trigger_id, session, consume=True)
         except _Denied as exc:
-            raise self._pre_denial(principal, tool_name, str(exc)) from exc
+            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
         except Exception as exc:
             raise self._pre_denial(
-                principal, tool_name, f"harness check failed: {type(exc).__name__}"
+                principal,
+                tool_name,
+                f"harness check failed: {type(exc).__name__}",
+                group_id=group_id,
             ) from exc
 
     def _harness_checks(
@@ -809,7 +820,14 @@ class GovernedToolDispatcher:
                         telemetry=consume,
                     )
         if consume:
-            self._final_admission(principal, tool_name, spec, trigger_id, session)
+            self._final_admission(
+                principal,
+                tool_name,
+                spec,
+                trigger_id,
+                session,
+                decisions[0].decision_id if decisions else None,
+            )
         return spec, args, decisions
 
     def _recheck_kill_switch(self, principal: Principal, tool_name: str) -> None:
