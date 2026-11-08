@@ -35,7 +35,12 @@ _log = logging.getLogger(__name__)
 _MAX_RETRIES_LIMIT = 10
 
 from acgs_lite.audit import AuditEntry, AuditLog
-from acgs_lite.circuit_breaker import GovernanceCircuitBreaker, WebhookNotificationChannel
+from acgs_lite.circuit_breaker import (
+    HALT_SIGNAL_DIR_ENV,
+    GovernanceCircuitBreaker,
+    NotificationChannel,
+    WebhookNotificationChannel,
+)
 from acgs_lite.constitution import Constitution
 from acgs_lite.constitution.refusal_reasoning import RefusalReasoningEngine
 from acgs_lite.constrained_output import attach_response_format
@@ -245,15 +250,21 @@ class GovernedAgent:
         if governance_context is not None and not isinstance(governance_context, Mapping):
             raise TypeError("governance_context must be a mapping")
         webhook_url = os.getenv("ACGS_HALT_WEBHOOK_URL")
-        if circuit_breaker is None and webhook_url:
-            circuit_breaker = GovernanceCircuitBreaker(
-                system_id=agent_id,
-                notification_channels=[
+        halt_signal_dir = os.getenv(HALT_SIGNAL_DIR_ENV, "").strip()
+        # Opt-in default breaker: built only when a halt webhook or a shared halt
+        # signal dir is configured. With neither, there is no default breaker.
+        if circuit_breaker is None and (webhook_url or halt_signal_dir):
+            channels: list[NotificationChannel] = []
+            if webhook_url:
+                channels.append(
                     WebhookNotificationChannel(
                         webhook_url,
                         secret=os.getenv("ACGS_HALT_WEBHOOK_SECRET"),
                     )
-                ],
+                )
+            circuit_breaker = GovernanceCircuitBreaker(
+                system_id=agent_id,
+                notification_channels=channels,
             )
         self._agent = agent
         self.agent_id = agent_id
@@ -348,6 +359,8 @@ class GovernedAgent:
 
     def _execute_agent(self, input: str, **kwargs: Any) -> Any:
         """Execute the underlying agent (sync)."""
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.check()
         if hasattr(self._agent, "run"):
             return self._agent.run(input, **kwargs)
         elif callable(self._agent):
@@ -679,6 +692,8 @@ class GovernedAgent:
 
     async def _aexecute_agent(self, input: str, **kwargs: Any) -> Any:
         """Execute the underlying agent (async)."""
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.check()
         if hasattr(self._agent, "arun"):
             return await self._agent.arun(input, **kwargs)
         elif hasattr(self._agent, "run"):
@@ -888,6 +903,7 @@ class GovernedCallable:
         receipt_signer: ReceiptSigner | None = None,
         trusted_execution_keys: Mapping[str, str] | None = None,
         grant_ttl_seconds: float | None = None,
+        circuit_breaker: GovernanceCircuitBreaker | None = None,
     ) -> None:
         """Construct the governed-callable decorator.
 
@@ -903,6 +919,9 @@ class GovernedCallable:
         recovery of an attempt already recorded for the grant. The signing
         arguments are refused outside the production profile.
         """
+        if circuit_breaker is None and os.getenv(HALT_SIGNAL_DIR_ENV, "").strip():
+            circuit_breaker = GovernanceCircuitBreaker(system_id=agent_id)
+        self._circuit_breaker = circuit_breaker
         self.constitution = constitution or Constitution.default()
         self.agent_id = agent_id
         self.audit_log = audit_log if audit_log is not None else AuditLog()
@@ -1229,6 +1248,8 @@ class GovernedCallable:
         self, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[ConsumeDecision | None, str]:
         """Authorize the call; return the ledger outcome and the bound argument digest."""
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.check()
         if self.require_durable_audit:
             self.audit_log.validate_durable_state()
         tokens = extract_authorization_kwargs(kwargs)
