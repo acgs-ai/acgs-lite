@@ -353,3 +353,14 @@ class TestImportPathShadows:
     def test_codeowners_lists_import_shadows(self) -> None:
         text = render_codeowners(DEFAULT_IMMUTABLE_CORE, ["@o"])
         assert "/src/*.py @o" in text and "**/*.pth @o" in text
+
+
+class TestRepoRootImportShadows:
+    """Round-2 re-review (MEDIUM): repo-root modules and conftest files."""
+
+    @pytest.mark.parametrize("path", ["json.py", "conftest.py", "pkg/tests/conftest.py"])
+    def test_core(self, path: str) -> None:
+        assert DEFAULT_IMMUTABLE_CORE.classify(path) is CoreCategory.CONTROL_PLANE
+
+    def test_ordinary_module_unchanged(self) -> None:
+        assert DEFAULT_IMMUTABLE_CORE.classify("src/acgs_lite/foo.py") is None

@@ -233,6 +233,8 @@ def module_shadow_patterns(pattern: str) -> tuple[str, ...]:
 
 _STARTUP_HOOKS = frozenset({"sitecustomize", "usercustomize"})
 IMPORT_SHADOW_PATTERNS = (
+    "*.py",
+    "**/conftest.py",
     "src/*.py",
     "**/sitecustomize*",
     "**/sitecustomize*/**",
@@ -374,7 +376,8 @@ class ImmutableCoreRegistry:
 
     def _import_shadow(self, normalized: str) -> bool:
         """Paths that change what the trusted import closure executes:
-        ``sitecustomize``/``usercustomize`` and ``*.pth`` anywhere, any
+        ``sitecustomize``/``usercustomize``, ``*.pth`` and ``conftest.py``
+        anywhere, any repo-root ``*.py``, any
         top-level ``src/*.py`` (``src/json.py`` shadows the stdlib under
         PYTHONPATH=src) and any ``src/<entry>`` that is not a trusted package."""
         if self._src_packages is None:
@@ -383,6 +386,14 @@ class ImmutableCoreRegistry:
         if any(seg.split(".", 1)[0] in _STARTUP_HOOKS for seg in segments):
             return True
         if segments[-1].endswith(".pth"):
+            return True
+        if segments[-1] == "conftest.py":
+            # pytest imports every conftest on its collection path; one can
+            # neuter `make verify` / CI.
+            return True
+        if len(segments) == 1 and segments[0].endswith(".py"):
+            # The repo root is on sys.path (`python -m pytest`, PYTHONPATH=.):
+            # a root json.py / conftest.py shadows the stdlib or the test run.
             return True
         return (
             segments[0] == "src" and len(segments) >= 2 and (segments[1] not in self._src_packages)
