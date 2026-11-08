@@ -223,3 +223,15 @@ class TestKillSwitch:
                 tool_tiers={},
                 kill_switch=object(),  # type: ignore[arg-type]
             )
+
+
+def test_directory_becoming_writable_engages_without_signal(tmp_path):
+    directory = tmp_path / "halt"
+    switch = KillSwitch("sys-a", signal_dir=directory)
+    assert not switch.is_engaged()
+    directory.chmod(0o777)
+    try:
+        assert not switch.signal_path.exists()
+        assert switch.is_engaged()
+    finally:
+        directory.chmod(0o700)
