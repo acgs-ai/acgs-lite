@@ -65,6 +65,57 @@ PROMPT = ARTIFACT_FILES["prompt"]
 CONTROL_PLANE = Path(__file__).resolve().parents[2] / "src" / "acgs_lite" / "control_plane"
 
 
+def test_takeover_attests_actor_and_preserves_independent_approval(
+    env: DemoEnvironment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from acgs_lite.control_plane.action_hash import action_hash
+    from acgs_lite.control_plane.identity import AdminAttestor
+    from acgs_lite.control_plane.incident import IncidentMutationLock
+    from acgs_lite.control_plane.roles import RoleAssignments
+
+    cp = env.cp
+    bootstrap = Principal("role-bootstrap", PrincipalKind.HUMAN)
+    roles = RoleAssignments(bootstrap)
+    for capability, human in (
+        ("incident_commander", REQUESTER),
+        ("incident_admin", ADMIN),
+        ("incident_admin", APPROVER),
+    ):
+        roles.grant_capability(bootstrap, capability, human)
+    lock = IncidentMutationLock(
+        registry=cp.registry, roles=roles, pdp=cp.pdp, admin_attestor=AdminAttestor(cp.credentials)
+    )
+    state = lock.declare_incident(
+        REQUESTER, "inc-auth", admin_credential=env.human_credential(REQUESTER)
+    )
+    lock.acquire(
+        AGENT, "inc-auth", commander=REQUESTER, admin_credential=env.human_credential(REQUESTER)
+    )
+    monkeypatch.setattr(lock, "_clock", lambda: state.declared_at + 100000)
+    request = lock.takeover_request(ADMIN, "commander unavailable")
+    approval = env.approver_sign(action_hash(request))
+    before = lock.state_path.read_bytes(), lock.history()
+    with pytest.raises(IncidentLockError, match="admin attestation"):
+        lock.take_over(ADMIN, "commander unavailable", approvals=[approval])
+    with pytest.raises(IncidentLockError, match="admin attestation"):
+        lock.take_over(
+            ADMIN,
+            "commander unavailable",
+            approvals=[approval],
+            admin_credential=env.human_credential(APPROVER),
+        )
+    assert (lock.state_path.read_bytes(), lock.history()) == before
+    with pytest.raises(IncidentLockError, match="second incident_admin"):
+        lock.take_over(ADMIN, "commander unavailable", admin_credential=env.human_credential(ADMIN))
+    token = env.human_credential(ADMIN)
+    result = lock.take_over(
+        ADMIN, "commander unavailable", approvals=[approval], admin_credential=token
+    )
+    assert result.commander_id == ADMIN.canonical_id and result.holder_id is None
+    with pytest.raises(IncidentLockError, match="admin attestation"):
+        lock.take_over(ADMIN, "commander unavailable", approvals=[approval], admin_credential=token)
+
+
 @pytest.fixture()
 def env(tmp_path: Path) -> Iterator[DemoEnvironment]:
     environment = build_demo_environment(tmp_path)
@@ -324,6 +375,10 @@ def _admin_calls(env: DemoEnvironment) -> dict[str, tuple[type[Exception], Admin
             IncidentLockError,
             lambda a, c: cp.incident_lock.resolve(a, admin_credential=c),
         ),
+        "incident_takeover": (
+            IncidentLockError,
+            lambda a, c: cp.incident_lock.take_over(a, "recovery", admin_credential=c),
+        ),
         "promotion_promote": (
             PromotionRejected,
             lambda a, c: cp.promotion.promote(
@@ -360,6 +415,7 @@ ENTRY_POINTS: dict[str, str] = {
     "incident_transfer": "incident.py:IncidentMutationLock._require_commander",
     "incident_release": "incident.py:IncidentMutationLock._require_commander",
     "incident_resolve": "incident.py:IncidentMutationLock._require_commander",
+    "incident_takeover": "roles.py:RoleAssignments.has_capability",
     # PromotionGate.promote has no kind check of its own (the PDP and the
     # ledger enforce HUMAN); it is attested at its entry.
     "promotion_promote": "receipt_ledger.py:ReceiptLedger.append_promotion",

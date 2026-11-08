@@ -543,12 +543,18 @@ class IncidentMutationLock:
         )
 
     def take_over(
-        self, admin: Principal, reason: str, *, approvals: Sequence[SignedApproval] = ()
+        self,
+        admin: Principal,
+        reason: str,
+        *,
+        approvals: Sequence[SignedApproval] = (),
+        admin_credential: str | None = None,
     ) -> IncidentState:
         """Break glass: a human holding ``incident_admin`` takes command of a
         stale incident (no commander/holder activity for ``stale_after_s``),
         with a signed approval from a *second* incident_admin; receipted and
         logged. The holder is released."""
+        self._attest(admin, admin_credential)
         if self._roles is None or self._pdp is None:
             raise IncidentLockError("break-glass takeover needs role assignments and a PDP")
         if not self._roles.has_capability(admin, CAP_INCIDENT_ADMIN):
