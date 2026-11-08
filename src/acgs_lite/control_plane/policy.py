@@ -117,7 +117,12 @@ class PolicyStatement:
         if normalized is None:
             if self.effect is not PolicyEffect.FORBID:
                 return False
-        elif not any(_compiled_glob(glob).fullmatch(normalized) for glob in self.resources):
+        elif not any(
+            _compiled_glob(glob, case_sensitive=self.effect is PolicyEffect.PERMIT).fullmatch(
+                normalized
+            )
+            for glob in self.resources
+        ):
             return False
         if self.condition is None:
             return True

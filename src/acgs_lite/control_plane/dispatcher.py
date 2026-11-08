@@ -22,11 +22,13 @@ then requires, in order:
    parent directory deletes the core files beneath it. Existing directories
    and symlinks are not exempt even in scratch; OS confinement is still
    required to prevent filesystem changes racing these checks;
-4. PDP permits for a ``tool.call`` decision (``attributes["paths"]`` = the
+4. non-human directory reads are denied because their descendants may be
+   sensitive; regular leaf-file reads still require per-path authorization;
+5. PDP permits for a ``tool.call`` decision (``attributes["paths"]`` = the
    declared paths plus every string leaf, at any depth, that classifies as
    core) and for one ``file.write`` (or ``file.read`` for read-only tools)
    decision per such path;
-5. repository permissions: ``RepositoryPermissions.can_write`` for every path
+6. repository permissions: ``RepositoryPermissions.can_write`` for every path
    a write tool receives (an independent second layer; it is required).
 
 Phase 3 adds harness-side pre-checks, all before step 1 and none operable by
@@ -506,6 +508,21 @@ class GovernedToolDispatcher:
                 # enforced on it: only a principal granted "**" may use it.
                 raise _Denied("shell-like tools need an unrestricted ('**') repository write grant")
 
+        if spec.read_only and principal.kind is not PrincipalKind.HUMAN:
+            for path in declared:
+                normalized = self._registry.normalize(path)
+                if normalized is None:
+                    continue  # the PDP rejects unresolvable paths
+                target = posixpath.join(self._registry.repo_root or os.getcwd(), normalized)
+                directory_shaped = path.endswith("/") or "." not in normalized.rsplit("/", 1)[-1]
+                if (
+                    os.path.isdir(target)
+                    or os.path.islink(target)
+                    or (directory_shaped and not os.path.isfile(target))
+                ):
+                    raise _Denied(
+                        f"directory-like read target {path!r} may contain sensitive files"
+                    )
         if not spec.read_only and self._registry.has_unanchored_patterns():
             for path in declared:
                 if self._registry.is_core(path):

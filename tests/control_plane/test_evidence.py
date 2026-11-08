@@ -266,6 +266,7 @@ def _gh_payload(**overrides: Any) -> dict[str, Any]:
         "head_branch": "main",
         "event": "push",
         "repository": {"full_name": "o/r"},
+        "head_repository": {"full_name": "o/r"},
     }
     payload.update(overrides)
     return {k: v for k, v in payload.items() if v is not _MISSING}
@@ -299,7 +300,12 @@ class TestGitHubActionsRunVerifier:
         assert any("attest" in reason for reason in reasons)
 
     def test_success(self) -> None:
-        fetch = _Fetch(_gh_payload(repository={"full_name": "acgs-ai/acgs-lite"}))
+        fetch = _Fetch(
+            _gh_payload(
+                repository={"full_name": "acgs-ai/acgs-lite"},
+                head_repository={"full_name": "acgs-ai/acgs-lite"},
+            )
+        )
         assert _gh(fetch, "acgs-ai/acgs-lite").validate(_gh_ref()).valid
         assert fetch.paths == ["/repos/acgs-ai/acgs-lite/actions/runs/42"]
 
@@ -540,3 +546,49 @@ class TestR1DigestAttestation:
         reasons = evaluate_evidence([_ci(artifact_digest=DIGEST)], NoAttest(), required=True)
         assert any("cannot attest" in r for r in reasons)
         assert evaluate_evidence([_ci(head_sha=SHA)], NoAttest(), required=True) == ()
+
+
+@pytest.mark.parametrize("event", ["pull_request", "pull_request_target", "workflow_run"])
+@pytest.mark.parametrize(
+    "head_repo", [{"full_name": "fork/r"}, None, {}, [], {"full_name": 17}, _MISSING]
+)
+def test_github_rejects_untrusted_head_repository_before_artifact_attestation(
+    event: str, head_repo: Any
+) -> None:
+    artifact_calls: list[str] = []
+
+    def artifacts(path: str) -> tuple[str, ...]:
+        artifact_calls.append(path)
+        return (DIGEST,)
+
+    verifier = GitHubActionsRunVerifier(
+        _Fetch(_gh_payload(event=event, head_repository=head_repo)),
+        repository="o/r",
+        allowed_workflows={".github/workflows/ci.yml"},
+        allowed_branches={"main"},
+        allowed_events={event},
+        artifact_fetch=artifacts,
+    )
+    reasons = evaluate_evidence(
+        (_gh_ref(artifact_digest=DIGEST),), verifier, required=True, bind_digest=DIGEST
+    )
+    assert any("head repository" in reason for reason in reasons)
+    assert artifact_calls == []
+
+
+@pytest.mark.parametrize("event", ["push", "pull_request", "pull_request_target", "workflow_run"])
+def test_github_accepts_allowed_same_repository_head(event: str) -> None:
+    verifier = GitHubActionsRunVerifier(
+        _Fetch(_gh_payload(event=event, head_repository={"full_name": "o/r"})),
+        repository="o/r",
+        allowed_workflows={".github/workflows/ci.yml"},
+        allowed_branches={"main"},
+        allowed_events={event},
+        artifact_fetch=lambda _: (DIGEST,),
+    )
+    assert (
+        evaluate_evidence(
+            (_gh_ref(artifact_digest=DIGEST),), verifier, required=True, bind_digest=DIGEST
+        )
+        == ()
+    )
