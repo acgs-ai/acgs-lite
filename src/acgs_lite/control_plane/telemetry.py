@@ -243,6 +243,12 @@ class _ApprovalEvent(OversightEvent):
 @dataclass(frozen=True, kw_only=True)
 class ApprovalRequested(_ApprovalEvent):
     kind: ClassVar[EventKind] = EventKind.APPROVAL_REQUESTED
+    principal_kind: PrincipalKind | None = None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.principal_kind is not None:
+            object.__setattr__(self, "principal_kind", PrincipalKind(self.principal_kind))
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -689,9 +695,17 @@ class TelemetryRecorder:
         )
 
     def record_approval_requested(
-        self, action_hash: str, *, at: float | None = None
+        self,
+        action_hash: str,
+        *,
+        principal_kind: PrincipalKind | None = None,
+        at: float | None = None,
     ) -> OversightEvent:
-        return self._append(ApprovalRequested(action_hash=action_hash, **self._common(at)))
+        return self._append(
+            ApprovalRequested(
+                action_hash=action_hash, principal_kind=principal_kind, **self._common(at)
+            )
+        )
 
     def record_approval_granted(
         self, action_hash: str, approver_id: str, *, at: float | None = None
@@ -943,9 +957,13 @@ class OversightMetrics:
             raise TypeError("store must implement TelemetryStore")
         self._store = store
         self._clock = clock
+        self._event_batch: tuple[OversightEvent, ...] | None = None
+
+    def _read_all(self) -> tuple[OversightEvent, ...]:
+        return self._store.read_all() if self._event_batch is None else self._event_batch
 
     def _events(self, kind: type[OversightEvent]) -> list[Any]:
-        return [event for event in self._store.read_all() if type(event) is kind]
+        return [event for event in self._read_all() if type(event) is kind]
 
     def override_rate(
         self,
@@ -992,24 +1010,29 @@ class OversightMetrics:
         )
 
     def approval_latency(
-        self, *, since: float | None = None, until: float | None = None
+        self, segment: Segment = "all", *, since: float | None = None, until: float | None = None
     ) -> LatencyMetric:
-        """Latency of approval requests made within ``[since, until]``."""
-        requested: dict[str, float] = {}
+        """Latency of requests in the window, segmented by requesting principal.
+
+        Legacy requests without attribution and SERVICE requests count only
+        under ``all``. Repeated requests retain the earliest attribution.
+        """
+        _check_segment(segment)
+        requested: dict[str, ApprovalRequested] = {}
         for event in self._events(ApprovalRequested):
-            if event.action_hash not in requested or event.at < requested[event.action_hash]:
-                requested[event.action_hash] = event.at
-        # Grants are emitted only for the counted approvals of a *satisfied*
-        # quorum, so the quorum completed at the latest of them (a T3 request
+            if event.action_hash not in requested or event.at < requested[event.action_hash].at:
+                requested[event.action_hash] = event
+        # Grants are emitted for the earliest approval prefix satisfying both
+        # quorum count and roles, so it completed at the latest (a T3 request
         # approved at +10s and +90s took 90s, not 10s). A denial resolves at
         # the first denial.
         completed: dict[str, float] = {}
         denied: dict[str, float] = {}
-        for event in self._store.read_all():
+        for event in self._read_all():
             if not isinstance(event, (ApprovalGranted, ApprovalDenied)):
                 continue
-            start = requested.get(event.action_hash)
-            if start is None or event.at < start:
+            request = requested.get(event.action_hash)
+            if request is None or event.at < request.at:
                 continue
             if isinstance(event, ApprovalGranted):
                 completed[event.action_hash] = max(
@@ -1022,8 +1045,11 @@ class OversightMetrics:
             resolved[action_hash] = min(at, resolved.get(action_hash, at))
         latencies: list[float] = []
         pending = pre_approved = 0
-        for action_hash, start in requested.items():
+        for action_hash, request in requested.items():
+            start = request.at
             if not _in_window(start, since, until):
+                continue
+            if segment != "all" and request.principal_kind is not _SEGMENT_KIND[segment]:
                 continue
             end = resolved.get(action_hash)
             if end is None:
@@ -1063,6 +1089,14 @@ class OversightMetrics:
         merged ``change_id``'s author kind; unmerged subjects appear only
         under ``"all"``."""
         _check_segment(segment)
+        return self._verifier_metrics(since=since, until=until).get(
+            (verifier_id, segment), ConfusionMetric(0, 0, 0, 0, None, None, 0)
+        )
+
+    def _verifier_metrics(
+        self, *, since: float | None = None, until: float | None = None
+    ) -> dict[tuple[str | None, Segment], ConfusionMetric]:
+        """Build shared latest-evidence indexes and aggregate every segment once."""
         truths: dict[str, GroundTruth] = {}
         for truth in self._events(GroundTruth):
             current = truths.get(truth.subject_id)
@@ -1070,42 +1104,41 @@ class OversightMetrics:
                 truths[truth.subject_id] = truth
         verdicts: dict[tuple[str, str], VerifierVerdict] = {}
         for verdict in self._events(VerifierVerdict):
-            if verifier_id is not None and verdict.verifier_id != verifier_id:
-                continue
             if not _in_window(verdict.at, since, until):
                 continue
             key = (verdict.verifier_id, verdict.subject_id)
             current_verdict = verdicts.get(key)
             if current_verdict is None or verdict.at >= current_verdict.at:
                 verdicts[key] = verdict
-        authors = self._author_kinds() if segment != "all" else {}
-        tp = fp = fn = tn = unlabeled = 0
-        for (_, subject_id), verdict in verdicts.items():
-            if segment != "all" and authors.get(subject_id) is not AuthorKind(segment):
-                continue
+        authors = self._author_kinds()
+        counts: dict[tuple[str | None, Segment], list[int]] = {}
+        for (verifier_id, subject_id), verdict in verdicts.items():
             truth = truths.get(subject_id)
             if truth is None:
-                unlabeled += 1
-                continue
-            flagged = verdict.predicted is Verdict.FAIL
-            failing = truth.actual is Verdict.FAIL
-            if flagged and failing:
-                tp += 1
-            elif flagged:
-                fp += 1
-            elif failing:
-                fn += 1
+                bucket = 4  # unlabeled
+            elif verdict.predicted is Verdict.FAIL:
+                bucket = 0 if truth.actual is Verdict.FAIL else 1  # tp / fp
             else:
-                tn += 1
-        return ConfusionMetric(
-            tp=tp,
-            fp=fp,
-            fn=fn,
-            tn=tn,
-            precision=_ratio(tp, tp + fp),
-            recall=_ratio(tp, tp + fn),
-            unlabeled=unlabeled,
-        )
+                bucket = 2 if truth.actual is Verdict.FAIL else 3  # fn / tn
+            segments: list[Segment] = ["all"]
+            author = authors.get(subject_id)
+            if author in (AuthorKind.AGENT, AuthorKind.HUMAN):
+                segments.append(author.value)
+            for segment in segments:
+                for selected in (None, verifier_id):
+                    counts.setdefault((selected, segment), [0, 0, 0, 0, 0])[bucket] += 1
+        return {
+            key: ConfusionMetric(
+                tp=tp,
+                fp=fp,
+                fn=fn,
+                tn=tn,
+                precision=_ratio(tp, tp + fp),
+                recall=_ratio(tp, tp + fn),
+                unlabeled=unlabeled,
+            )
+            for key, (tp, fp, fn, tn, unlabeled) in counts.items()
+        }
 
     def verifier_ids(self) -> tuple[str, ...]:
         return tuple(sorted({event.verifier_id for event in self._events(VerifierVerdict)}))
@@ -1159,20 +1192,28 @@ class OversightMetrics:
 
     def snapshot(self, *, rework_window_s: float = DEFAULT_REWORK_WINDOW_S) -> dict[str, Any]:
         """All four metrics (plus agent/human segments) as JSON-ready data."""
+        now = float(self._clock())
+        # A fresh query instance keeps concurrent callers independent and every
+        # section on one immutable store version, with one JSONL parse.
+        batch = OversightMetrics(self._store, clock=lambda: now)
+        batch._event_batch = tuple(self._read_all())
+        return batch._snapshot_data(rework_window_s=rework_window_s)
+
+    def _snapshot_data(self, *, rework_window_s: float) -> dict[str, Any]:
         segments: tuple[Segment, ...] = ("all", "agent", "human")
+        verifiers = self._verifier_metrics()
+        empty = ConfusionMetric(0, 0, 0, 0, None, None, 0)
         return {
             "generated_at": float(self._clock()),
             "override_rate": {s: dataclasses.asdict(self.override_rate(s)) for s in segments},
-            "approval_latency": dataclasses.asdict(self.approval_latency()),
+            "approval_latency": {s: dataclasses.asdict(self.approval_latency(s)) for s in segments},
             "verifier": {
                 "positive_class": Verdict.FAIL.value,
                 "segments": {
-                    s: dataclasses.asdict(self.verifier_precision_recall(segment=s))
-                    for s in segments
+                    s: dataclasses.asdict(verifiers.get((None, s), empty)) for s in segments
                 },
                 "by_verifier": {
-                    vid: dataclasses.asdict(self.verifier_precision_recall(vid))
-                    for vid in self.verifier_ids()
+                    vid: dataclasses.asdict(verifiers[(vid, "all")]) for vid in self.verifier_ids()
                 },
             },
             "post_merge_rework": {

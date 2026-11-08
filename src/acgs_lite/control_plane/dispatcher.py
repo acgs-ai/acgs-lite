@@ -316,7 +316,7 @@ class GovernedToolDispatcher:
             )
         )
         if self._gate is not None and spec.tier >= APPROVAL_GATE_MIN_TIER:
-            self._gate.note_approval_requested(digest)
+            self._gate.note_approval_requested(digest, principal_kind=principal.kind)
         return digest
 
     def register(

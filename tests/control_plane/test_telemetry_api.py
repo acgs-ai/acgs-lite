@@ -56,7 +56,9 @@ def _metrics() -> tuple[OversightMetrics, TriggerCircuitBreaker]:
     rec.record_decision("d1", PrincipalKind.AGENT, True)
     rec.record_decision("d2", PrincipalKind.HUMAN, False)
     rec.record_override("d1", ALICE, "human_overrode_allow")
-    rec.record_approval_requested("sha256:" + "a" * 64, at=clock.now - 30)
+    rec.record_approval_requested(
+        "sha256:" + "a" * 64, principal_kind=PrincipalKind.AGENT, at=clock.now - 30
+    )
     rec.record_approval_granted("sha256:" + "a" * 64, "bob")
     rec.record_verifier_verdict("c1", "v1", "fail")
     rec.record_ground_truth(
@@ -207,6 +209,8 @@ class TestEndpoints:
         latency = get("/telemetry/approval-latency")
         assert latency == dataclasses.asdict(metrics.approval_latency())
         assert latency["p50_s"] == 30
+        assert get("/telemetry/approval-latency", segment="agent")["p50_s"] == 30
+        assert get("/telemetry/approval-latency", segment="human")["count"] == 0
         verifier = get("/telemetry/verifier", verifier_id="v1", segment="agent")
         assert verifier["positive_class"] == "fail"
         assert (verifier["tp"], verifier["precision"], verifier["recall"]) == (1, 1.0, 1.0)
@@ -236,6 +240,7 @@ class TestEndpoints:
             ("/telemetry/rework", {"window_s": -1}),
             ("/telemetry/rework", {"segment": "robots"}),
             ("/telemetry/approval-latency", {"until": "nan"}),
+            ("/telemetry/approval-latency", {"segment": "robots"}),
         ],
     )
     def test_bad_query_is_400(
