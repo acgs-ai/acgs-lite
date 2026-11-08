@@ -145,8 +145,12 @@ def normalize_path(path: object, repo_root: str | None = None) -> str | None:
     return normalized
 
 
-def compile_glob(pattern: str) -> re.Pattern[str]:
-    """Compile a repo glob into a case-insensitive full-match regex.
+def compile_glob(pattern: str, *, case_sensitive: bool = False) -> re.Pattern[str]:
+    """Compile a repo glob into a full-match regex.
+
+    Core classification defaults to conservative case-insensitive matching;
+    permission grants use case-sensitive matching to avoid widening authority
+    to distinct filesystem paths.
 
     Semantics (deliberately not :mod:`fnmatch`, whose ``*`` crosses ``/``):
 
@@ -201,7 +205,8 @@ def compile_glob(pattern: str) -> re.Pattern[str]:
             continue
         out.append(re.escape(char))
         i += 1
-    return re.compile("".join(out), re.IGNORECASE | re.DOTALL)
+    flags = re.DOTALL if case_sensitive else re.IGNORECASE | re.DOTALL
+    return re.compile("".join(out), flags)
 
 
 def literal_prefix(pattern: str) -> str:

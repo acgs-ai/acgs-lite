@@ -455,6 +455,16 @@ class TestOpaqueSubclassBoundary:
 
 
 class TestFinalReviewBoundaries:
+    def test_grants_preserve_case_but_core_classification_remains_conservative(self) -> None:
+        permissions = RepositoryPermissions(
+            DEFAULT_IMMUTABLE_CORE,
+            [WriteGrant(AGENT.id, PrincipalKind.AGENT, ("Workspace/**",))],
+        )
+        assert permissions.can_write(AGENT, "Workspace/file.txt")
+        assert not permissions.can_write(AGENT, "workspace/file.txt")
+        assert not permissions.can_write(AGENT, "Workspace/.ENV")
+        assert DEFAULT_IMMUTABLE_CORE.is_core("EVALUATOR/score.py")
+
     @pytest.mark.parametrize(
         "path",
         [
@@ -473,7 +483,16 @@ class TestFinalReviewBoundaries:
                 DEFAULT_IMMUTABLE_CORE, [WriteGrant(AGENT.id, PrincipalKind.AGENT, (path,))]
             )
 
-    @pytest.mark.parametrize("path", ["workspace./x.py", "workspace../x.py", "workspace\\x.py"])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "workspace./x.py",
+            "workspace../x.py",
+            "workspace\\x.py",
+            "Workspace/x.py",
+            "WORKSPACE/x.py",
+        ],
+    )
     def test_nonportable_alias_cannot_escape_workspace_grant(
         self, pdp: PolicyDecisionPoint, path: str
     ) -> None:
