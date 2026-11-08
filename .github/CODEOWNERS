@@ -56,6 +56,7 @@
 /.gitlab-ci.yml @acgs-ai/governance-humans
 /.pre-commit-config.yaml @acgs-ai/governance-humans
 /Makefile @acgs-ai/governance-humans
+/requirements-test-optional.txt @acgs-ai/governance-humans
 /scripts/** @acgs-ai/governance-humans
 /scripts/check_critical_coverage.py @acgs-ai/governance-humans
 /scripts/check_links.py @acgs-ai/governance-humans

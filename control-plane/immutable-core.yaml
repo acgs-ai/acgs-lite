@@ -50,6 +50,7 @@ categories:
   - .gitlab-ci.yml
   - .pre-commit-config.yaml
   - Makefile
+  - requirements-test-optional.txt
   - scripts/**
   - scripts/check_critical_coverage.py
   - scripts/check_links.py
