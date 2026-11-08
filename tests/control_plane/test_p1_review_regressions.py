@@ -675,6 +675,10 @@ class TestFinalReviewBoundaries:
             "scripts/run_governance_regression.py",
             "scripts/check_links.py",
             "scripts/check_release_coherence.py",
+            "scripts/subprocess.py",
+            "scripts/json.py",
+            "scripts/json/__init__.py",
+            "scripts/subprocess.cpython-310-x86_64-linux-gnu.so",
             "tests/red_team/governance_fail_closed_cases.py",
             "Makefile",
         ],
@@ -686,6 +690,15 @@ class TestFinalReviewBoundaries:
             RepositoryPermissions(
                 DEFAULT_IMMUTABLE_CORE, [WriteGrant(AGENT.id, PrincipalKind.AGENT, (path,))]
             )
+
+    def test_caret_glob_class_is_literal(self) -> None:
+        permissions = RepositoryPermissions(
+            DEFAULT_IMMUTABLE_CORE,
+            [WriteGrant(AGENT.id, PrincipalKind.AGENT, ("workspace/[^a].txt",))],
+        )
+        assert permissions.can_write(AGENT, "workspace/^.txt")
+        assert permissions.can_write(AGENT, "workspace/a.txt")
+        assert not permissions.can_write(AGENT, "workspace/b.txt")
 
     @pytest.mark.parametrize(
         "path",
