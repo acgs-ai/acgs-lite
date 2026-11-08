@@ -19,7 +19,9 @@ then requires, in order:
    command token may resolve to an immutable-core path;
 3. for write tools: no *directory-like* path outside the scratch prefixes
    while the registry has unanchored (``**/``) patterns, because deleting a
-   parent directory deletes the core files beneath it;
+   parent directory deletes the core files beneath it. Existing directories
+   and symlinks are not exempt even in scratch; OS confinement is still
+   required to prevent filesystem changes racing these checks;
 4. PDP permits for a ``tool.call`` decision (``attributes["paths"]`` = the
    declared paths plus every string leaf, at any depth, that classifies as
    core) and for one ``file.write`` (or ``file.read`` for read-only tools)
@@ -72,7 +74,11 @@ from typing import Any
 from acgs_lite.control_plane.action_hash import arguments_digest
 from acgs_lite.control_plane.approvals import ApprovalGate, SignedApproval
 from acgs_lite.control_plane.autonomy import AutonomyController, AutonomyLevel, FailureKind
-from acgs_lite.control_plane.breaker import TriggerCircuitBreaker, valid_trigger_id
+from acgs_lite.control_plane.breaker import (
+    TriggerCircuitBreaker,
+    _BreakerAdmission,
+    valid_trigger_id,
+)
 from acgs_lite.control_plane.budgets import BudgetLedger
 from acgs_lite.control_plane.context import DecisionRequest
 from acgs_lite.control_plane.credentials import (
@@ -162,8 +168,8 @@ def _string_leaves(value: Any, out: list[str], depth: int = 0) -> None:
     elif value_type is bytes:
         try:
             out.append(value.decode("utf-8"))
-        except UnicodeDecodeError:
-            return
+        except UnicodeDecodeError as exc:
+            raise _Denied("byte arguments must be valid UTF-8 for path inspection") from exc
     elif any(value_type is scalar for scalar in _SCALARS):
         return
     elif value_type is dict:
@@ -429,11 +435,21 @@ class GovernedToolDispatcher:
         # A host that permits ordinary file updates binds a repository root
         # so the existing target can be checked before authorization.
         root = self._registry.repo_root
-        return root is None or not os.path.isfile(posixpath.join(root, normalized))
+        if root is None:
+            return True
+        target = posixpath.join(root, normalized)
+        return os.path.islink(target) or not os.path.isfile(target)
 
     def _in_scratch(self, raw: str) -> bool:
         normalized = self._registry.normalize(raw)
         if normalized is None:
+            return False
+        # Scratch prefixes still contain globally protected names (.env,
+        # conftest.py, etc.). Never exempt an existing directory or symlink:
+        # a recursive operation could mutate protected descendants. Traversal
+        # is not proof of confinement, so leave directory mutations denied.
+        target = posixpath.join(self._registry.repo_root or os.getcwd(), normalized)
+        if os.path.isdir(target) or os.path.islink(target):
             return False
         candidate = normalized.lower() + "/"
         return any(candidate.startswith(prefix) for prefix in self._scratch_prefixes)
@@ -589,10 +605,11 @@ class GovernedToolDispatcher:
         trigger_id: str | None,
         session: ScopedCredential | None,
         consume: bool,
-    ) -> None:
+        admission: _BreakerAdmission | None = None,
+    ) -> _BreakerAdmission | None:
         breaker = self._breaker
         if breaker is None or principal.kind is PrincipalKind.HUMAN:
-            return
+            return None
         registry = breaker.registry
         if registry is None:  # pragma: no cover - refused at construction
             raise _Denied("no trigger registry")
@@ -611,8 +628,17 @@ class GovernedToolDispatcher:
         for cohort in registry.cohorts_of(principal):
             if breaker.cohort_suspended(cohort, probing=trigger_id):
                 raise _Denied(f"system cohort {cohort} suspended (a bound trigger is not closed)")
-        if not breaker.allow_autonomous(trigger_id, consume=consume):
-            raise _Denied(f"trigger {trigger_id} autonomous mode suspended (circuit breaker open)")
+        if admission is not None:
+            if admission.trigger_id != trigger_id or not breaker._admission_valid(admission):
+                raise _Denied(f"trigger {trigger_id} admission invalidated")
+            return admission
+        if consume:
+            reserved = breaker._reserve_admission(trigger_id)
+            if reserved is not None:
+                return reserved
+        elif breaker.allow_autonomous(trigger_id, consume=False):
+            return None
+        raise _Denied(f"trigger {trigger_id} autonomous mode suspended (circuit breaker open)")
 
     def _autonomy_check(self, principal: Principal, spec: _ToolSpec) -> None:
         if principal.kind is PrincipalKind.HUMAN or self._autonomy is None:
@@ -631,7 +657,8 @@ class GovernedToolDispatcher:
         trigger_id: str | None,
         session: ScopedCredential | None,
         group_id: str | None,
-    ) -> None:
+        admission: _BreakerAdmission | None = None,
+    ) -> _BreakerAdmission | None:
         """Re-admit after the PDP: a failure observed meanwhile may have
         tripped the breaker, suspended the cohort or demoted the agent. Only
         here is the half-open probe spent (atomically, if still available)."""
@@ -646,7 +673,9 @@ class GovernedToolDispatcher:
                 # is_demoted(), not level(): level() would also demote on the
                 # budget this very call was just charged against.
                 raise _Denied("autonomy demoted to P0_ONLY: read-only T0 tools only")
-            self._breaker_check(principal, trigger_id, session, consume=True)
+            return self._breaker_check(
+                principal, trigger_id, session, consume=True, admission=admission
+            )
         except _Denied as exc:
             raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
         except Exception as exc:
@@ -729,6 +758,8 @@ class GovernedToolDispatcher:
         consume: bool = False,
         requested_by: str | None = None,
         trigger_id: str | None = None,
+        *,
+        admission_sink: list[_BreakerAdmission] | None = None,
     ) -> tuple[_ToolSpec, dict[str, Any], tuple[Decision, ...]]:
         if self._kill_switch_engaged():
             raise self._pre_denial(principal, tool_name, "kill switch engaged", telemetry=consume)
@@ -820,7 +851,7 @@ class GovernedToolDispatcher:
                         telemetry=consume,
                     )
         if consume:
-            self._final_admission(
+            admission = self._final_admission(
                 principal,
                 tool_name,
                 spec,
@@ -828,6 +859,8 @@ class GovernedToolDispatcher:
                 session,
                 decisions[0].decision_id if decisions else None,
             )
+            if admission is not None and admission_sink is not None:
+                admission_sink.append(admission)
         return spec, args, decisions
 
     def _recheck_kill_switch(self, principal: Principal, tool_name: str) -> None:
@@ -923,21 +956,50 @@ class GovernedToolDispatcher:
         """Authorise (off the event loop) then invoke a sync or async tool."""
         approver_tuple = tuple(approvers)
         approval_tuple = tuple(approvals)
-        spec, args, decisions = await asyncio.to_thread(
-            self._authorize,
-            principal,
-            tool_name,
-            arguments,
-            approver_tuple,
-            approval_tuple,
-            authored_by,
-            credential,
-            True,
-            requested_by,
-            trigger_id,
-        )
-        self._recheck_kill_switch(principal, tool_name)
-        value = spec.fn(**args)
+        admissions: list[_BreakerAdmission] = []
+
+        def invoke() -> tuple[_ToolSpec, Any, tuple[Decision, ...]]:
+            spec, args, decisions = self._authorize(
+                principal,
+                tool_name,
+                arguments,
+                approver_tuple,
+                approval_tuple,
+                authored_by,
+                credential,
+                True,
+                requested_by,
+                trigger_id,
+                admission_sink=admissions,
+            )
+            self._recheck_kill_switch(principal, tool_name)
+            return spec, spec.fn(**args), decisions
+
+        spec, value, decisions = await asyncio.to_thread(invoke)
         if inspect.isawaitable(value):
+            try:
+                self._recheck_kill_switch(principal, tool_name)
+                session = self._verify_credential(principal, tool_name, credential)
+                admission = admissions[0] if admissions else None
+                self._final_admission(
+                    principal,
+                    tool_name,
+                    spec,
+                    admission.trigger_id if admission is not None else trigger_id,
+                    session,
+                    decisions[0].decision_id if decisions else None,
+                    admission=admission,
+                )
+            except BaseException as exc:
+                if inspect.iscoroutine(value):
+                    value.close()
+                if isinstance(exc, _Denied):
+                    raise self._pre_denial(
+                        principal,
+                        tool_name,
+                        str(exc),
+                        group_id=decisions[0].decision_id if decisions else None,
+                    ) from exc
+                raise
             value = await value
         return ToolResult(tool_name, value, decisions)
