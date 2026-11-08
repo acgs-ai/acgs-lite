@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case-insensitively, matching the Python engine. Before, a pattern with an
   uppercase literal (for example `AKIA[0-9A-Z]{16}`) never matched on the Rust
   path, so an action the Python path denies was allowed when the companion was
-  installed. Affects builds of the companion from source up to 3.0.1; no
-  `acgs-lite-rust` wheel has been published to PyPI.
+  installed. Affects the companion built from acgs-lite source checkouts up
+  to and including 3.0.1; no `acgs-lite-rust` wheel has been published to PyPI.
 - Rust companion: the Python binding now lowercases non-ASCII text fully, so
   keywords such as `contraseña` match `CONTRASEÑA` when the binding is called
   directly. `GovernanceEngine` was not affected.
