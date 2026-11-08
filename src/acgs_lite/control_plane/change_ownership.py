@@ -50,6 +50,22 @@ class OwnershipDenied(PermissionError):
 
 
 def branch_for(principal: Principal, change_id: str) -> str:
+    """Return the assignment branch, rejecting Git-unsafe components.
+
+    A valid Principal ID can still be unsuitable for a Git branch (for
+    example ``agent:1``); such principals cannot receive change ownership.
+    """
+    # Reject before assigning ownership: authorizing an unusable Git branch
+    # would leave the change with no branch-writing execution path.
+    for component in (principal.canonical_id, change_id):
+        if (
+            not isinstance(component, str)
+            or not re.fullmatch(r"[A-Za-z0-9._@-]+", component)
+            or component.startswith(".")
+            or component.endswith((".", ".lock"))
+            or ".." in component
+        ):
+            raise OwnershipDenied("identifier is not a valid Git branch component")
     return f"agent/{principal.canonical_id}/{change_id}"
 
 

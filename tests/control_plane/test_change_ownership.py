@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,42 @@ def owners(tmp_path: Path) -> ChangeOwnershipRegistry:
 
 def test_branch_name() -> None:
     assert branch_for(AGENT, "c1") == "agent/agent-1/c1"
+
+
+@pytest.mark.parametrize(
+    "principal_id,change_id",
+    [
+        ("agent:1", "c1"),
+        ("agent-1", "change.lock"),
+        (".agent", "c1"),
+        ("agent..1", "c1"),
+        ("agent-1", "change."),
+    ],
+)
+def test_invalid_git_branch_rejected_before_assignment(principal_id: str, change_id: str) -> None:
+    principal = Principal(principal_id, PrincipalKind.AGENT)
+    raw = f"agent/{principal.canonical_id}/{change_id}"
+    assert (
+        subprocess.run(["git", "check-ref-format", "--branch", raw], capture_output=True).returncode
+        != 0
+    )
+    registry = ChangeOwnershipRegistry(DEFAULT_IMMUTABLE_CORE, admin=ADMIN)
+    with pytest.raises(OwnershipDenied, match="Git branch"):
+        registry.assign(ADMIN, change_id, principal, "workspace/wt")
+    assert registry.get(change_id) is None
+
+
+@pytest.mark.parametrize(
+    "principal_id,change_id", [("agent-1", "c1"), ("agent@host", "change.v2"), ("_agent", "c_1")]
+)
+def test_valid_branch_names_pass_git(principal_id: str, change_id: str) -> None:
+    branch = branch_for(Principal(principal_id, PrincipalKind.AGENT), change_id)
+    assert (
+        subprocess.run(
+            ["git", "check-ref-format", "--branch", branch], capture_output=True
+        ).returncode
+        == 0
+    )
 
 
 def test_worktree_containment_preserves_case_without_repo_root() -> None:
