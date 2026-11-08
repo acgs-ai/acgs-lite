@@ -309,6 +309,21 @@ class TestHumanAuthenticator:
 
 
 class TestAttestedIssuance:
+    @pytest.mark.parametrize("invalid", ["size", "scopes", "ttl"])
+    def test_invalid_human_issuance_preserves_session(
+        self, issuer: CredentialIssuer, invalid: str
+    ) -> None:
+        session = _session(issuer, "alice", ALICE_KEY)
+        scopes = (
+            [f"tool:{'a' * 240}{index:03d}" for index in range(80)]
+            if invalid == "size"
+            else ([] if invalid == "scopes" else ["tool:x"])
+        )
+        with pytest.raises(CredentialIssuanceRefused):
+            issuer.issue_for_human(session, scopes=scopes, ttl_s=-1 if invalid == "ttl" else None)
+        credential = issuer.issue_for_human(session, scopes=["tool:x"])
+        assert issuer.authenticate(credential.token).principal_id == "alice"
+
     def test_unknown_id_refused(self, issuer: CredentialIssuer) -> None:
         with pytest.raises(CredentialIssuanceRefused, match="not in the identity directory"):
             issuer.issue(Principal("bot-9", PrincipalKind.AGENT), scopes={"tool:x"})

@@ -369,19 +369,29 @@ class CredentialIssuer:
         The session is redeemed (one-shot) against this issuer's own
         :attr:`human_authenticator`; the principal comes from the directory.
         """
-        from acgs_lite.control_plane.identity import HumanAuthenticationFailed
+        from acgs_lite.control_plane.identity import HumanAuthenticationFailed, VerifiedHumanSession
 
         authenticator = self._authenticator
         if authenticator is None:
             raise CredentialIssuanceRefused("issue_for_human needs an identity provider")
+        scope_set = frozenset([scopes] if isinstance(scopes, str) else scopes)
+        if not scope_set or not all(isinstance(s, str) and _SCOPE.fullmatch(s) for s in scope_set):
+            raise CredentialIssuanceRefused("scopes must be non-empty scope strings")
+        ttl = self._validated_ttl(scope_set, ttl_s)
+        if not isinstance(session, VerifiedHumanSession) or not isinstance(
+            session.principal, Principal
+        ):
+            raise CredentialIssuanceRefused("human session refused: malformed session")
+        # Reject bad requests before consuming the one-shot authentication.
+        # This candidate identity is used only to bound size; redeem below
+        # still authenticates the exact session before minting any credential.
+        if self._token_size_bound(session.principal, scope_set, None, None) > MAX_TOKEN_CHARS:
+            raise CredentialIssuanceRefused(f"credential would exceed {MAX_TOKEN_CHARS} characters")
         try:
             principal = authenticator.redeem(session)
         except HumanAuthenticationFailed as exc:
             raise CredentialIssuanceRefused(f"human session refused: {exc}") from exc
-        scope_set = frozenset([scopes] if isinstance(scopes, str) else scopes)
-        if not scope_set or not all(isinstance(s, str) and _SCOPE.fullmatch(s) for s in scope_set):
-            raise CredentialIssuanceRefused("scopes must be non-empty scope strings")
-        return self._mint(principal, scope_set, self._validated_ttl(scope_set, ttl_s), None, None)
+        return self._mint(principal, scope_set, ttl, None, None)
 
     def _validated_ttl(self, scope_set: frozenset[str], ttl_s: float | None) -> float:
         admin = any(scope.partition(":")[0].lower() == "admin" for scope in scope_set)
