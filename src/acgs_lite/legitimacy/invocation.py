@@ -9,12 +9,10 @@ import json
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
-from decimal import Decimal
-from enum import Enum
 from typing import Any
 
 from acgs_lite.legitimacy.invariants import LegitimacyInvariantError, strict_bound_context
+from acgs_lite.serialization import _has_hidden_json_control
 
 INVOCATION_DIGEST_DOMAIN = b"acgs-invocation-v1\x00"
 POLICY_DIGEST_DOMAIN = b"acgs-policy-v1\x00"
@@ -80,6 +78,11 @@ def bind_invocation(
     strict_context: bool = False,
 ) -> InvocationBinding:
     """Bind trusted method identity, argument digest, and signature-derived scope/subjects."""
+    # Digest first: it admits only JSON-native values, so the scope and subject
+    # coercion below never calls a method of a caller-supplied object.
+    argument_digest = canonical_argument_digest(
+        func, args, kwargs, include_receiver=include_receiver
+    )
     bound = _bound_arguments(func, args, kwargs, include_receiver=include_receiver)
     scope = bound.get("scope")
     if scope is None:
@@ -91,9 +94,7 @@ def bind_invocation(
         scope, subjects = strict_bound_context(bound, func=func)
     return InvocationBinding(
         method_id=trusted_method_id(func, override=method_override),
-        argument_digest=canonical_argument_digest(
-            func, args, kwargs, include_receiver=include_receiver
-        ),
+        argument_digest=argument_digest,
         scope=None if scope is None else str(scope),
         subjects=_coerce_subjects(subjects),
     )
@@ -168,56 +169,99 @@ def _bound_arguments(
     return arguments
 
 
-def _canonical_json(value: Any, *, _seen: set[int] | None = None) -> Any:
-    seen = _seen if _seen is not None else set()
-    identity = id(value)
-    if isinstance(value, (list, tuple, dict, set, frozenset)):
-        if identity in seen:
-            raise ArgumentNotDigestible("cyclic argument cannot be digested")
-        seen = set(seen)
-        seen.add(identity)
-    if value is None or isinstance(value, bool):
+def defaulted_argument_values(
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: Mapping[str, Any],
+) -> tuple[Any, ...]:
+    """Values the call takes from parameter defaults, in signature order.
+
+    These are digested by :func:`canonical_argument_digest` (it applies defaults)
+    but are not among the raw call arguments, so they must be evaluated
+    separately. ``*args``/``**kwargs`` parameters have no default and are never
+    included. Parameters named ``self``/``cls`` are not exempt, in either profile: a
+    real receiver is always supplied, so a defaulted one is an ordinary parameter
+    whose default the callable runs with.
+    """
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError) as exc:
+        raise ArgumentNotDigestible("callable has no inspectable signature") from exc
+    filtered = {key: value for key, value in kwargs.items() if key not in CONTROL_KWARGS}
+    try:
+        bound = signature.bind(*args, **filtered)
+    except TypeError as exc:
+        raise ArgumentNotDigestible(f"arguments do not match callable signature: {exc}") from exc
+    return tuple(
+        parameter.default
+        for name, parameter in signature.parameters.items()
+        if name not in bound.arguments and parameter.default is not inspect.Parameter.empty
+    )
+
+
+_MAX_CANONICAL_DEPTH = 32
+
+
+def _canonical_json(value: Any, *, _seen: set[int] | None = None, _depth: int = 0) -> Any:
+    """Tagged canonical encoding of a JSON-native value; everything else is refused.
+
+    Admits exactly the governance payload contract of
+    :func:`acgs_lite.serialization.governance_payloads_for_enforcement`: exact
+    ``None``/``bool``/``int``/finite ``float``/``str``, strict-UTF-8 ``bytes`` and
+    ``bytearray`` without NUL, ``list``, ``tuple`` and ``dict`` with ``str`` keys,
+    matched with ``type(v) is T`` so no method of the value's type is ever called.
+    The tags keep ``int``/``float``, ``str``/``bytes``, ``bytes``/``bytearray`` and
+    ``list``/``tuple`` distinct in the digest.
+    Hidden C0 controls are rejected in text and keys, matching payload enforcement.
+    """
+    if _depth > _MAX_CANONICAL_DEPTH:
+        raise ArgumentNotDigestible(f"argument nests deeper than {_MAX_CANONICAL_DEPTH} levels")
+    kind = type(value)
+    if value is None or kind is bool or kind is str:
+        if kind is str and _has_hidden_json_control(value):
+            raise ArgumentNotDigestible("string argument contains hidden C0 controls")
         return value
-    if isinstance(value, Enum):
-        enum_type = type(value)
-        return {
-            "__enum__": [
-                enum_type.__module__,
-                enum_type.__qualname__,
-                _canonical_json(value.value, _seen=seen),
-            ]
-        }
-    if isinstance(value, int) and not isinstance(value, bool):
-        return {"__int__": str(value)}
-    if isinstance(value, float):
-        if math.isnan(value) or math.isinf(value):
+    if kind is int:
+        try:
+            return {"__int__": str(value)}
+        except ValueError:  # Python's int-to-str digit limit
+            raise ArgumentNotDigestible("integer too large to digest") from None
+    if kind is float:
+        if not math.isfinite(value):
             raise ArgumentNotDigestible("non-finite float cannot be digested")
         return {"__float__": value.hex()}
-    if isinstance(value, str):
-        return value
-    if isinstance(value, (bytes, bytearray)):
-        return {"__bytes__": base64.urlsafe_b64encode(bytes(value)).decode("ascii")}
-    if isinstance(value, Decimal):
-        return {"__decimal__": str(value)}
-    if isinstance(value, datetime):
-        return {"__datetime__": value.isoformat()}
-    if isinstance(value, tuple):
-        return {"__tuple__": [_canonical_json(item, _seen=seen) for item in value]}
-    if isinstance(value, list):
-        return {"__list__": [_canonical_json(item, _seen=seen) for item in value]}
-    if isinstance(value, (set, frozenset)):
-        encoded = sorted(
-            (_dumps(_canonical_json(item, _seen=seen)) for item in value),
-        )
-        return {"__set__": encoded}
-    if isinstance(value, Mapping):
-        items = []
-        for key, item in value.items():
-            encoded_key = _canonical_json(key, _seen=seen)
-            items.append([_dumps(encoded_key), encoded_key, _canonical_json(item, _seen=seen)])
-        items.sort(key=lambda pair: pair[0])
-        return {"__map__": [[key, item] for _sort, key, item in items]}
-    raise ArgumentNotDigestible(f"unsupported argument type: {type(value).__name__}")
+    if kind is bytes or kind is bytearray:
+        try:
+            text = bytes(value).decode("utf-8")
+        except UnicodeDecodeError:
+            raise ArgumentNotDigestible("bytes argument is not strict UTF-8") from None
+        if _has_hidden_json_control(text):
+            raise ArgumentNotDigestible("bytes argument contains hidden C0 controls")
+        tag = "__bytes__" if kind is bytes else "__bytearray__"
+        return {tag: base64.urlsafe_b64encode(bytes(value)).decode("ascii")}
+    if kind is not list and kind is not tuple and kind is not dict:
+        raise ArgumentNotDigestible(f"unsupported argument type: {kind.__name__}")
+    seen = _seen if _seen is not None else set()
+    identity = id(value)
+    if identity in seen:
+        raise ArgumentNotDigestible("cyclic argument cannot be digested")
+    seen = set(seen)
+    seen.add(identity)
+    depth = _depth + 1
+    if kind is tuple:
+        return {"__tuple__": [_canonical_json(item, _seen=seen, _depth=depth) for item in value]}
+    if kind is list:
+        return {"__list__": [_canonical_json(item, _seen=seen, _depth=depth) for item in value]}
+    items = []
+    for key in dict.keys(value):
+        if type(key) is not str:
+            raise ArgumentNotDigestible(f"unsupported mapping key type: {type(key).__name__}")
+        if _has_hidden_json_control(key):
+            raise ArgumentNotDigestible("mapping key contains hidden C0 controls")
+        encoded = _canonical_json(dict.__getitem__(value, key), _seen=seen, _depth=depth)
+        items.append([_dumps(key), key, encoded])
+    items.sort(key=lambda pair: pair[0])
+    return {"__map__": [[key, item] for _sort, key, item in items]}
 
 
 def _dumps(value: Any) -> str:
@@ -248,6 +292,7 @@ __all__ = [
     "bind_invocation",
     "bind_policy",
     "canonical_argument_digest",
+    "defaulted_argument_values",
     "reject_method_spoof_kwargs",
     "trusted_method_id",
 ]
