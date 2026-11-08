@@ -181,7 +181,10 @@ def _human_only_change_below_floor(ctx: DecisionContext) -> bool:
 
 def _core_change_without_attested_second_human(ctx: DecisionContext) -> bool:
     request = ctx.request
-    if classify_category(request.action, ctx.core_category) is not ChangeClass.CORE_HUMAN_ONLY:
+    if not any(
+        classify_category(request.action, category) is ChangeClass.CORE_HUMAN_ONLY
+        for category in _all_core_categories(ctx)
+    ):
         return False
     if (
         request.principal.kind is not PrincipalKind.HUMAN
