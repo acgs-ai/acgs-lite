@@ -209,8 +209,8 @@ def _canonical_json(value: Any, *, _seen: set[int] | None = None, _depth: int = 
     ``None``/``bool``/``int``/finite ``float``/``str``, strict-UTF-8 ``bytes`` and
     ``bytearray`` without NUL, ``list``, ``tuple`` and ``dict`` with ``str`` keys,
     matched with ``type(v) is T`` so no method of the value's type is ever called.
-    The tags keep ``int``/``float``, ``str``/``bytes`` and ``list``/``tuple`` distinct
-    in the digest.
+    The tags keep ``int``/``float``, ``str``/``bytes``, ``bytes``/``bytearray`` and
+    ``list``/``tuple`` distinct in the digest.
     """
     if _depth > _MAX_CANONICAL_DEPTH:
         raise ArgumentNotDigestible(f"argument nests deeper than {_MAX_CANONICAL_DEPTH} levels")
@@ -233,7 +233,8 @@ def _canonical_json(value: Any, *, _seen: set[int] | None = None, _depth: int = 
             raise ArgumentNotDigestible("bytes argument is not strict UTF-8") from None
         if "\x00" in text:
             raise ArgumentNotDigestible("bytes argument contains NUL")
-        return {"__bytes__": base64.urlsafe_b64encode(bytes(value)).decode("ascii")}
+        tag = "__bytes__" if kind is bytes else "__bytearray__"
+        return {tag: base64.urlsafe_b64encode(bytes(value)).decode("ascii")}
     if kind is not list and kind is not tuple and kind is not dict:
         raise ArgumentNotDigestible(f"unsupported argument type: {kind.__name__}")
     seen = _seen if _seen is not None else set()

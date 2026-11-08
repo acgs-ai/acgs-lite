@@ -71,6 +71,16 @@ def test_tuple_and_list_have_distinct_digests() -> None:
     assert tuple_digest != list_digest
 
 
+def test_bytes_and_bytearray_have_distinct_digests() -> None:
+    def take(data: object) -> None:
+        return None
+
+    bytes_digest = canonical_argument_digest(take, (b"pay",), {})
+    bytearray_digest = canonical_argument_digest(take, (bytearray(b"pay"),), {})
+    assert bytes_digest != bytearray_digest
+    assert bytes_digest == canonical_argument_digest(take, (b"pay",), {})
+
+
 def test_nan_argument_fails_closed() -> None:
     def take(value: float) -> None:
         return None
