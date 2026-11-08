@@ -66,6 +66,7 @@
 /Makefile @acgs-ai/governance-humans
 /scripts/check_critical_coverage.py @acgs-ai/governance-humans
 /scripts/check_links.py @acgs-ai/governance-humans
+/scripts/check_release_coherence.py @acgs-ai/governance-humans
 /scripts/qualify_wheel.py @acgs-ai/governance-humans
 /scripts/release_candidate.py @acgs-ai/governance-humans
 /scripts/run_governance_regression.py @acgs-ai/governance-humans
@@ -73,6 +74,7 @@
 # ci_rules: module shadows (package dirs, extensions, pyc)
 /scripts/__pycache__/check_critical_coverage.* @acgs-ai/governance-humans
 /scripts/__pycache__/check_links.* @acgs-ai/governance-humans
+/scripts/__pycache__/check_release_coherence.* @acgs-ai/governance-humans
 /scripts/__pycache__/qualify_wheel.* @acgs-ai/governance-humans
 /scripts/__pycache__/release_candidate.* @acgs-ai/governance-humans
 /scripts/__pycache__/run_governance_regression.* @acgs-ai/governance-humans
@@ -80,6 +82,8 @@
 /scripts/check_critical_coverage/** @acgs-ai/governance-humans
 /scripts/check_links.* @acgs-ai/governance-humans
 /scripts/check_links/** @acgs-ai/governance-humans
+/scripts/check_release_coherence.* @acgs-ai/governance-humans
+/scripts/check_release_coherence/** @acgs-ai/governance-humans
 /scripts/qualify_wheel.* @acgs-ai/governance-humans
 /scripts/qualify_wheel/** @acgs-ai/governance-humans
 /scripts/release_candidate.* @acgs-ai/governance-humans
