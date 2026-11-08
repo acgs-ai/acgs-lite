@@ -455,7 +455,7 @@ class TestOpaqueSubclassBoundary:
         dispatcher = GovernedToolDispatcher(
             pdp, permissions=_permissions(), tool_tiers={"opaque": ActionTier.T1}
         )
-        dispatcher.register("opaque", opaque, opaque_params={"payload"})
+        dispatcher.register("opaque", opaque, opaque_params={"payload"}, merge_capable=False)
         with pytest.raises(ToolDenied):
             dispatcher.dispatch(AGENT, "opaque", {} if use_default else {"payload": value})
         assert invoked == []
