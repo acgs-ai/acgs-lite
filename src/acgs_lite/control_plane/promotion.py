@@ -203,6 +203,14 @@ class PromotionGate:
         decision, decided = self._pdp._decide_attested(request)
         if not decision.allowed or decided is None:
             raise PromotionRejected(f"PDP denied promotion: {decision.reason}", decision)
+        switch = self._pdp.kill_switch
+        if switch is not None:
+            try:
+                engaged = bool(switch.is_engaged())
+            except Exception:
+                engaged = True
+            if engaged:
+                raise PromotionRejected("kill switch engaged; promotion not performed", decision)
         try:
             # The receipt cites the gate-attested approvers, not host input.
             return self._append_promotion(decision, decided)
