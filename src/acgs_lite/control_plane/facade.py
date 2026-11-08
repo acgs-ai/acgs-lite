@@ -115,7 +115,11 @@ class ControlPlaneConfig:
     breaker_policy: BreakerPolicy
     tool_tiers: Mapping[str, ActionTier] = field(default_factory=dict)
     read_only_tools: frozenset[str] = frozenset()
-    quorum_policies: Mapping[ActionTier, QuorumPolicy] = DEFAULT_QUORUM_POLICIES
+    # default_factory: Python 3.11 rejects an unhashable MappingProxyType as a
+    # dataclass default (3.10 and 3.12+ accept it), breaking the package import.
+    quorum_policies: Mapping[ActionTier, QuorumPolicy] = field(
+        default_factory=lambda: DEFAULT_QUORUM_POLICIES
+    )
     core_registry: ImmutableCoreRegistry = DEFAULT_IMMUTABLE_CORE
     max_runbook_age_days: int = DEFAULT_MAX_RUNBOOK_AGE_DAYS
     narrow_max_blast_radius: int = DEFAULT_NARROW_MAX_BLAST_RADIUS
