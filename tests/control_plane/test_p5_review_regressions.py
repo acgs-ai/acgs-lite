@@ -383,6 +383,19 @@ class TestDeclareWriteFailureLiveInstances:
     """Security re-review (HIGH): a receipted declare whose state write fails
     must deny writes on live instances, without a restart."""
 
+    def test_live_instance_observes_replacement_incident(
+        self, tmp_path: Path, ledger_pdp: PolicyDecisionPoint
+    ) -> None:
+        lock = _lock(tmp_path, pdp=ledger_pdp)
+        lock.declare_incident(COMMANDER, "inc-a")
+        other = _lock(tmp_path, pdp=ledger_pdp)
+        assert other.state().incident_id == "inc-a"
+        lock.resolve(COMMANDER)
+        lock.declare_incident(COMMANDER, "inc-b")
+        lock.acquire(BOB, "inc-b", commander=COMMANDER)
+        assert other.write_denial(BOB) is None
+        assert other.state().incident_id == "inc-b"
+
     def test_live_instances_deny(
         self, tmp_path: Path, ledger_pdp: PolicyDecisionPoint, monkeypatch: pytest.MonkeyPatch
     ) -> None:
