@@ -1601,6 +1601,7 @@ class GovernedToolDispatcher:
                         tool_name,
                         f"change ownership: {exc}",
                         group_id=auth.decisions[0].decision_id if auth.decisions else None,
+                        credential_id=auth.decisions[0].credential_id if auth.decisions else None,
                     ) from exc
             lock = self._incident_lock
             if lock is not None and not (auth.spec.read_only and auth.plan.tier == ActionTier.T0):
