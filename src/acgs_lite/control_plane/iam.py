@@ -189,4 +189,9 @@ def render_codeowners(registry: ImmutableCoreRegistry, owners: Sequence[str]) ->
             lines.append(f"# {category.value}: module shadows (package dirs, extensions, pyc)\n")
             for pattern in shadows[category]:
                 lines.append(f"{_codeowners_pattern(pattern)} {owner_text}\n")
+    imports = registry.import_shadow_patterns()
+    if imports:
+        lines.append("\n# control_plane: import-path shadows (src/*.py, site hooks, .pth)\n")
+        for pattern in imports:
+            lines.append(f"{_codeowners_pattern(pattern)} {owner_text}\n")
     return "".join(lines)

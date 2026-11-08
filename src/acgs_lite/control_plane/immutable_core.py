@@ -45,6 +45,7 @@ __all__ = [
     "UNRESOLVABLE_PATH_CATEGORY",
     "compile_glob",
     "literal_prefix",
+    "IMPORT_SHADOW_PATTERNS",
     "module_shadow_patterns",
     "normalize_path",
 ]
@@ -230,6 +231,17 @@ def module_shadow_patterns(pattern: str) -> tuple[str, ...]:
     return tuple(shadows)
 
 
+_STARTUP_HOOKS = frozenset({"sitecustomize", "usercustomize"})
+IMPORT_SHADOW_PATTERNS = (
+    "src/*.py",
+    "**/sitecustomize*",
+    "**/sitecustomize*/**",
+    "**/usercustomize*",
+    "**/usercustomize*/**",
+    "**/*.pth",
+)
+
+
 def _validate_pattern(pattern: object) -> str:
     if not isinstance(pattern, str) or not pattern.strip():
         raise ImmutableCoreError("core patterns must be non-empty strings")
@@ -246,10 +258,18 @@ def _validate_pattern(pattern: object) -> str:
 class ImmutableCoreRegistry:
     """Immutable mapping of :class:`CoreCategory` to repo globs."""
 
-    __slots__ = ("_entries", "_shadows", "_compiled", "_anchored_prefixes", "_repo_root")
+    __slots__ = (
+        "_entries",
+        "_shadows",
+        "_compiled",
+        "_anchored_prefixes",
+        "_repo_root",
+        "_src_packages",
+    )
 
     _entries: tuple[tuple[CoreCategory, tuple[str, ...]], ...]
     _shadows: tuple[tuple[CoreCategory, tuple[str, ...]], ...]
+    _src_packages: frozenset[str] | None
     _compiled: tuple[tuple[CoreCategory, tuple[re.Pattern[str], ...]], ...]
     _anchored_prefixes: tuple[tuple[CoreCategory, tuple[str, ...]], ...]
     _repo_root: str | None
@@ -302,6 +322,15 @@ class ImmutableCoreRegistry:
             ),
         )
         object.__setattr__(self, "_repo_root", repo_root)
+        # Trusted modules under src/ make src/ an import root (PYTHONPATH=src),
+        # so anything else importable from there can shadow them or the stdlib.
+        src_packages = frozenset(
+            p.lower().split("/")[1]
+            for _, pats in entries
+            for p in pats
+            if module_shadow_patterns(p) and p.lower().startswith("src/") and p.count("/") >= 2
+        )
+        object.__setattr__(self, "_src_packages", src_packages or None)
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("ImmutableCoreRegistry is immutable")
@@ -335,6 +364,29 @@ class ImmutableCoreRegistry:
         (see :func:`module_shadow_patterns`); they are core like the
         :meth:`patterns` they derive from, but are not part of the manifest."""
         return MappingProxyType(dict(self._shadows))
+
+    def import_shadow_patterns(self) -> tuple[str, ...]:
+        """CODEOWNERS-expressible globs of :meth:`_import_shadow` (the
+        ``src/<other>/`` rule has no glob form and is enforced in code)."""
+        if self._src_packages is None:
+            return ()
+        return IMPORT_SHADOW_PATTERNS
+
+    def _import_shadow(self, normalized: str) -> bool:
+        """Paths that change what the trusted import closure executes:
+        ``sitecustomize``/``usercustomize`` and ``*.pth`` anywhere, any
+        top-level ``src/*.py`` (``src/json.py`` shadows the stdlib under
+        PYTHONPATH=src) and any ``src/<entry>`` that is not a trusted package."""
+        if self._src_packages is None:
+            return False
+        segments = normalized.lower().split("/")
+        if any(seg.split(".", 1)[0] in _STARTUP_HOOKS for seg in segments):
+            return True
+        if segments[-1].endswith(".pth"):
+            return True
+        return (
+            segments[0] == "src" and len(segments) >= 2 and (segments[1] not in self._src_packages)
+        )
 
     def normalize(self, path: object) -> str | None:
         return normalize_path(path, self._repo_root)
@@ -377,6 +429,8 @@ class ImmutableCoreRegistry:
             for category, regexes in self._compiled
             if any(regex.fullmatch(normalized) for regex in regexes)
         )
+        if self._import_shadow(normalized):
+            by_pattern |= {CoreCategory.CONTROL_PLANE}
         directory = normalized.lower() + "/"
         by_prefix = frozenset(
             category

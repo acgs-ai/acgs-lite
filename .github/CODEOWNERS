@@ -164,3 +164,11 @@
 /tests/__pycache__/conftest.* @acgs-ai/governance-humans
 /tests/conftest.* @acgs-ai/governance-humans
 /tests/conftest/** @acgs-ai/governance-humans
+
+# control_plane: import-path shadows (src/*.py, site hooks, .pth)
+/src/*.py @acgs-ai/governance-humans
+**/sitecustomize* @acgs-ai/governance-humans
+**/sitecustomize*/** @acgs-ai/governance-humans
+**/usercustomize* @acgs-ai/governance-humans
+**/usercustomize*/** @acgs-ai/governance-humans
+**/*.pth @acgs-ai/governance-humans

@@ -313,3 +313,43 @@ class TestDurableAuditNeedsLog:
     def test_construction_rejected(self, constitution: Constitution, permit_all: PolicySet) -> None:
         with pytest.raises(ValueError, match="durable_audit"):
             PolicyDecisionPoint.for_constitution(constitution, permit_all, durable_audit=True)
+
+
+class TestImportPathShadows:
+    """Security re-review (MEDIUM): import-root shadows of the TCB / stdlib."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "src/sitecustomize.py",
+            "src/json.py",
+            "src/json/__init__.py",
+            "src/yaml",
+            "workspace/usercustomize.py",
+            "workspace/sitecustomize/__init__.py",
+            "src/evil.pth",
+            "workspace/lib/extra.pth",
+        ],
+    )
+    def test_import_shadows_are_core(self, path: str) -> None:
+        assert DEFAULT_IMMUTABLE_CORE.classify(path) is CoreCategory.CONTROL_PLANE
+
+    @pytest.mark.parametrize("path", ["workspace/x.py", "src/acgs_lite/unrelated.py", "app/m.py"])
+    def test_ordinary_paths_stay_routine(self, path: str) -> None:
+        assert DEFAULT_IMMUTABLE_CORE.classify(path) is None
+
+    def test_agent_write_denied_at_dispatch(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied):
+            dispatcher.dispatch(AGENT, "write", {"path": "workspace/sitecustomize.py"})
+        assert sink.calls == []
+
+    def test_registry_without_src_modules_is_unaffected(self) -> None:
+        from acgs_lite.control_plane import ImmutableCoreRegistry
+
+        registry = ImmutableCoreRegistry({CoreCategory.EVALUATOR: ["evaluator/**"]})
+        assert registry.classify("src/json.py") is None
+
+    def test_codeowners_lists_import_shadows(self) -> None:
+        text = render_codeowners(DEFAULT_IMMUTABLE_CORE, ["@o"])
+        assert "/src/*.py @o" in text and "**/*.pth @o" in text

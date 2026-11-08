@@ -267,8 +267,12 @@ class GovernedToolDispatcher:
             return True
         if "." not in normalized.rsplit("/", 1)[-1]:
             return True
-        # TODO(control-plane-gap): with repo_root=None the existing-directory
-        # fallback is disabled; only the slash/extension heuristics apply.
+        # TODO(control-plane-gap): repo_root=None is the norm for p1-p5
+        # integrators (only the p6 facade binds a root), and then a dotted
+        # last segment ("app/v1.2") is taken for a file, so an agent may
+        # delete/overwrite a directory holding unanchored core files
+        # (app/v1.2/.env). Even with a root, the isdir fallback misses a
+        # not-yet-existing dotted directory such as "app/v1.2/" created later.
         root = self._registry.repo_root
         return root is not None and os.path.isdir(posixpath.join(root, normalized))
 
