@@ -15,6 +15,23 @@ from acgs_lite.control_plane.runbook import (
 pytestmark = [pytest.mark.unit]
 
 
+def test_runbook_path_scope_does_not_widen_posix_case(runbook_data: Any, rb: Any) -> None:
+    data = runbook_data()
+    registry = rb.make(DEFAULT_IMMUTABLE_CORE)
+    digest = rb.approve(registry, data)
+    arguments = dict(
+        tool_name="write_file",
+        principal=Principal("agent-1", PrincipalKind.AGENT),
+        blast_radius=1,
+        consume=False,
+    )
+    registry.check_execution(data["runbook_id"], digest, paths=["workspace/ok.txt"], **arguments)
+    with pytest.raises(RunbookDenied, match="outside the runbook scope"):
+        registry.check_execution(
+            data["runbook_id"], digest, paths=["Workspace/ok.txt"], **arguments
+        )
+
+
 def test_untyped_scope_requires_reapproval(runbook_data: Any) -> None:
     data = runbook_data()
     data["scope_selector"].pop("principal_kinds", None)

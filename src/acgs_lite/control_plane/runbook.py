@@ -631,7 +631,10 @@ class RunbookRegistry:
         paths = list(paths)
         if not paths and not selector.allow_pathless:
             raise RunbookDenied("a path-less call is outside the runbook scope (allow_pathless)")
-        regexes = [compile_glob(g[2:] if g.startswith("./") else g) for g in selector.paths]
+        regexes = [
+            compile_glob(g[2:] if g.startswith("./") else g, case_sensitive=True)
+            for g in selector.paths
+        ]
         for path in paths:
             normalized = self._registry.normalize(path)
             if normalized is None or self._registry.is_core(normalized):
