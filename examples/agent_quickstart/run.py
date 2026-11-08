@@ -12,7 +12,8 @@ Covers three capabilities in sequence:
 
 No API keys required. Runs fully offline.
 
-Run:
+Run (requires the ``crypto`` extra for the Ed25519 receipt signer):
+    pip install -e ".[crypto]"
     python examples/agent_quickstart/run.py
 
 Exit code 0 = all assertions passed (ACGS-Lite is correctly installed).
