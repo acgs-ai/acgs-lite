@@ -210,7 +210,9 @@ runs the callable again; the signature, key pin and bindings are still checked.
 
 Governed arguments and return values must be JSON-native: exact `dict` with `str`
 keys, `list`, `tuple`, `str`, `int`, `bool`, finite `float`, `None`, and
-`bytes`/`bytearray` that decode as strict UTF-8 without NUL. The governance
+`bytes`/`bytearray` that decode as strict UTF-8. Text and dictionary keys containing
+C0 controls other than tab, newline and carriage return are rejected, because JSON
+escaping would conceal those characters from rule matching. The governance
 projector, the argument digest and the output digest admit exactly these values,
 matched by exact type. Anything else (`Enum` members, dataclasses, pydantic
 models, `datetime`, `UUID`, paths, `Decimal`, sets, subclasses of the accepted

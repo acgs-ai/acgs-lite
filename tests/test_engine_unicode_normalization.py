@@ -348,7 +348,9 @@ class TestGovernedCallableEndToEnd:
 
         with pytest.raises(ConstitutionalViolationError) as exc_info:
             process(action, decision_receipt=self._receipt("process"))
-        assert exc_info.value.rule_id == "NO-DELETE"
+        # Hidden C0 controls are refused at the invocation boundary before matching.
+        expected = "LEGITIMACY-INVARIANT" if "\x00" in action else "NO-DELETE"
+        assert exc_info.value.rule_id == expected
         assert calls == []
 
     def test_obfuscated_keyword_argument_denied(self, backend: str) -> None:

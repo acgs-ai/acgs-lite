@@ -403,6 +403,11 @@ DENY_CASES: list[Any] = [
     pytest.param(lambda: 10**5000, id="huge-int"),
     pytest.param(_deep, id="deep-nesting"),
     pytest.param(_cycle, id="cycle"),
+    pytest.param(lambda: "forbidden\x00word", id="nul-spliced-string"),
+    pytest.param(lambda: {"memo": "forbidden\x01word"}, id="control-spliced-value"),
+    pytest.param(lambda: {"forbidden\x08word": "ok"}, id="control-spliced-key"),
+    pytest.param(lambda: [b"forbidden\x0bword"], id="control-spliced-bytes"),
+    pytest.param(lambda: (bytearray(b"forbidden\x1fword"),), id="control-spliced-bytearray"),
 ]
 
 
@@ -420,6 +425,14 @@ def test_projector_denies(make: Callable[[], Any], wrap: bool) -> None:
     with pytest.raises(GovernancePayloadError) as excinfo:
         governance_payloads_for_enforcement(value)
     assert excinfo.value.rule_id in {UNEVALUABLE, "GOVERNANCE-PAYLOAD-OVERSIZE"}
+
+
+@pytest.mark.parametrize("codepoint", [i for i in range(32) if i not in (9, 10, 13)])
+def test_json_escaping_cannot_hide_control_splices(codepoint: int) -> None:
+    text = "forbidden" + chr(codepoint) + "word"
+    for value in (text, {"memo": text}, {text: "ok"}, [text], (text,), text.encode()):
+        with pytest.raises(GovernancePayloadError):
+            governance_payloads_for_enforcement(value)
 
 
 def _one_arg(value: object) -> None:
@@ -595,6 +608,7 @@ def test_control_keyword_payload_denies_by_rule(
 def _benign() -> dict[str, Any]:
     return {
         "note": "hello",
+        "whitespace": "ordinary\ttext\nwith\rline endings",
         "items": [1, -2, 2.5, True, False, None, "x"],
         "nested": {"deep": [{"k": "v"}]},
         "raw": b"plain bytes",

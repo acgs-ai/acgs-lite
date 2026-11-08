@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
@@ -21,6 +22,14 @@ _MAX_GOVERNANCE_PAYLOAD_CHARS = 10_000
 
 _OVERSIZE_RULE_ID = "GOVERNANCE-PAYLOAD-OVERSIZE"
 _UNEVALUABLE_RULE_ID = "GOVERNANCE-PAYLOAD-UNEVALUABLE"
+
+# JSON escapes these invisible controls, hiding keyword splices from the matcher.
+# Keep ordinary text whitespace; the engine intentionally preserves it too.
+_HIDDEN_JSON_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _has_hidden_json_control(text: str) -> bool:
+    return _HIDDEN_JSON_CONTROL.search(text) is not None
 
 
 class GovernancePayloadError(ConstitutionalViolationError):
@@ -146,7 +155,9 @@ class _Projector:
     ``bytes``/``bytearray`` without NUL (projected as text), ``list``, ``tuple``
     (projected as a list) and ``dict`` with ``str`` keys, all matched exactly. Every
     other value, a reference cycle, nesting deeper than 32 levels and budget
-    exhaustion raise :class:`GovernancePayloadError`. There is no skip mode.
+    exhaustion raise :class:`GovernancePayloadError`. Hidden C0 controls in any
+    text or key also deny; ordinary tab/newline/carriage-return remain valid.
+    There is no skip mode.
     """
 
     __slots__ = ("budget", "index", "path")
@@ -161,8 +172,8 @@ class _Projector:
             text = bytes(value).decode("utf-8")
         except UnicodeDecodeError:
             raise _unevaluable(value, self.index) from None
-        if "\x00" in text:
-            # NUL bytes are how UTF-16/UTF-32 text hides ASCII words from keyword rules.
+        if _has_hidden_json_control(text):
+            # Includes NUL padding used to disguise UTF-16/UTF-32 text.
             raise _unevaluable(value, self.index)
         return text
 
@@ -175,6 +186,8 @@ class _Projector:
             )
         kind = type(value)
         if value is None or kind is str or kind is int or kind is bool:
+            if kind is str and _has_hidden_json_control(value):
+                raise _unevaluable(value, self.index)
             self.budget.spend(len(value) if kind is str else 1, self.index)
             return value
         if kind is float:
@@ -208,6 +221,8 @@ class _Projector:
         for key in dict.keys(mapping):
             if type(key) is not str:
                 raise _unevaluable(key, self.index)
+            if _has_hidden_json_control(key):
+                raise _unevaluable(key, self.index)
             self.budget.spend(len(key), self.index)
             projected[key] = self.project(dict.__getitem__(mapping, key), depth + 1)
         return projected
@@ -218,6 +233,8 @@ def _enforcement_payload(value: Any, index: int, *, max_chars: int) -> str | Non
     if value is None:
         return None
     if type(value) is str:
+        if _has_hidden_json_control(value):
+            raise _unevaluable(value, index)
         return value
     projector = _Projector(index=index, budget=_Budget(max_chars))
     try:
@@ -251,6 +268,8 @@ def governance_payloads_for_enforcement(
     ``str``, ``int``, ``bool``, finite ``float``, ``None``; ``bytes``/``bytearray``
     that decode as strict UTF-8 with no NUL (evaluated as text); ``list``;
     ``tuple`` (evaluated as a list); ``dict`` whose keys are all exact ``str``.
+    Text and keys containing C0 controls other than tab, newline and carriage
+    return deny: JSON escaping would conceal them from rule matching.
 
     Everything else denies with ``GOVERNANCE-PAYLOAD-UNEVALUABLE`` at any depth:
     ``Enum`` members, dataclasses, pydantic models, ``datetime``/``date``/``time``,
