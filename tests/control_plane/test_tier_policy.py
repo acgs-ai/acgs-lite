@@ -168,12 +168,12 @@ def _approve(
 class TestDispatcherTiers:
     def test_tier_is_computed_from_profile(self, p5: Any) -> None:
         d = p5.dispatcher
-        assert d.tier_of_call(AGENT, "read_file", {"path": "workspace/a"}) is ActionTier.T0
+        assert d.tier_of_call(AGENT, "read_file", {"path": "workspace/a.txt"}) is ActionTier.T0
         assert d.tier_of_call(AGENT, "write_file", {"path": f"{p5.worktree}/a"}) is ActionTier.T2
         with pytest.raises(ValueError, match="T3 by a non-human"):
             d.tier_of_call(AGENT, "delete_file", {"path": f"{p5.worktree}/a"})
         human = Principal("alice", PrincipalKind.HUMAN)
-        assert d.tier_of_call(human, "delete_file", {"path": "workspace/a"}) is ActionTier.T3
+        assert d.tier_of_call(human, "delete_file", {"path": "workspace/a.txt"}) is ActionTier.T3
 
     def test_caller_tier_lower_than_computed_denied(self, p5: Any) -> None:
         with pytest.raises(ToolDenied, match="lower than the computed tier"):
@@ -185,12 +185,12 @@ class TestDispatcherTiers:
                 tier=ActionTier.T0,
             )
         with pytest.raises(ToolDenied, match="not an ActionTier"):
-            p5.dispatcher.dispatch(AGENT, "read_file", {"path": "workspace/a"}, tier=True)  # type: ignore[arg-type]
+            p5.dispatcher.dispatch(AGENT, "read_file", {"path": "workspace/a.txt"}, tier=True)  # type: ignore[arg-type]
         assert p5.calls == []
 
     def test_caller_tier_higher_is_ignored(self, p5: Any) -> None:
         result = p5.dispatcher.dispatch(
-            AGENT, "read_file", {"path": "workspace/a"}, tier=ActionTier.T3
+            AGENT, "read_file", {"path": "workspace/a.txt"}, tier=ActionTier.T3
         )
         assert result.decisions[0].tier is ActionTier.T0
 
@@ -307,7 +307,7 @@ class TestPdpTierFloor:
         nested = DecisionRequest(
             AGENT,
             "file.write",
-            "workspace/a",
+            "workspace/a.txt",
             ActionTier.T1,
             attributes={"via_tool": "x", "tool_call": {"action_profile": destroying}},
         )

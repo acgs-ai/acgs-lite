@@ -352,7 +352,10 @@ class TestKillSwitchToctouAndPaths:
                 require_credential=True,
             )
             dispatcher.register(
-                "w", awrite if mode == "async_coroutine" else write, path_params={"path"}
+                "w",
+                awrite if mode == "async_coroutine" else write,
+                path_params={"path"},
+                merge_capable=False,
             )
             with pytest.raises(ToolDenied, match="credential"):
                 if mode == "sync":

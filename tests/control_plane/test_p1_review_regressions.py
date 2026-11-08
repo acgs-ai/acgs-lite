@@ -548,7 +548,7 @@ class TestFinalReviewBoundaries:
                 tool_tiers={"read_tree": ActionTier.T0},
                 read_only_tools=frozenset({"read_tree"}),
             )
-            dispatcher.register("read_tree", read_tree, path_params={"path"})
+            dispatcher.register("read_tree", read_tree, path_params={"path"}, merge_capable=False)
             with pytest.raises(ToolDenied):
                 dispatcher.dispatch(AGENT, "read_tree", {"path": directory})
         assert calls == []

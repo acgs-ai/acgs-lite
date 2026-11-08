@@ -687,7 +687,7 @@ class TestDispatchT1:
         )
         d.register("r", lambda path: path, path_params={"path"}, merge_capable=False)
         with pytest.raises(ToolDenied, match="no runbook registry"):
-            d.dispatch(AGENT, "r", {"path": "x"}, runbook_id="rb", runbook_hash="h")
+            d.dispatch(AGENT, "r", {"path": "x.txt"}, runbook_id="rb", runbook_hash="h")
 
     def test_constructor_requires_review_queue(self, gated_pdp: Any, rb: Any) -> None:
         from acgs_lite.control_plane import GovernedToolDispatcher, RepositoryPermissions
