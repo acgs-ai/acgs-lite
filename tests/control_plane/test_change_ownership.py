@@ -155,7 +155,7 @@ class TestDispatcherOwnership:
             (A1, "{wt}/a.md", None, "change_id"),
             (A2, "{wt}/a.md", "c1", "not the writer"),
             (A1, "workspace/elsewhere.md", "c1", "outside"),
-            (A1, "{wt}/../c2/a.md", "c1", "outside"),
+            (A1, "{wt}/../c2/a.md", "c1", "INV-TOOL-ARG-CORE"),
             (A1, "{wt}/link/x.md", "c1", "symlink"),
             (A1, "{wt}/a.md", "c9", "no assigned writer"),
         ],
