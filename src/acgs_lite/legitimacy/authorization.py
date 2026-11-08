@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import hmac
 import json
 import secrets
@@ -157,6 +158,9 @@ class ExecutionAuthority:
         self._pending: set[str] = set()
         # receipt_hash -> (grant_id, prune-after deadline or None to keep forever)
         self._issued_receipts: dict[str, tuple[str, datetime | None]] = {}
+        # Min-heap of (deadline, receipt_hash) for prunable entries only, so issuance
+        # never rescans the receipts that are kept forever.
+        self._prune_deadlines: list[tuple[datetime, str]] = []
 
     def allocate_grant_id(self) -> str:
         """Reserve a fresh random grant id to be committed into a v2 receipt."""
@@ -186,12 +190,9 @@ class ExecutionAuthority:
         prune_after = _parse_expiry(expires_at) if v2 else None
         with self._lock:
             now = datetime.now(timezone.utc)
-            for stale in [
-                receipt_hash
-                for receipt_hash, (_gid, due) in self._issued_receipts.items()
-                if due is not None and due < now
-            ]:
-                del self._issued_receipts[stale]
+            while self._prune_deadlines and self._prune_deadlines[0][0] < now:
+                _due, stale = heapq.heappop(self._prune_deadlines)
+                self._issued_receipts.pop(stale, None)
             if receipt.receipt_hash in self._issued_receipts:
                 raise LegitimacyInvariantError("receipt already minted a grant")
             if grant_id is None:
@@ -217,6 +218,8 @@ class ExecutionAuthority:
                 if receipt.context_digest != context_digest:
                     raise LegitimacyInvariantError("receipt does not match trusted context digest")
             self._issued_receipts[receipt.receipt_hash] = (claimed, prune_after)
+            if prune_after is not None:
+                heapq.heappush(self._prune_deadlines, (prune_after, receipt.receipt_hash))
             return claimed
 
     def issue(

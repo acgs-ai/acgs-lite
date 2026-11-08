@@ -642,6 +642,11 @@ def test_issued_receipt_registry_prunes_expired_grants() -> None:
     assert all(g.receipt.receipt_hash not in registry for g in expired)
     assert live.receipt.receipt_hash in registry
     assert unbounded.receipt.receipt_hash in registry
+    # Only expiring entries are indexed for pruning (no per-issue full registry scan).
+    assert {h for _due, h in authority._prune_deadlines} == {
+        h for h, (_gid, due) in registry.items() if due is not None
+    }
+    assert unbounded.receipt.receipt_hash not in {h for _due, h in authority._prune_deadlines}
     # Within its lifetime a receipt still mints at most one grant.
     with pytest.raises(LegitimacyInvariantError, match="already minted"):
         authority.issue(
