@@ -1468,14 +1468,15 @@ class GovernedToolDispatcher:
     ) -> None:
         """Closes the authorise-then-invoke window (TOCTOU), sync and async:
         the kill switch, and for writes the incident mutation lock."""
+        group_id = auth.decisions[0].decision_id if auth is not None and auth.decisions else None
         if self._kill_switch_engaged():
-            raise self._pre_denial(principal, tool_name, "kill switch engaged")
+            raise self._pre_denial(principal, tool_name, "kill switch engaged", group_id=group_id)
         lock = self._incident_lock
         if lock is not None and auth is not None:
             if not (auth.spec.read_only and auth.plan.tier == ActionTier.T0):
                 denial = lock.write_denial(principal)
                 if denial is not None:
-                    raise self._pre_denial(principal, tool_name, denial)
+                    raise self._pre_denial(principal, tool_name, denial, group_id=group_id)
 
     def _recheck_credential(
         self, principal: Principal, tool_name: str, credential: object, *, group_id: str | None
