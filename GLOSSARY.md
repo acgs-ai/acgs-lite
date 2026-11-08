@@ -10,13 +10,13 @@ One entry per term: definition, boundaries, one resolved ambiguity. Agents write
 - Definition: `Constitution.hash` (`src/acgs_lite/constitution/constitution.py`) is a 16-hex-character sha256 prefix computed once over each rule's id, text, severity, hardcoded flag and sorted keywords. `hash_versioned` renders it as `sha256:v1:<hash>`.
 - Boundary: it is a short label for a rule set. It is not a collision-resistant policy identity (that is the **policy digest**), and changes to patterns, `enabled`, `workflow_action` or `condition` leave it unchanged.
 - Avoid: policy digest, constitution ID.
-- Resolved ambiguity: `CONSTITUTIONAL_HASH = "608508a9bd224290"` in `src/acgs_lite/_meta.py` is a fixed package stamp, also hardcoded in the CDP records. It is not computed from any loaded constitution.
+- Resolved ambiguity: `CONSTITUTIONAL_HASH = "608508a9bd224290"` in `src/acgs_lite/_meta.py` is a fixed package stamp, also hardcoded in the CDP modules (`src/acgs_lite/cdp/certificate.py`, `src/acgs_lite/cdp/store.py`). It is not computed from any loaded constitution.
 
 ## policy digest
 - Definition: `bind_policy(constitution)` (`src/acgs_lite/legitimacy/invocation.py`) returns `PolicyBinding(version, algorithm="sha256", digest)`. The digest is sha256 over the `acgs-policy-v1\x00` domain prefix plus the canonical JSON of the whole constitution. `policy_identity()` renders it as `acgs:policy:v1:sha256:<digest>`.
-- Boundary: it is the full, domain-separated content digest. It is not `Constitution.hash`, and it is not `PolicyBinding.version`, which only carries a display label.
+- Boundary: it is the full, domain-separated content digest. It is not `Constitution.hash`, and it is not `PolicyBinding.version`, which only carries a display label taken from `constitution.hash` (falling back to `constitution.version`).
 - Avoid: constitutional hash, policy hash, policy version (used as an identity).
-- Resolved ambiguity: grants and attempt records bind `policy_digest`, and the code explicitly says not to reuse the truncated `Constitution.hash`. A label change keeps the identity, while a content change alters it.
+- Resolved ambiguity: grants and attempt records bind `policy_digest`, and the code explicitly says not to reuse the truncated `Constitution.hash`. Changing `PolicyBinding.version` alone keeps the identity. Editing any constitution field, including `name`, `version`, `version_name`, `description`, `metadata` and `changelog`, changes the digest.
 
 ## MACIRole
 - Definition: `MACIRole` (`src/acgs_lite/maci/roles.py`) has exactly four members: PROPOSER, VALIDATOR, EXECUTOR and OBSERVER. A verb is permitted only if it is in the role's allow set and not in its deny set. OBSERVER may read, query, export and observe only.
@@ -52,7 +52,7 @@ One entry per term: definition, boundaries, one resolved ambiguity. Agents write
 - Definition: a row of `AuditLog` (`src/acgs_lite/audit.py`). `record(entry)` appends it under the log lock and returns a chain hash over the previous hash and the entry hash. `JSONLAuditBackend` writes `_chain_hash` and `_format_version` (`sha256-v1` or `legacy-sha256-16`).
 - Boundary: it is a hash-chained governance log row. It is not a DecisionReceipt, and writing it with `record()` does not guarantee it is persisted.
 - Avoid: audit receipt, audit event, log line.
-- Resolved ambiguity: `record()` only logs a backend write failure as a warning. Use `record_durable()` for fail-closed persistence. Adapter payloads rename the entry's `constitutional_hash` to `policy_hash` (`to_receipt_dict`), so the same value appears under two names.
+- Resolved ambiguity: `record()` only logs a backend write failure as a warning. Use `record_durable()` for fail-closed persistence. The generic `to_receipt_dict()` projection (`src/acgs_lite/legitimacy/receipt.py`) renames the entry's `constitutional_hash` to `policy_hash`, so the same value appears under two names.
 
 ## external effect
 - Definition: one provider dispatch tracked by `EffectStore` (`src/acgs_lite/legitimacy/effects.py`), an opt-in SQLite lifecycle with the `EffectState` values RESERVED, IN_FLIGHT, UNKNOWN, DONE and NOT_DONE. `send()` commits IN_FLIGHT before calling the provider, and any exception moves the effect to UNKNOWN. `reconcile()` settles only through `EffectProvider.query_and_fence`, and it accepts NOT_DONE only when the effect was fenced (`fenced=True`).
@@ -61,7 +61,7 @@ One entry per term: definition, boundaries, one resolved ambiguity. Agents write
 - Resolved ambiguity: the in-process `AttemptStatus.PARTIAL` (`src/acgs_lite/legitimacy/ledger.py`) is a different state. PARTIAL is not UNKNOWN, so keep the two separate.
 
 ## effect key
-- Definition: the key `EffectStore.reserve()` derives as `acgs:effect:v1:` + sha256 over `acgs-provider-effect-v1\0` and the canonical JSON of `[provider_id, grant_identity, action_digest]`. In the same transaction it reserves `amount` on an `EffectBudget` only if it fits within `capacity - settled - reserved`.
+- Definition: the key `EffectStore.reserve()` derives as `acgs:effect:v1:` + sha256 over `acgs-provider-effect-v1\0` and the canonical JSON of `[provider_id, grant_identity, action_digest]`, where `action_digest` is itself sha256 over `acgs-effect-action-v1\0` and the canonical action JSON. In the same transaction it reserves `amount` on an `EffectBudget` only if it fits within `capacity - settled - reserved`.
 - Boundary: it is a grant-bound, immutable provider key with an atomic integer hold on a fixed budget. It is not a caller-chosen idempotency token, and `EffectBudget` is not `CostBudget` (compute accounting).
 - Avoid: idempotency key, request ID, dedupe token, quota.
 - Resolved ambiguity: one `grant_identity` maps to one effect forever. A replay with identical bindings returns the existing record, any changed binding raises "grant effect binding is immutable", DONE settles the amount and NOT_DONE releases it.
