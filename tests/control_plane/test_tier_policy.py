@@ -278,13 +278,12 @@ class TestDispatcherTiers:
 
     def test_profile_tool_needs_gate(self, pdp: Any) -> None:
         from acgs_lite.control_plane import (
-            DEFAULT_IMMUTABLE_CORE,
             GovernedToolDispatcher,
             RepositoryPermissions,
         )
 
         d = GovernedToolDispatcher(
-            pdp, permissions=RepositoryPermissions(DEFAULT_IMMUTABLE_CORE), tool_tiers={}
+            pdp, permissions=RepositoryPermissions(pdp.registry), tool_tiers={}
         )
         with pytest.raises(ValueError, match="ApprovalGate"):
             d.register(

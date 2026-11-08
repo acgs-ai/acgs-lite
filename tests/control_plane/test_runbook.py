@@ -278,7 +278,7 @@ class TestApproval:
         with pytest.raises(TypeError, match="ApprovalGate"):
             RunbookRegistry(DEFAULT_IMMUTABLE_CORE, pdp=pdp, roles=rb.roles)
         with pytest.raises(TypeError, match="roles"):
-            RunbookRegistry(DEFAULT_IMMUTABLE_CORE, pdp=gated_pdp, roles="r")  # type: ignore[arg-type]
+            RunbookRegistry(gated_pdp.registry, pdp=gated_pdp, roles="r")  # type: ignore[arg-type]
         with pytest.raises(ValueError, match="same immutable-core"):
             RunbookRegistry(
                 DEFAULT_IMMUTABLE_CORE.with_repo_root("/x"), pdp=gated_pdp, roles=rb.roles
@@ -677,14 +677,13 @@ class TestDispatchT1:
 
     def test_runbook_without_registry_denied(self, gated_pdp: Any) -> None:
         from acgs_lite.control_plane import (
-            DEFAULT_IMMUTABLE_CORE,
             GovernedToolDispatcher,
             RepositoryPermissions,
         )
 
         d = GovernedToolDispatcher(
             gated_pdp,
-            permissions=RepositoryPermissions(DEFAULT_IMMUTABLE_CORE),
+            permissions=RepositoryPermissions(gated_pdp.registry),
             tool_tiers={"r": ActionTier.T0},
             read_only_tools=frozenset({"r"}),
         )
@@ -696,13 +695,13 @@ class TestDispatchT1:
         from acgs_lite.control_plane import GovernedToolDispatcher, RepositoryPermissions
         from acgs_lite.control_plane.tier_policy import ReviewQueue
 
-        perms = RepositoryPermissions(DEFAULT_IMMUTABLE_CORE)
+        perms = RepositoryPermissions(gated_pdp.registry)
         with pytest.raises(ValueError, match="review_queue"):
             GovernedToolDispatcher(
                 gated_pdp,
                 permissions=perms,
                 tool_tiers={},
-                runbooks=rb.make(DEFAULT_IMMUTABLE_CORE),
+                runbooks=rb.make(gated_pdp.registry),
             )
         with pytest.raises(ValueError, match="same immutable-core"):
             GovernedToolDispatcher(

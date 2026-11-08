@@ -353,14 +353,13 @@ class TestBranchAndMergeHardening:
 
     def test_branch_tool_without_ownership_denied_for_agents(self, gated_pdp: Any) -> None:
         from acgs_lite.control_plane import (
-            DEFAULT_IMMUTABLE_CORE,
             GovernedToolDispatcher,
             RepositoryPermissions,
         )
 
         d = GovernedToolDispatcher(
             gated_pdp,
-            permissions=RepositoryPermissions(DEFAULT_IMMUTABLE_CORE),
+            permissions=RepositoryPermissions(gated_pdp.registry),
             tool_tiers={"push": ActionTier.T2},
         )
         d.register(
