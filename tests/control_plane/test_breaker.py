@@ -19,7 +19,6 @@ import pytest
 
 from acgs_lite.audit import AuditEntry, AuditLog, JSONLAuditBackend
 from acgs_lite.control_plane import (
-    DEFAULT_IMMUTABLE_CORE,
     ActionTier,
     CredentialIssuer,
     GovernedToolDispatcher,
@@ -386,7 +385,7 @@ def _dispatcher(
     d = GovernedToolDispatcher(
         pdp,
         permissions=RepositoryPermissions(
-            DEFAULT_IMMUTABLE_CORE,
+            pdp.registry,
             [
                 WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",)),
                 WriteGrant("agent-2", PrincipalKind.AGENT, ("workspace/**",)),
@@ -589,7 +588,7 @@ class TestDispatcherIntegration:
         d = GovernedToolDispatcher(
             pdp,
             permissions=RepositoryPermissions(
-                DEFAULT_IMMUTABLE_CORE,
+                pdp.registry,
                 [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))],
             ),
             tool_tiers={"write": ActionTier.T1},
@@ -665,7 +664,7 @@ class TestDispatcherIntegration:
         with pytest.raises(TypeError):
             GovernedToolDispatcher(
                 pdp,
-                permissions=RepositoryPermissions(DEFAULT_IMMUTABLE_CORE, []),
+                permissions=RepositoryPermissions(pdp.registry, []),
                 tool_tiers={},
                 breaker=object(),  # type: ignore[arg-type]
             )

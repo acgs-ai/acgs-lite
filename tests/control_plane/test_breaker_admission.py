@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 
 from acgs_lite.control_plane import (
-    DEFAULT_IMMUTABLE_CORE,
     ActionTier,
     GovernedToolDispatcher,
     PolicyDecisionPoint,
@@ -113,7 +112,7 @@ async def test_async_body_uses_its_original_admission(
     dispatcher = GovernedToolDispatcher(
         pdp,
         permissions=RepositoryPermissions(
-            DEFAULT_IMMUTABLE_CORE, [WriteGrant("agent", PrincipalKind.AGENT, ("workspace/**",))]
+            pdp.registry, [WriteGrant("agent", PrincipalKind.AGENT, ("workspace/**",))]
         ),
         tool_tiers={"write": ActionTier.T1},
         breaker=breaker,

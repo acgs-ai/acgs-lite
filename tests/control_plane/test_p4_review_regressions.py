@@ -69,7 +69,7 @@ def _dispatcher(
     d = GovernedToolDispatcher(
         pdp,
         permissions=RepositoryPermissions(
-            DEFAULT_IMMUTABLE_CORE, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
+            pdp.registry, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
         ),
         tool_tiers={"write": ActionTier.T1},
         breaker=breaker,
@@ -147,7 +147,7 @@ class TestAdmissionRecheckedBeforeInvoke:
     """240.7: a trip during PDP evaluation stops the already-authorised call."""
 
     def test_trip_during_evaluation_blocks_invocation(
-        self, constitution: Constitution, permit_all: PolicySet
+        self, constitution: Constitution, permit_all: PolicySet, tmp_path: Path
     ) -> None:
         calls: list[str] = []
         breaker, rec, _, store = _breaker(BreakerPolicy(max_rollbacks=1, cohort_suspension=False))
@@ -159,7 +159,11 @@ class TestAdmissionRecheckedBeforeInvoke:
                 rec.record_rollback("loop-a", "c1", agent=AGENT)
 
         with PolicyDecisionPoint.for_constitution(
-            constitution, permit_all, listeners=[trip_on_allow], telemetry=rec
+            constitution,
+            permit_all,
+            listeners=[trip_on_allow],
+            telemetry=rec,
+            registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)),
         ) as pdp:
             d = _dispatcher(pdp, breaker, calls)
             with pytest.raises(ToolDenied, match="autonomous mode suspended") as denied:
@@ -215,12 +219,16 @@ class TestAdmissionRecheckedBeforeInvoke:
         if mode == "await_resume":
             monkeypatch.setattr(asyncio, "to_thread", halt_after_worker)
         with PolicyDecisionPoint.for_constitution(
-            constitution, permit_all, telemetry=recorder, listeners=[halt_on_allow]
+            constitution,
+            permit_all,
+            telemetry=recorder,
+            listeners=[halt_on_allow],
+            registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)),
         ) as pdp:
             d = GovernedToolDispatcher(
                 pdp,
                 permissions=RepositoryPermissions(
-                    DEFAULT_IMMUTABLE_CORE,
+                    pdp.registry,
                     [WriteGrant(AGENT.id, PrincipalKind.AGENT, ("workspace/**",))],
                 ),
                 tool_tiers={"write": ActionTier.T1},
@@ -249,13 +257,16 @@ class TestPreDenialTelemetryKind:
     """240.3 / 240.8: dispatcher pre-denials keep the validated kind."""
 
     def test_pre_denial_segmented_as_agent(
-        self, constitution: Constitution, permit_all: PolicySet
+        self, constitution: Constitution, permit_all: PolicySet, tmp_path: Path
     ) -> None:
         store = InMemoryTelemetryStore()
         recorder = TelemetryRecorder(store, CI)
         breaker, _, _, _ = _breaker(BreakerPolicy())
         with PolicyDecisionPoint.for_constitution(
-            constitution, permit_all, telemetry=recorder
+            constitution,
+            permit_all,
+            telemetry=recorder,
+            registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)),
         ) as pdp:
             d = _dispatcher(pdp, breaker, [])
             with pytest.raises(ToolDenied, match="trigger_id"):

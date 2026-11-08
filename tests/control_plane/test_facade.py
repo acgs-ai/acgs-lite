@@ -155,6 +155,8 @@ def test_configured_workflow_verifier_reaches_runbook_predicate(
         ref = ExternalRunRef(provider="github-actions", run_id="123", source="ci_system")
         assert predicate_satisfied(predicate, ref, cp.dispatcher._run_verifier) is expected
         assert cp.dispatcher._run_verifier is verifier
+        assert cp.dispatcher._backup_consumption is cp.runs
+        assert cp.runs.supports_durable_backup_consumption
     finally:
         cp.close()
 

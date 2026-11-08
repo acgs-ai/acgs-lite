@@ -380,6 +380,7 @@ def build_control_plane(config: ControlPlaneConfig) -> ControlPlane:
             incident_lock=incident_lock,
             run_verifier=config.run_verifier if config.run_verifier is not None else runs,
             backup_workflows=config.backup_workflows,
+            backup_consumption_registry=runs,
             narrow_max_blast_radius=config.narrow_max_blast_radius,
         )
     except ControlPlaneConfigError:
