@@ -283,6 +283,40 @@ def test_unbound_effects_are_refused(tmp_path):
     assert len(provider.sends) == 1 and provider.queries == []
 
 
+def test_reconcile_of_reserved_effect_does_not_bind(store):
+    registry = ProviderContractRegistry()
+    registry.register(fenceable())
+    contracted = ContractedEffectStore(store, registry)
+    provider = SpyProvider()
+    effect = reserve(store)
+    with pytest.raises(ProviderNotDispatchable, match="no durable contract binding"):
+        contracted.reconcile(effect.key, provider)
+    # The refused reconcile left no binding: a later contract still binds on first send.
+    updated = ProviderContractRegistry()
+    updated.register(fenceable(version="2027-01-01"))
+    assert ContractedEffectStore(store, updated).send(effect.key, provider).state is (
+        EffectState.DONE
+    )
+    assert provider.queries == [] and len(provider.sends) == 1
+
+
+def test_stale_reserved_read_does_not_bind_raw_dispatched_effect(store, monkeypatch):
+    registry = ProviderContractRegistry()
+    registry.register(fenceable())
+    contracted = ContractedEffectStore(store, registry)
+    provider = SpyProvider()
+    effect = reserve(store)
+    stale = store.get(effect.key)
+    assert store.send(effect.key, provider).state is EffectState.DONE  # raw, unbound
+    # Simulate the race: the wrapper's pre-transaction read still sees RESERVED.
+    monkeypatch.setattr(store, "get", lambda _key: stale)
+    with pytest.raises(ProviderNotDispatchable, match="no durable contract binding"):
+        contracted.send(effect.key, provider)
+    with pytest.raises(ProviderNotDispatchable, match="no durable contract binding"):
+        contracted.contract_for(effect.key, provider)
+    assert len(provider.sends) == 1
+
+
 def test_restart_reconciles_unknown_effect_under_same_contract(tmp_path):
     path = tmp_path / "effects.sqlite"
     store = EffectStore(path)

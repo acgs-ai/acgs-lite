@@ -204,9 +204,12 @@ class ContractedEffectStore:
     def _bound_digest(self, key: str, bind: ProviderContract | None) -> str | None:
         with self._transaction() as db:
             if bind is not None:
+                # Re-check RESERVED inside this write transaction: the caller's
+                # store.get() may be stale if a raw store.send() dispatched since.
                 db.execute(
-                    "INSERT OR IGNORE INTO effect_contract_bindings VALUES (?,?)",
-                    (key, bind.digest),
+                    "INSERT OR IGNORE INTO effect_contract_bindings (key, contract_digest) "
+                    "SELECT key, ? FROM external_effects WHERE key=? AND state=?",
+                    (bind.digest, key, EffectState.RESERVED.value),
                 )
             row = db.execute(
                 "SELECT contract_digest FROM effect_contract_bindings WHERE key=?", (key,)
@@ -239,7 +242,8 @@ class ContractedEffectStore:
         return self.store.send(key, provider)
 
     def reconcile(self, key: str, provider: EffectProvider) -> EffectRecord:
-        self._checked(key, provider, bind=True)
+        # Never bind here: only the first gated send() may create a binding.
+        self._checked(key, provider, bind=False)
         return self.store.reconcile(key, provider)
 
 
