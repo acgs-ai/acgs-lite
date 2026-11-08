@@ -423,7 +423,7 @@ def test_projector_denies(make: Callable[[], Any], wrap: bool) -> None:
 
 
 def _one_arg(value: object) -> None:
-    del value
+    pass
 
 
 @pytest.mark.parametrize("make", DENY_CASES)
@@ -694,7 +694,7 @@ def test_binder_does_not_stringify_scope_before_validation() -> None:
             return "scope"
 
     def g(scope: object) -> None:
-        del scope
+        pass
 
     with pytest.raises(ArgumentNotDigestible):
         bind_invocation(g, (Loud(),), {}, strict_context=True)

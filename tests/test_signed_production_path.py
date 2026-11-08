@@ -855,8 +855,6 @@ def test_allow_with_controls_executes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_unknown_decision_type_is_not_allow(monkeypatch: pytest.MonkeyPatch) -> None:
-    import acgs_lite.governed as governed_module
-
     calls: list[str] = []
     _func, wrapped = _protected(_guard(), calls)
     grant = wrapped.issue_grant("acct-1")
@@ -864,7 +862,7 @@ def test_unknown_decision_type_is_not_allow(monkeypatch: pytest.MonkeyPatch) -> 
     def unknown(_value: object) -> str:
         raise ValueError("unknown decision")
 
-    monkeypatch.setattr(governed_module, "canonicalize_decision_state", unknown)
+    monkeypatch.setattr("acgs_lite.governed.canonicalize_decision_state", unknown)
     _deny(wrapped, calls, "^Unknown decision type is not allow$", "acct-1", execution_grant=grant)
 
 
