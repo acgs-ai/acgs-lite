@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from acgs_lite.legitimacy.invariants import LegitimacyInvariantError, strict_bound_context
+from acgs_lite.serialization import _has_hidden_json_control
 
 INVOCATION_DIGEST_DOMAIN = b"acgs-invocation-v1\x00"
 POLICY_DIGEST_DOMAIN = b"acgs-policy-v1\x00"
@@ -211,11 +212,14 @@ def _canonical_json(value: Any, *, _seen: set[int] | None = None, _depth: int = 
     matched with ``type(v) is T`` so no method of the value's type is ever called.
     The tags keep ``int``/``float``, ``str``/``bytes``, ``bytes``/``bytearray`` and
     ``list``/``tuple`` distinct in the digest.
+    Hidden C0 controls are rejected in text and keys, matching payload enforcement.
     """
     if _depth > _MAX_CANONICAL_DEPTH:
         raise ArgumentNotDigestible(f"argument nests deeper than {_MAX_CANONICAL_DEPTH} levels")
     kind = type(value)
     if value is None or kind is bool or kind is str:
+        if kind is str and _has_hidden_json_control(value):
+            raise ArgumentNotDigestible("string argument contains hidden C0 controls")
         return value
     if kind is int:
         try:
@@ -231,8 +235,8 @@ def _canonical_json(value: Any, *, _seen: set[int] | None = None, _depth: int = 
             text = bytes(value).decode("utf-8")
         except UnicodeDecodeError:
             raise ArgumentNotDigestible("bytes argument is not strict UTF-8") from None
-        if "\x00" in text:
-            raise ArgumentNotDigestible("bytes argument contains NUL")
+        if _has_hidden_json_control(text):
+            raise ArgumentNotDigestible("bytes argument contains hidden C0 controls")
         tag = "__bytes__" if kind is bytes else "__bytearray__"
         return {tag: base64.urlsafe_b64encode(bytes(value)).decode("ascii")}
     if kind is not list and kind is not tuple and kind is not dict:
@@ -252,6 +256,8 @@ def _canonical_json(value: Any, *, _seen: set[int] | None = None, _depth: int = 
     for key in dict.keys(value):
         if type(key) is not str:
             raise ArgumentNotDigestible(f"unsupported mapping key type: {type(key).__name__}")
+        if _has_hidden_json_control(key):
+            raise ArgumentNotDigestible("mapping key contains hidden C0 controls")
         encoded = _canonical_json(dict.__getitem__(value, key), _seen=seen, _depth=depth)
         items.append([_dumps(key), key, encoded])
     items.sort(key=lambda pair: pair[0])

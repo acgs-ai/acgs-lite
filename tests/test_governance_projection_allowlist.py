@@ -283,8 +283,6 @@ _UNEVALUABLE_ROWS = [
     pytest.param(lambda: {PlainObject(): "x"}, id="opaque-key"),
     pytest.param(lambda: {("a", W): "x"}, id="tuple-key"),
     # Dataclasses and pydantic models deny outright under the JSON-only contract.
-    pytest.param(lambda: Priv(), id="pydantic-private-attr"),
-    pytest.param(lambda: Comp(), id="pydantic-computed-field"),
     pytest.param(lambda: Extra(body=W), id="pydantic-extra"),
     pytest.param(lambda: Root([W]), id="pydantic-root-model"),
     pytest.param(lambda: DC(W), id="dataclass-field"),
@@ -311,6 +309,14 @@ class Extra(BaseModel):
 
 class Root(RootModel[list[str]]):
     pass
+
+
+_UNEVALUABLE_ROWS.extend(
+    [
+        pytest.param(Priv, id="pydantic-private-attr"),
+        pytest.param(Comp, id="pydantic-computed-field"),
+    ]
+)
 
 
 # Plain JSON payloads carrying the keyword must deny by rule, not as unevaluable.
