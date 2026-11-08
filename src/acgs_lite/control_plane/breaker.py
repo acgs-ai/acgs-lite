@@ -285,6 +285,14 @@ class _Trigger:
         self.probes = 0
         self.locked = False
         self.reason = ""
+        self.generation = 0
+
+
+@dataclass(frozen=True)
+class _BreakerAdmission:
+    trigger_id: str
+    trigger: _Trigger
+    generation: int
 
 
 class _ClockUnavailable(Exception):
@@ -400,6 +408,7 @@ class TriggerCircuitBreaker:
                 elif len(trigger.rollbacks) >= self._policy.max_rollbacks:
                     reason = f"{len(trigger.rollbacks)} rollbacks within window"
             if trigger.open:
+                trigger.generation += 1
                 if trigger.probes > 0 and not trigger.locked:
                     # A failure after a probe: no more probes until a human reset.
                     trigger.locked = True
@@ -410,6 +419,7 @@ class TriggerCircuitBreaker:
                     trigger.tripped_at = now
                     trigger.last_probe_at = None
             elif reason:
+                trigger.generation += 1
                 trigger.open = True
                 trigger.tripped_at = now if clock_ok else None
                 trigger.reason = reason
@@ -482,14 +492,47 @@ class TriggerCircuitBreaker:
             return False
         with self._lock:
             trigger = self._triggers.get(trigger_id)
-            if trigger is None or not trigger.open:
-                return True
-            if not self._probe_available(trigger, now):
-                return False
-            if consume:
-                trigger.last_probe_at = now
-                trigger.probes += 1
+            return self._allow_locked(trigger, now, consume=consume)
+
+    def _allow_locked(self, trigger: _Trigger | None, now: float, *, consume: bool) -> bool:
+        if trigger is None or not trigger.open:
             return True
+        if not self._probe_available(trigger, now):
+            return False
+        if consume:
+            trigger.last_probe_at = now
+            trigger.probes += 1
+        return True
+
+    def _reserve_admission(self, trigger_id: str) -> _BreakerAdmission | None:
+        """Atomically admit a call and capture its trigger generation."""
+        if not valid_trigger_id(trigger_id):
+            return None
+        try:
+            now = self._now()
+        except _ClockUnavailable:
+            return None
+        with self._lock:
+            trigger = self._triggers.setdefault(trigger_id, _Trigger())
+            if not self._allow_locked(trigger, now, consume=True):
+                return None
+            return _BreakerAdmission(trigger_id, trigger, trigger.generation)
+
+    def _admission_valid(self, admission: _BreakerAdmission) -> bool:
+        """Recheck a reserved call without spending another half-open probe."""
+        try:
+            self._now()
+        except _ClockUnavailable:
+            return False
+        with self._lock:
+            current = self._triggers.get(admission.trigger_id)
+            # reset() replaces the trigger identity, so reset then re-trip at
+            # an identical clock reading cannot revive an older admission.
+            return (
+                current is admission.trigger
+                and current.generation == admission.generation
+                and not current.locked
+            )
 
     def cohort_suspended(self, system_id: str | None, *, probing: str | None = None) -> bool:
         """True if ``cohort_suspension`` is on and any trigger bound to

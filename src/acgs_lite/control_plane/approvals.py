@@ -43,7 +43,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
@@ -209,6 +209,8 @@ class QuorumResult:
     # Earliest signed-approval prefix satisfying both count and role coverage.
     # Observability only: all counted approvals are still consumed.
     completion_approver_ids: tuple[str, ...] = ()
+    telemetry_cycle_id: str | None = None
+    telemetry_requested_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -352,7 +354,7 @@ class ApprovalGate:
     approved action runs, so concurrent replays lose.
 
     Phase 4: with ``telemetry=`` the gate records APPROVAL_REQUESTED the
-    first time it sees an action hash that needs a quorum (any non-dry-run
+    first time it sees an action hash in a new approval cycle (any non-dry-run
     evaluation, satisfied or not, or :meth:`note_approval_requested` from
     ``GovernedToolDispatcher.action_hash_for``) and one APPROVAL_GRANTED per
     approver in the earliest quorum-completing prefix when a quorum is consumed.
@@ -400,7 +402,7 @@ class ApprovalGate:
         self._lock = threading.Lock()
         self._consumed: set[tuple[str, str]] = set()
         self._telemetry = telemetry
-        self._requested: collections.OrderedDict[str, float] = collections.OrderedDict()
+        self._requested: collections.OrderedDict[str, tuple[float, str]] = collections.OrderedDict()
         self._resolved: set[str] = set()  # requested hashes whose quorum was consumed
         self.telemetry_failures = 0
 
@@ -431,8 +433,9 @@ class ApprovalGate:
         try:
             now = float(telemetry.clock())
             with self._lock:
-                requested_at = self._requested.get(result.action_hash)
-                if result.action_hash in self._requested:
+                current = self._requested.get(result.action_hash)
+                requested_at = result.telemetry_requested_at
+                if current is not None and current[1] == result.telemetry_cycle_id:
                     self._resolved.add(result.action_hash)
         except Exception as exc:
             logger.warning("approval telemetry failed: %s", type(exc).__name__)
@@ -449,7 +452,11 @@ class ApprovalGate:
             if requested_at is not None:
                 at = max(at, min(requested_at, now))
             self._telemetry_call(
-                telemetry.record_approval_granted, result.action_hash, approver_id, at=at
+                telemetry.record_approval_granted,
+                result.action_hash,
+                approver_id,
+                cycle_id=result.telemetry_cycle_id,
+                at=at,
             )
 
     def _telemetry_call(
@@ -482,27 +489,35 @@ class ApprovalGate:
 
     def note_approval_requested(
         self, action_hash: str, *, principal_kind: PrincipalKind | None = None
-    ) -> None:
-        """Record (once per hash) that *action_hash* awaits a quorum."""
+    ) -> tuple[float, str] | None:
+        """Record one pending approval cycle; start another after consumption."""
         telemetry = self._telemetry
         if telemetry is None or not isinstance(action_hash, str) or not action_hash:
-            return
+            return None
         try:
             now = float(telemetry.clock())
         except Exception as exc:
             logger.warning("approval telemetry failed: %s", type(exc).__name__)
             with self._lock:
                 self.telemetry_failures += 1
-            return
+            return None
         with self._lock:
-            if action_hash in self._requested:
-                return
-            self._requested[action_hash] = now
+            if action_hash in self._requested and action_hash not in self._resolved:
+                return self._requested[action_hash]
+            cycle = (now, uuid.uuid4().hex)
+            self._requested[action_hash] = cycle
+            self._requested.move_to_end(action_hash)
+            self._resolved.discard(action_hash)
             while len(self._requested) > _MAX_REQUESTED_TRACKED:
                 self._evict_one()
         self._telemetry_call(
-            telemetry.record_approval_requested, action_hash, principal_kind=principal_kind, at=now
+            telemetry.record_approval_requested,
+            action_hash,
+            principal_kind=principal_kind,
+            cycle_id=cycle[1],
+            at=now,
         )
+        return cycle
 
     def evaluate(
         self,
@@ -518,9 +533,13 @@ class ApprovalGate:
         try:
             result = self._evaluate(request, tuple(approvals))
             if record_request and result.required > 0:
-                self.note_approval_requested(
+                cycle = self.note_approval_requested(
                     result.action_hash, principal_kind=request.principal.kind
                 )
+                if cycle is not None:
+                    result = replace(
+                        result, telemetry_requested_at=cycle[0], telemetry_cycle_id=cycle[1]
+                    )
             return result
         except Exception as exc:
             return QuorumResult(

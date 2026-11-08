@@ -641,6 +641,27 @@ def latency_setup(
 
 
 class TestApprovalLatencyThroughDispatcher:
+    def test_successive_identical_action_cycles(self, latency_setup: Any) -> None:
+        d, clock, store, bob, gate = latency_setup
+        args = {"path": "workspace/a", "content": "same"}
+        hashes = []
+        for start in (1000.0, 2000.0):
+            clock.now = start
+            action = d.action_hash_for(AGENT, "edit", args, requested_by=REQ)
+            hashes.append(action)
+            clock.now = start + 10
+            d.dispatch(
+                AGENT, "edit", args, requested_by=REQ, approvals=[bob(action, now=clock.now)]
+            )
+        assert hashes[0] == hashes[1]
+        metrics = OversightMetrics(store, clock=clock)
+        assert metrics.approval_latency("agent").count == 2
+        assert metrics.approval_latency("agent").max_s == 10
+        assert metrics.approval_latency("agent", since=2000).count == 1
+        assert metrics.approval_latency("agent", until=1500).count == 1
+        assert metrics.approval_latency("human").count == 0
+        assert gate.telemetry_failures == 0
+
     def test_requested_then_granted(
         self,
         latency_setup: tuple[
@@ -934,6 +955,7 @@ def test_approval_latency_segments_follow_requester_and_roundtrip() -> None:
     # Old persisted requests without attribution remain in the combined metric.
     old = rec.record_approval_requested(h("6")).to_dict()
     old.pop("principal_kind")
+    old.pop("cycle_id")
     assert event_from_dict(old).principal_kind is None
 
 
@@ -982,3 +1004,52 @@ def test_latency_uses_earliest_role_satisfying_quorum(
     metrics = OversightMetrics(store, clock=clock)
     assert metrics.approval_latency("agent").max_s == expected
     assert metrics.approval_latency("human").count == 0
+
+    # A second identical T2/T3 action starts a separate approval cycle.
+    clock.now = 2000
+    second = gate.evaluate(request, [])
+    assert second.action_hash == pending.action_hash
+    assert second.telemetry_cycle_id != pending.telemetry_cycle_id
+    fresh = [
+        sign(second.action_hash, now=at)
+        for sign, at in zip(signers, [2010, 2020, 2090, 2095], strict=True)
+    ]
+    clock.now = 2100
+    assert gate.consume(gate.evaluate(request, fresh))
+    assert metrics.approval_latency("agent").count == 2
+    assert metrics.approval_latency("agent").max_s == expected
+    assert metrics.approval_latency("agent", since=2000).count == 1
+    assert metrics.approval_latency("agent", since=2000).max_s == expected
+    assert all(event_from_dict(event.to_dict()) == event for event in store.read_all())
+
+
+def test_legacy_denial_resolves_gate_generated_cycle(approval_authority: ApprovalAuthority) -> None:
+    clock = Clock(1000)
+    store, rec = _recorder(clock)
+    gate = ApprovalGate(approval_authority, clock=clock, telemetry=rec)
+    gate.note_approval_requested(h("a"), principal_kind=PrincipalKind.AGENT)
+    clock.now = 1010
+    rec.record_approval_denied(h("a"), Principal("reviewer", PrincipalKind.HUMAN))
+    metric = OversightMetrics(store).approval_latency("agent")
+    assert metric.count == 1
+    assert metric.max_s == 10
+    assert metric.pending == 0
+
+
+def test_legacy_denials_match_latest_unambiguous_cycle() -> None:
+    clock = Clock(1000)
+    store, rec = _recorder(clock)
+    reviewer = Principal("reviewer", PrincipalKind.HUMAN)
+    for start, cycle in [(1000, "first"), (2000, "second")]:
+        rec.record_approval_requested(
+            h("a"), cycle_id=cycle, principal_kind=PrincipalKind.AGENT, at=start
+        )
+        rec.record_approval_denied(h("a"), reviewer, at=start + 10)
+    metrics = OversightMetrics(store)
+    assert metrics.approval_latency("agent").count == 2
+    assert metrics.approval_latency("agent").max_s == 10
+    assert metrics.approval_latency("agent", since=2000).count == 1
+    rec.record_approval_requested(h("b"), cycle_id="overlap-a", at=3000)
+    rec.record_approval_requested(h("b"), cycle_id="overlap-b", at=3000)
+    rec.record_approval_denied(h("b"), reviewer, at=3010)
+    assert metrics.approval_latency().pending == 2

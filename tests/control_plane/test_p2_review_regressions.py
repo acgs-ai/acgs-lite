@@ -188,6 +188,42 @@ class TestRunRegistryAcrossInstances:
         reopened = TrustedRunRegistry(path=path, registry=core, signer=signer)
         assert len(reopened) == 1 and reopened.validate(_ci()).valid
 
+    def test_read_only_verifier_refreshes_new_signed_records(
+        self, tmp_path: Path, signer: Ed25519ReceiptSigner
+    ) -> None:
+        core, path, writer, _ = self._pair(tmp_path, signer)
+        reader = TrustedRunRegistry(
+            path=path,
+            registry=core,
+            trusted_public_keys={signer.key_id: signer.public_key_hex()},
+        )
+        assert not reader.validate(_ci()).valid
+        writer.register_run(CI, _ci(), conclusion="success")
+        assert reader.validate(_ci()).valid
+        writer.register_run(CI, _ci("2"), conclusion="success")
+        assert reader.validate(_ci("2")).valid
+
+    @pytest.mark.parametrize("corruption", ["append", "shrink", "remove"])
+    def test_live_verifier_rejects_corrupted_persistence(
+        self, tmp_path: Path, signer: Ed25519ReceiptSigner, corruption: str
+    ) -> None:
+        core, path, writer, _ = self._pair(tmp_path, signer)
+        writer.register_run(CI, _ci(), conclusion="success")
+        reader = TrustedRunRegistry(
+            path=path,
+            registry=core,
+            trusted_public_keys={signer.key_id: signer.public_key_hex()},
+        )
+        assert reader.validate(_ci()).valid
+        if corruption == "append":
+            with path.open("ab") as handle:
+                handle.write(b'{"record":"unsigned"}\n')
+        elif corruption == "shrink":
+            path.write_bytes(b"")
+        else:
+            path.unlink()
+        assert not reader.validate(_ci()).valid
+
     def test_interleaved_registrations_both_persist(
         self, tmp_path: Path, signer: Ed25519ReceiptSigner
     ) -> None:

@@ -304,8 +304,12 @@ def evaluate_evidence(
 
 def _attests_digest(verifier: ExternalRunVerifier, ref: ExternalRunRef) -> bool:
     target: object = verifier
-    if isinstance(verifier, CompositeRunVerifier):
-        target = verifier.verifier_for(ref)
+    visited: set[int] = set()
+    while isinstance(target, CompositeRunVerifier):
+        if id(target) in visited:
+            return False
+        visited.add(id(target))
+        target = target.verifier_for(ref)
     return getattr(target, "attests_artifact_digest", False) is True
 
 
@@ -429,11 +433,35 @@ class TrustedRunRegistry:
             raise ValueError("a persisted run registry needs a signer or trusted_public_keys")
         self._keys = keys
         self._path = require_audit_store_path(path, registry)
-        if not self._path.exists():
+        self._refresh_persisted()
+
+    def _refresh_persisted(self) -> None:
+        """Read newly appended signed records under the writer's file lock.
+
+        Called with the instance lock held (or during construction). A failed
+        refresh must prevent validation from trusting a stale cached record.
+        """
+        if self._path is None:
             return
-        data = self._path.read_bytes()
-        self._ingest(data)
-        self._end = len(data)
+        try:
+            handle = self._path.open("rb")
+        except FileNotFoundError:
+            if self._end:
+                raise ValueError("run registry disappeared since it was opened") from None
+            return
+        with handle:
+            fcntl: Any = importlib.import_module("fcntl")
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+            try:
+                size = os.fstat(handle.fileno()).st_size
+                if size < self._end:
+                    raise ValueError("run registry shrank since it was opened")
+                if size > self._end:
+                    handle.seek(self._end)
+                    self._ingest(handle.read(size - self._end))
+                    self._end = size
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def _ingest(self, data: bytes) -> None:
         """Verify and add the signed lines in *data* (bytes after ``_end``)."""
@@ -607,6 +635,10 @@ class TrustedRunRegistry:
         if ref.source is EvidenceSource.AGENT_LOG:
             return invalid(AGENT_LOG_REASON)
         with self._lock:
+            try:
+                self._refresh_persisted()
+            except (OSError, ValueError, ImportError) as exc:
+                return invalid(f"run registry refresh failed: {exc}")
             record = self._records.get((ref.provider, ref.run_id))
         if record is None:
             return invalid(f"run {ref.label} is not registered")

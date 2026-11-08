@@ -6,6 +6,7 @@ every one of them showed the bypass.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import threading
 import time
@@ -315,6 +316,31 @@ class TestL10DryRunIsNamedAsSuch:
 
 
 class TestKillSwitchToctouAndPaths:
+    async def test_async_body_rechecks_halt_after_worker_returns(
+        self, pdp: PolicyDecisionPoint, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        switch = KillSwitch("sys-a", signal_dir=tmp_path / "h")
+        dispatcher = GovernedToolDispatcher(
+            pdp, permissions=_permissions(), tool_tiers={"w": ActionTier.T1}, kill_switch=switch
+        )
+        calls: list[str] = []
+
+        async def write(path: str) -> None:
+            calls.append(path)
+
+        dispatcher.register("w", write, path_params={"path"}, merge_capable=False)
+        original = asyncio.to_thread
+
+        async def halt_after_worker(fn: Any, *args: Any, **kwargs: Any) -> Any:
+            result = await original(fn, *args, **kwargs)
+            switch.engage(ALICE, "after worker")
+            return result
+
+        monkeypatch.setattr(asyncio, "to_thread", halt_after_worker)
+        with pytest.raises(ToolDenied, match="kill switch"):
+            await dispatcher.adispatch(AGENT, "w", {"path": "workspace/a"})
+        assert calls == []
+
     def _dispatcher(
         self, pdp: PolicyDecisionPoint, switch: KillSwitch, engage_during_auth: bool
     ) -> tuple[GovernedToolDispatcher, list[str]]:
