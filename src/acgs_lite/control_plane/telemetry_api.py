@@ -180,10 +180,17 @@ def create_telemetry_app(
         return respond(dataclasses.asdict(result))
 
     @app.get("/telemetry/approval-latency")
-    def approval_latency(since: float | None = None, until: float | None = None) -> JSONResponse:
-        result = metrics.approval_latency(
-            since=window(since, "since"), until=window(until, "until")
-        )
+    def approval_latency(
+        segment: str = "all", since: float | None = None, until: float | None = None
+    ) -> JSONResponse:
+        try:
+            result = metrics.approval_latency(
+                cast(Segment, segment),
+                since=window(since, "since"),
+                until=window(until, "until"),
+            )
+        except ValueError as exc:
+            raise bad_request(exc) from exc
         return respond(dataclasses.asdict(result))
 
     @app.get("/telemetry/verifier")

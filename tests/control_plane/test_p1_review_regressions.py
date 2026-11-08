@@ -387,3 +387,14 @@ class TestRepoRootImportShadows:
 
     def test_ordinary_module_unchanged(self) -> None:
         assert DEFAULT_IMMUTABLE_CORE.classify("src/acgs_lite/foo.py") is None
+
+
+class TestDottedDirectoryTargets:
+    @pytest.mark.parametrize("path", ["app/v1.2", "app/v1.2/", "app/report.txt"])
+    def test_unknown_target_kind_outside_scratch_is_denied(
+        self, pdp: PolicyDecisionPoint, path: str
+    ) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied, match="may contain core files"):
+            dispatcher.dispatch(AGENT, "write", {"path": path})
+        assert sink.calls == []

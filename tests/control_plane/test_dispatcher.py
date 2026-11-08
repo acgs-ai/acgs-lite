@@ -456,10 +456,10 @@ class TestDeniedByBothLayers:
     def test_permissive_pdp_iam_denies_at_dispatch(
         self, pdp: PolicyDecisionPoint, agent: Principal
     ) -> None:
-        # PDP permits everything outside the core; IAM never granted other/**.
-        dispatcher, recorder = _dispatcher(pdp)
+        # PDP permits scratch writes, but this principal has no IAM grants.
+        dispatcher, recorder = _dispatcher(pdp, RepositoryPermissions(DEFAULT_IMMUTABLE_CORE))
         with pytest.raises(ToolDenied) as excinfo:
-            dispatcher.dispatch(agent, "write_file", {"path": "other/notes.md"})
+            dispatcher.dispatch(agent, "write_file", {"path": "workspace/notes.md"})
         assert "repository permissions deny" in excinfo.value.decision.reason
         assert recorder.calls == []
 

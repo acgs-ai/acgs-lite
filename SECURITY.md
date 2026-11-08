@@ -12,9 +12,9 @@ Only the current packaged version line is targeted for security fixes.
 
 | Version line | Security status | Notes |
 | --- | --- | --- |
-| `2.12.x` | Supported for responsible-disclosure triage and intended fixes | Current published package version is `2.12.0`. |
-| `2.11.x` | Previous line; still accepted for reports that also affect `2.12.x` | Upgrade to the latest `2.12.x` when possible. |
-| `< 2.11` | Not supported | Upgrade to the latest `2.12.x` release before reporting unless the issue also affects `2.12.x`. |
+| `3.0.x` | Supported for responsible-disclosure triage and intended fixes | Current published package version is `3.0.1`. |
+| `2.12.x` | Previous line; still accepted for reports that also affect `3.0.x` | Upgrade to the latest `3.0.x` when possible. |
+| `< 2.12` | Not supported | Upgrade to the latest `3.0.x` release before reporting unless the issue also affects `3.0.x`. |
 
 ## Vulnerability Scope
 

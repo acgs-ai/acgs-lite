@@ -29,7 +29,12 @@ from acgs_lite.control_plane import (
     ToolDenied,
     WriteGrant,
 )
-from acgs_lite.control_plane.approvals import ApprovalAuthority, ApprovalGate, SignedApproval
+from acgs_lite.control_plane.approvals import (
+    ApprovalAuthority,
+    ApprovalGate,
+    QuorumPolicy,
+    SignedApproval,
+)
 from acgs_lite.control_plane.autonomy import AutonomyController, AutonomyLevel, ErrorBudget
 from acgs_lite.control_plane.evidence import EvidenceSource, ExternalRunRef
 from acgs_lite.control_plane.telemetry import (
@@ -655,6 +660,11 @@ class TestApprovalLatencyThroughDispatcher:
         granted = [e for e in store.read_all() if isinstance(e, ApprovalGranted)]
         assert [(e.action_hash, e.approver_id, e.at) for e in granted] == [(action, "bob", 1090)]
         assert gate.telemetry_failures == 0
+        requested = [e for e in store.read_all() if isinstance(e, ApprovalRequested)]
+        assert requested and all(e.principal_kind is PrincipalKind.AGENT for e in requested)
+        metrics = OversightMetrics(store, clock=clock)
+        assert metrics.approval_latency("agent") == latency
+        assert metrics.approval_latency("human").count == 0
         decisions = [e for e in store.read_all() if isinstance(e, DecisionObserved)]
         assert decisions and all(e.principal_kind is PrincipalKind.AGENT for e in decisions)
 
@@ -865,3 +875,110 @@ def test_rework_event_kind_attribute() -> None:
     )
     assert rework.to_dict()["kind"] == "rework"
     assert event_from_dict(rework.to_dict()) == rework
+
+
+@pytest.mark.parametrize("verifiers", [1, 12])
+def test_snapshot_reads_one_immutable_jsonl_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verifiers: int
+) -> None:
+    core = DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
+    store = JSONLTelemetryStore("audit/snapshot.jsonl", registry=core)
+    rec = TelemetryRecorder(store, CI, clock=Clock(100))
+    rec.record_merge("s1", author_kind="agent", author_id="agent-1", at=0)
+    rec.record_ground_truth("s1", "fail", run_ref=CI_RUN, at=1)
+    for i in range(verifiers):
+        rec.record_verifier_verdict("s1", f"v{i}", "fail", at=2)
+    reads = 0
+    read = store.read_all
+
+    def counted_read() -> tuple[OversightEvent, ...]:
+        nonlocal reads
+        reads += 1
+        batch = read()
+        # Concurrently arriving data must not split a snapshot across versions.
+        rec.record_verifier_verdict("s1", "late", "pass", at=3)
+        return batch
+
+    monkeypatch.setattr(store, "read_all", counted_read)
+    snapshot = OversightMetrics(store, clock=Clock(100)).snapshot()
+    assert reads == 1
+    assert len(snapshot["verifier"]["by_verifier"]) == verifiers
+    assert snapshot["verifier"]["segments"]["all"]["tp"] == verifiers
+    assert snapshot["verifier"]["segments"]["agent"]["tp"] == verifiers
+    assert snapshot["verifier"]["segments"]["human"]["tp"] == 0
+
+
+def test_approval_latency_segments_follow_requester_and_roundtrip() -> None:
+    store, rec = _recorder()
+    for char, kind, start, end in (
+        ("1", PrincipalKind.AGENT, 0, 10),
+        ("2", PrincipalKind.HUMAN, 20, 50),
+        ("3", PrincipalKind.SERVICE, 60, 100),
+        ("4", None, 100, 150),
+    ):
+        event = rec.record_approval_requested(h(char), principal_kind=kind, at=start)
+        assert event_from_dict(event.to_dict()) == event
+        rec.record_approval_granted(h(char), "bob", at=end)
+    # A later duplicate must not relabel the original request.
+    rec.record_approval_requested(h("1"), principal_kind=PrincipalKind.HUMAN, at=1)
+    rec.record_approval_requested(h("5"), principal_kind=PrincipalKind.AGENT, at=200)
+    metrics = OversightMetrics(store)
+    assert metrics.approval_latency().count == 4
+    assert metrics.approval_latency("agent").p50_s == 10
+    assert metrics.approval_latency("agent").pending == 1
+    assert metrics.approval_latency("human").p50_s == 30
+    assert metrics.approval_latency("agent", since=20).count == 0
+    assert metrics.snapshot()["approval_latency"]["human"]["p50_s"] == 30
+    with pytest.raises(ValueError, match="segment"):
+        metrics.approval_latency("robot")
+    # Old persisted requests without attribution remain in the combined metric.
+    old = rec.record_approval_requested(h("6")).to_dict()
+    old.pop("principal_kind")
+    assert event_from_dict(old).principal_kind is None
+
+
+@pytest.mark.parametrize(
+    ("tier", "required", "roles", "expected"),
+    [
+        (ActionTier.T2, 1, frozenset(), 10),
+        (ActionTier.T3, 2, frozenset(), 20),
+        (ActionTier.T3, 2, frozenset({"ops"}), 90),
+    ],
+)
+def test_latency_uses_earliest_role_satisfying_quorum(
+    approval_authority: ApprovalAuthority,
+    approver_factory: Callable[..., Sign],
+    tier: ActionTier,
+    required: int,
+    roles: frozenset[str],
+    expected: int,
+) -> None:
+    clock = Clock(1000)
+    store, rec = _recorder(clock)
+    gate = ApprovalGate(
+        approval_authority,
+        policies={tier: QuorumPolicy(required, required_roles=roles)},
+        clock=clock,
+        telemetry=rec,
+    )
+    request = DecisionRequest(AGENT, "tool.call", "deploy", tier, attributes={"requested_by": REQ})
+    pending = gate.evaluate(request, [])
+    signers = [
+        approver_factory("bob"),
+        approver_factory("carol"),
+        approver_factory("dora", roles=frozenset({"ops"})),
+        approver_factory("eric"),
+    ]
+    approvals = [
+        sign(pending.action_hash, now=at)
+        for sign, at in zip(signers, [1010, 1020, 1090, 1095], strict=True)
+    ]
+    clock.now = 1100
+    result = gate.evaluate(request, reversed(approvals))
+    assert result.satisfied
+    assert len(result.counted_approvals) == 4  # authorization semantics unchanged
+    assert gate.consume(result)
+    assert all(gate.is_consumed(approval) for approval in approvals)
+    metrics = OversightMetrics(store, clock=clock)
+    assert metrics.approval_latency("agent").max_s == expected
+    assert metrics.approval_latency("human").count == 0

@@ -366,6 +366,8 @@ ENTRY_POINTS: dict[str, str] = {
 }
 # Human-kind gates that are not entry points, each with the reason.
 ALLOWLIST: dict[str, str] = {
+    "telemetry.py:OversightMetrics.approval_latency": "read-only segmentation of recorded "
+    "requester kind, not a caller authorization gate",
     "approvals.py:_require_human": "helper; every caller is an entry point",
     "breaker.py:_require_human": "helper; every caller is an entry point",
     "runbook.py:_require_human": "helper; every caller is an entry point",

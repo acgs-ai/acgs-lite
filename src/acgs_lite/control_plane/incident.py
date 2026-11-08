@@ -311,9 +311,10 @@ class IncidentMutationLock:
             return None
         state = _parse(json.loads(text))
         self._ever_declared = True
-        if state.status == "resolved" and self._pdp is not None:
+        if self._pdp is not None:
             # Re-read the ledger tail: another instance (or this one, whose
-            # state write failed) may have receipted a declare since.
+            # state write failed) may have receipted a replacement incident
+            # since. A live reader can miss the resolved intermediate state.
             ledger_incident = self._ledger_unresolved()
             self._ledger_open = ledger_incident is not None
             self._ledger_incident = ledger_incident

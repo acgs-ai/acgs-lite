@@ -28,7 +28,7 @@ from acgs_lite.control_plane.budgets import BudgetLedger, BudgetLimits
 from acgs_lite.control_plane.change_ownership import ChangeOwnershipRegistry, OwnershipDenied
 from acgs_lite.control_plane.core_write import CoreChangeWriter, CoreWriteRejected
 from acgs_lite.control_plane.evaluator import DeterministicEvaluator, EvaluatorService
-from acgs_lite.control_plane.evidence import RunValidation
+from acgs_lite.control_plane.evidence import GitHubActionsRunVerifier, RunValidation
 from acgs_lite.control_plane.incident import IncidentLockError, IncidentMutationLock
 from acgs_lite.control_plane.roles import Role, RoleAssignments
 from acgs_lite.control_plane.runbook import (
@@ -285,9 +285,36 @@ class TestSuccessPredicate:
         )
         assert not predicate_satisfied(predicate, ref, runs)  # not registered
         runs.register_run(SERVICE, ref, conclusion="success")
-        assert predicate_satisfied(predicate, ref, runs)
+        assert not predicate_satisfied(predicate, ref, runs)  # no workflow attestation
         assert not predicate_satisfied(predicate, ref, None)
         assert not predicate_satisfied(predicate, "done", runs)
+
+    @pytest.mark.parametrize(
+        "workflow", [".github/workflows/ci.yml", ".github/workflows/other.yml"]
+    )
+    def test_external_run_requires_the_approved_workflow(self, workflow: str) -> None:
+        ref = ExternalRunRef("github-actions", "1", EvidenceSource.CI_SYSTEM, head_sha="a" * 40)
+        payload = {
+            "id": 1,
+            "repository": {"full_name": "acgs-ai/acgs-lite"},
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": "a" * 40,
+            "path": workflow,
+            "head_branch": "main",
+            "event": "push",
+        }
+        runs = GitHubActionsRunVerifier(
+            lambda path: payload,
+            repository="acgs-ai/acgs-lite",
+            allowed_workflows=[".github/workflows/ci.yml", ".github/workflows/other.yml"],
+            allowed_branches=["main"],
+            allowed_events=["push"],
+        )
+        predicate = ExternalRunPredicate(
+            kind="external_run", provider="github-actions", workflow=".github/workflows/ci.yml"
+        )
+        assert predicate_satisfied(predicate, ref, runs) is (workflow == predicate.workflow)
 
 
 class TestEvaluatorService:
@@ -355,6 +382,19 @@ def test_demo_write_file_refuses_dotdot(tmp_path: Path) -> None:
 class TestDeclareWriteFailureLiveInstances:
     """Security re-review (HIGH): a receipted declare whose state write fails
     must deny writes on live instances, without a restart."""
+
+    def test_live_instance_observes_replacement_incident(
+        self, tmp_path: Path, ledger_pdp: PolicyDecisionPoint
+    ) -> None:
+        lock = _lock(tmp_path, pdp=ledger_pdp)
+        lock.declare_incident(COMMANDER, "inc-a")
+        other = _lock(tmp_path, pdp=ledger_pdp)
+        assert other.state().incident_id == "inc-a"
+        lock.resolve(COMMANDER)
+        lock.declare_incident(COMMANDER, "inc-b")
+        lock.acquire(BOB, "inc-b", commander=COMMANDER)
+        assert other.write_denial(BOB) is None
+        assert other.state().incident_id == "inc-b"
 
     def test_live_instances_deny(
         self, tmp_path: Path, ledger_pdp: PolicyDecisionPoint, monkeypatch: pytest.MonkeyPatch

@@ -549,7 +549,7 @@ class GovernedToolDispatcher:
             )
         )
         if self._gate is not None and plan.tier >= APPROVAL_GATE_MIN_TIER:
-            self._gate.note_approval_requested(digest)
+            self._gate.note_approval_requested(digest, principal_kind=principal.kind)
         return digest
 
     def register(
@@ -702,14 +702,12 @@ class GovernedToolDispatcher:
             return True
         if "." not in normalized.rsplit("/", 1)[-1]:
             return True
-        # TODO(control-plane-gap): repo_root=None is the norm for p1-p5
-        # integrators (only the p6 facade binds a root), and then a dotted
-        # last segment ("app/v1.2") is taken for a file, so an agent may
-        # delete/overwrite a directory holding unanchored core files
-        # (app/v1.2/.env). Even with a root, the isdir fallback misses a
-        # not-yet-existing dotted directory such as "app/v1.2/" created later.
+        # A suffix is not evidence of a regular file: directories can have
+        # dots too. Outside scratch, unknown targets must remain restricted.
+        # A host that permits ordinary file updates binds a repository root
+        # so the existing target can be checked before authorization.
         root = self._registry.repo_root
-        return root is not None and os.path.isdir(posixpath.join(root, normalized))
+        return root is None or not os.path.isfile(posixpath.join(root, normalized))
 
     def _in_scratch(self, raw: str) -> bool:
         normalized = self._registry.normalize(raw)
@@ -812,10 +810,10 @@ class GovernedToolDispatcher:
 
         if not spec.read_only and self._registry.has_unanchored_patterns():
             for path in declared:
+                if self._registry.is_core(path):
+                    # Preserve the specific PDP denial for core targets.
+                    continue
                 if self._is_directory_like(path) and not self._in_scratch(path):
-                    # TODO(control-plane-gap): "directory-like" is inferred from
-                    # a trailing slash, a missing extension or an existing dir
-                    # under repo_root; extension-bearing directory names slip.
                     raise _Denied(f"directory-like write target {path!r} may contain core files")
         return spec, args, declared, core_leaves
 
