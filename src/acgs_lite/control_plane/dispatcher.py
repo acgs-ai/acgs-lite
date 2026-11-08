@@ -1149,6 +1149,7 @@ class GovernedToolDispatcher:
         session: ScopedCredential | None,
         group_id: str | None,
         admission: _BreakerAdmission | None = None,
+        credential_id: str | None = None,
     ) -> _BreakerAdmission | None:
         """Re-admit after the PDP: a failure observed meanwhile may have
         tripped the breaker, suspended the cohort or demoted the agent. Only
@@ -1168,13 +1169,16 @@ class GovernedToolDispatcher:
                 principal, trigger_id, session, consume=True, admission=admission
             )
         except _Denied as exc:
-            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
+            raise self._pre_denial(
+                principal, tool_name, str(exc), group_id=group_id, credential_id=credential_id
+            ) from exc
         except Exception as exc:
             raise self._pre_denial(
                 principal,
                 tool_name,
                 f"harness check failed: {type(exc).__name__}",
                 group_id=group_id,
+                credential_id=credential_id,
             ) from exc
 
     def _harness_checks(
@@ -1532,14 +1536,54 @@ class GovernedToolDispatcher:
     ) -> None:
         """Closes the authorise-then-invoke window (TOCTOU), sync and async:
         the kill switch, and for writes the incident mutation lock."""
+        group_id = auth.decisions[0].decision_id if auth is not None and auth.decisions else None
+        credential_id = (
+            auth.decisions[0].credential_id if auth is not None and auth.decisions else None
+        )
         if self._kill_switch_engaged():
-            raise self._pre_denial(principal, tool_name, "kill switch engaged")
+            raise self._pre_denial(
+                principal,
+                tool_name,
+                "kill switch engaged",
+                group_id=group_id,
+                credential_id=credential_id,
+            )
         lock = self._incident_lock
         if lock is not None and auth is not None:
             if not (auth.spec.read_only and auth.plan.tier == ActionTier.T0):
                 denial = lock.write_denial(principal)
                 if denial is not None:
-                    raise self._pre_denial(principal, tool_name, denial)
+                    raise self._pre_denial(
+                        principal, tool_name, denial, group_id=group_id, credential_id=credential_id
+                    )
+
+    def _recheck_execution(
+        self,
+        principal: Principal,
+        tool_name: str,
+        auth: _Authorized,
+        credential: object,
+        trigger_id: str | None,
+    ) -> None:
+        self._recheck_kill_switch(principal, tool_name, auth)
+        group_id = auth.decisions[0].decision_id if auth.decisions else None
+        credential_id = auth.decisions[0].credential_id if auth.decisions else None
+        try:
+            session = self._verify_credential(principal, tool_name, credential)
+        except _Denied as exc:
+            raise self._pre_denial(
+                principal, tool_name, str(exc), group_id=group_id, credential_id=credential_id
+            ) from exc
+        self._final_admission(
+            principal,
+            tool_name,
+            auth.spec.read_only and auth.plan.tier == ActionTier.T0,
+            auth.admission.trigger_id if auth.admission is not None else trigger_id,
+            session,
+            group_id,
+            admission=auth.admission,
+            credential_id=credential_id,
+        )
 
     def _run_on_authorized(
         self,
@@ -1665,7 +1709,7 @@ class GovernedToolDispatcher:
         # The hook first, then the TOCTOU recheck, so a halt engaged while the
         # hook ran (e.g. a slow durable intent write) still stops the tool.
         self._run_on_authorized(principal, tool_name, auth, on_authorized)
-        self._recheck_kill_switch(principal, tool_name, auth)
+        self._recheck_execution(principal, tool_name, auth, credential, trigger_id)
         try:
             value = auth.spec.fn(**auth.args)
         except BaseException:
@@ -1716,7 +1760,7 @@ class GovernedToolDispatcher:
                 tier=tier,
             )
             self._run_on_authorized(principal, tool_name, auth, on_authorized)
-            self._recheck_kill_switch(principal, tool_name, auth)
+            self._recheck_execution(principal, tool_name, auth, credential, trigger_id)
             try:
                 value = auth.spec.fn(**auth.args)
             except BaseException:
@@ -1731,27 +1775,10 @@ class GovernedToolDispatcher:
         auth, value = await asyncio.to_thread(invoke)
         if inspect.isawaitable(value):
             try:
-                self._recheck_kill_switch(principal, tool_name, auth)
-                session = self._verify_credential(principal, tool_name, credential)
-                self._final_admission(
-                    principal,
-                    tool_name,
-                    auth.spec.read_only and auth.plan.tier == ActionTier.T0,
-                    auth.admission.trigger_id if auth.admission is not None else trigger_id,
-                    session,
-                    auth.decisions[0].decision_id if auth.decisions else None,
-                    admission=auth.admission,
-                )
-            except BaseException as exc:
+                self._recheck_execution(principal, tool_name, auth, credential, trigger_id)
+            except BaseException:
                 if inspect.iscoroutine(value):
                     value.close()
-                if isinstance(exc, _Denied):
-                    raise self._pre_denial(
-                        principal,
-                        tool_name,
-                        str(exc),
-                        group_id=auth.decisions[0].decision_id if auth.decisions else None,
-                    ) from exc
                 raise
             try:
                 value = await value
