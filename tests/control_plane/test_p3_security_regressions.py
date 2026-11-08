@@ -69,9 +69,9 @@ CAROL = Principal("carol", PrincipalKind.HUMAN)
 Factory = Callable[..., Callable[..., SignedApproval]]
 
 
-def _permissions() -> RepositoryPermissions:
+def _permissions(registry: Any = DEFAULT_IMMUTABLE_CORE) -> RepositoryPermissions:
     return RepositoryPermissions(
-        DEFAULT_IMMUTABLE_CORE, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
+        registry, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
     )
 
 
@@ -132,7 +132,10 @@ class TestM3AtomicBudget:
 
         monkeypatch.setattr(ledger, "state", slow_state)
         d = GovernedToolDispatcher(
-            pdp, permissions=_permissions(), tool_tiers={"w": ActionTier.T1}, budgets=ledger
+            pdp,
+            permissions=_permissions(pdp.registry),
+            tool_tiers={"w": ActionTier.T1},
+            budgets=ledger,
         )
         calls: list[str] = []
         lock = threading.Lock()
@@ -219,7 +222,9 @@ class TestM5OriginalRequester:
         self, gated_pdp: PolicyDecisionPoint, approver_factory: Factory
     ) -> None:
         d = GovernedToolDispatcher(
-            gated_pdp, permissions=_permissions(), tool_tiers={"edit": ActionTier.T2}
+            gated_pdp,
+            permissions=_permissions(gated_pdp.registry),
+            tool_tiers={"edit": ActionTier.T2},
         )
         calls: list[str] = []
 
@@ -288,21 +293,21 @@ class TestL9SharedLedger:
         with pytest.raises(ValueError, match="same BudgetLedger"):
             GovernedToolDispatcher(
                 pdp,
-                permissions=_permissions(),
+                permissions=_permissions(pdp.registry),
                 tool_tiers={},
                 autonomy=AutonomyController(ErrorBudget(), ledger),
             )
         with pytest.raises(ValueError, match="same BudgetLedger"):
             GovernedToolDispatcher(
                 pdp,
-                permissions=_permissions(),
+                permissions=_permissions(pdp.registry),
                 tool_tiers={},
                 budgets=ledger,
                 autonomy=AutonomyController(ErrorBudget(), BudgetLedger()),
             )
         GovernedToolDispatcher(
             pdp,
-            permissions=_permissions(),
+            permissions=_permissions(pdp.registry),
             tool_tiers={},
             budgets=ledger,
             autonomy=AutonomyController(ErrorBudget(), ledger),
@@ -319,7 +324,12 @@ class TestKillSwitchToctouAndPaths:
     @pytest.mark.parametrize("mode", ["sync", "async_sync", "async_coroutine"])
     @pytest.mark.parametrize("invalidation", ["expiry", "revoke", "principal_revoke"])
     async def test_listener_invalidated_credential_never_invokes_tool(
-        self, constitution: Constitution, permit_all: PolicySet, mode: str, invalidation: str
+        self,
+        constitution: Constitution,
+        permit_all: PolicySet,
+        tmp_path: Path,
+        mode: str,
+        invalidation: str,
     ) -> None:
         now = [1000.0]
         issuer = CredentialIssuer(clock=lambda: now[0])
@@ -342,11 +352,14 @@ class TestKillSwitchToctouAndPaths:
             calls.append(path)
 
         with PolicyDecisionPoint.for_constitution(
-            constitution, permit_all, listeners=[invalidate]
+            constitution,
+            permit_all,
+            listeners=[invalidate],
+            registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)),
         ) as point:
             dispatcher = GovernedToolDispatcher(
                 point,
-                permissions=_permissions(),
+                permissions=_permissions(point.registry),
                 tool_tiers={"w": ActionTier.T1},
                 credential_issuer=issuer,
                 require_credential=True,
@@ -379,7 +392,7 @@ class TestKillSwitchToctouAndPaths:
         credential = issuer.issue(AGENT, scopes={"tool:w"}, ttl_s=1).token
         dispatcher = GovernedToolDispatcher(
             pdp,
-            permissions=_permissions(),
+            permissions=_permissions(pdp.registry),
             tool_tiers={"w": ActionTier.T1},
             kill_switch=switch,
             credential_issuer=issuer,
@@ -410,7 +423,10 @@ class TestKillSwitchToctouAndPaths:
         self, pdp: PolicyDecisionPoint, switch: KillSwitch, engage_during_auth: bool
     ) -> tuple[GovernedToolDispatcher, list[str]]:
         d = GovernedToolDispatcher(
-            pdp, permissions=_permissions(), tool_tiers={"w": ActionTier.T1}, kill_switch=switch
+            pdp,
+            permissions=_permissions(pdp.registry),
+            tool_tiers={"w": ActionTier.T1},
+            kill_switch=switch,
         )
         calls: list[str] = []
 
@@ -463,7 +479,7 @@ def _edit_dispatcher(
 ) -> tuple[GovernedToolDispatcher, list[str]]:
     d = GovernedToolDispatcher(
         pdp,
-        permissions=permissions or _permissions(),
+        permissions=permissions or _permissions(pdp.registry),
         tool_tiers={"edit": ActionTier.T2, "w": ActionTier.T1},
         **kw,
     )
@@ -555,7 +571,7 @@ class TestReReviewA_IamBeforeConsumption:
         approver_factory: Factory,
     ) -> None:
         d, calls = _edit_dispatcher(
-            gated_pdp, permissions=RepositoryPermissions(DEFAULT_IMMUTABLE_CORE, [])
+            gated_pdp, permissions=RepositoryPermissions(gated_pdp.registry, [])
         )
         args = {"path": "workspace/a.txt"}
         approval = approver_factory("bob")(

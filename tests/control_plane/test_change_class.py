@@ -96,7 +96,7 @@ class TestClassification:
 
 def _dispatcher(pdp: PolicyDecisionPoint, calls: list[str]) -> GovernedToolDispatcher:
     permissions = RepositoryPermissions(
-        DEFAULT_IMMUTABLE_CORE,
+        pdp.registry,
         [
             WriteGrant("alice", PrincipalKind.HUMAN, ("**",)),
             WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",)),
@@ -336,6 +336,8 @@ class TestCoreChangeWriter:
         repo: Path,
         tmp_path_factory: pytest.TempPathFactory,
         gated_pdp: PolicyDecisionPoint,
+        constitution: Constitution,
+        permit_all: PolicySet,
     ) -> None:
         for bad in ("../escape.yaml", "/etc/passwd", ".", ""):
             with pytest.raises(CoreWriteRejected):
@@ -352,8 +354,13 @@ class TestCoreChangeWriter:
             writer.write_core(ALICE, "audit/log", b"x", approvals=[])
         with pytest.raises(ValueError, match="already bound"):
             CoreChangeWriter(rooted_pdp)
-        with pytest.raises(ValueError, match="repo_root"):
-            CoreChangeWriter(gated_pdp)
+        with (
+            PolicyDecisionPoint.for_constitution(
+                constitution, permit_all, approval_gate=gated_pdp.approval_gate
+            ) as unbound_pdp,
+            pytest.raises(ValueError, match="repo_root"),
+        ):
+            CoreChangeWriter(unbound_pdp)
         with pytest.raises(TypeError):
             CoreChangeWriter("pdp")  # type: ignore[arg-type]
         with pytest.raises(ValueError):
