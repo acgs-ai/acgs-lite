@@ -345,6 +345,7 @@ class TestMedium4ParentDirectories:
         self, constitution: Constitution, permit_all: PolicySet, tmp_path: Path, sink: Sink
     ) -> None:
         (tmp_path / "app" / "v1.2").mkdir(parents=True)
+        (tmp_path / "app" / "notes.txt").write_text("ordinary file")
         registry = DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
         perms = RepositoryPermissions(
             registry, [WriteGrant("agent-1", PrincipalKind.AGENT, ("app/**",))]
@@ -367,8 +368,9 @@ class TestMedium4ParentDirectories:
         self, dispatcher: GovernedToolDispatcher, sink: Sink
     ) -> None:
         dispatcher.dispatch(AGENT, "rm", {"path": "workspace/build"})
-        dispatcher.dispatch(AGENT, "rm", {"path": "examples/demo.py"})
-        assert sink.calls == ["workspace/build", "examples/demo.py"]
+        with pytest.raises(ToolDenied, match="may contain core files"):
+            dispatcher.dispatch(AGENT, "rm", {"path": "examples/demo.py"})
+        assert sink.calls == ["workspace/build"]
 
 
 class TestMedium5PrincipalIds:
