@@ -129,9 +129,10 @@ class TestHalfOpenProbe:
         d = _dispatcher(pdp, breaker, calls)
         rec.record_rollback("loop-a", "c1", agent=AGENT)
         clock.now += 100
-        # Denied after the harness checks (no IAM grant for other/): no tool ran.
-        with pytest.raises(ToolDenied, match="repository permissions"):
-            d.dispatch(AGENT, "write", {"path": "other/x.py"}, trigger_id="loop-a")
+        # Denied by the PDP after the harness's half-open availability check.
+        # A pre-check denial would not exercise probe preservation here.
+        with pytest.raises(ToolDenied, match="INV-"):
+            d.dispatch(AGENT, "write", {"path": "workspace/.env"}, trigger_id="loop-a")
         assert breaker.status("loop-a").probes == 0
         d.dispatch(AGENT, "write", {"path": "workspace/a"}, trigger_id="loop-a")
         assert calls == ["workspace/a"]
