@@ -90,11 +90,23 @@ def _dispatcher(pdp: PolicyDecisionPoint) -> tuple[GovernedToolDispatcher, _Sink
     def shell(command: str, cwd: str | None = None) -> None:
         sink.calls.append(("shell", command, cwd))
 
-    d.register("write_default", write_default, path_params={"path"}, opaque_params={"content"})
-    d.register("read_default", read_default, path_params={"path"})
-    d.register("write", write, path_params={"path"}, opaque_params={"content", "output_file"})
-    d.register("read", read, path_params={"path"})
-    d.register("shell", shell, path_params={"cwd"}, command_param="command")
+    d.register(
+        "write_default",
+        write_default,
+        path_params={"path"},
+        opaque_params={"content"},
+        merge_capable=False,
+    )
+    d.register("read_default", read_default, path_params={"path"}, merge_capable=False)
+    d.register(
+        "write",
+        write,
+        path_params={"path"},
+        opaque_params={"content", "output_file"},
+        merge_capable=False,
+    )
+    d.register("read", read, path_params={"path"}, merge_capable=False)
+    d.register("shell", shell, path_params={"cwd"}, command_param="command", merge_capable=False)
     return d, sink
 
 

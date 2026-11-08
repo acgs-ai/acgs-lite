@@ -174,6 +174,12 @@ class CoreChangeWriter:
         if not decision.allowed:
             raise CoreWriteRejected(f"core change denied: {decision.reason}", decision)
         self._require_not_halted(decision)
+        if self._incident_lock is not None:
+            # Re-check: the decision's listeners may have declared an
+            # incident or moved the holder.
+            denial = self._incident_lock.write_denial(principal)
+            if denial is not None:
+                raise CoreWriteRejected(f"incident: {denial}", decision)
         try:
             dir_fd = _open_parent(root, parents)
         except OSError as exc:

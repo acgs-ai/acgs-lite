@@ -35,13 +35,14 @@ approval from a *second* ``incident_admin`` over the take-over's action hash.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import json
 import os
 import re
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -171,7 +172,8 @@ class IncidentMutationLock:
             raise ValueError("incident state must live under the immutable core")
         # TODO(control-plane-gap): without a registry the state path is not
         # checked against the core; pass one so no agent tool can write it.
-        self._ledger_open = self._ledger_unresolved()
+        self._ledger_incident = self._ledger_unresolved()
+        self._ledger_open = self._ledger_incident is not None
         if not self._ledger_open:
             # Never recreate a deleted directory while the ledger says an
             # incident is open: the missing state must keep denying writes.
@@ -184,22 +186,47 @@ class IncidentMutationLock:
         self._stale_after = float(stale_after_s)
         self._ever_declared = self._ledger_open or self._history.exists() or path.exists()
 
-    def _ledger_unresolved(self) -> bool:
-        """True if the PDP ledger's last incident.declare has no later resolve."""
+    def _ledger_unresolved(self) -> str | None:
+        """The incident id of the PDP ledger's last incident.declare with no
+        later resolve, else ``None``."""
         pdp = self._pdp
         ledger = None if pdp is None else pdp.receipt_ledger
         if ledger is None:
-            return False
-        open_incident = False
+            return None
+        open_incident: str | None = None
         for signed in ledger.receipts():
             receipt = signed.receipt
             if not receipt.allowed:
                 continue
             if receipt.action == DECLARE_ACTION:
-                open_incident = True
+                open_incident = receipt.resource
             elif receipt.action == RESOLVE_ACTION:
-                open_incident = False
+                open_incident = None
         return open_incident
+
+    @contextlib.contextmanager
+    def _locked(self) -> Iterator[None]:
+        """Serialise a lifecycle read/check/write across threads *and*
+        processes (instances sharing the state file): ``flock`` on a sidecar
+        lock file. It is opened without creating directories, so a deleted
+        state directory still fails closed."""
+        try:
+            fcntl: Any = importlib.import_module("fcntl")
+        except ImportError as exc:  # pragma: no cover - non-POSIX only
+            raise IncidentLockError("incident lock needs POSIX flock") from exc
+        with self._lock:
+            try:
+                # Entered with `with handle:` below; the open is split out so an
+                # OSError maps to IncidentLockError.
+                handle = open(self._path.with_name(self._path.name + ".flock"), "a+b")  # noqa: SIM115
+            except OSError as exc:
+                raise IncidentLockError(f"incident lock unavailable: {type(exc).__name__}") from exc
+            with handle:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def _decide(
         self,
@@ -258,6 +285,13 @@ class IncidentMutationLock:
             return None
         state = _parse(json.loads(text))
         self._ever_declared = True
+        if self._ledger_open and (
+            state.status == "resolved" or state.incident_id != self._ledger_incident
+        ):
+            # The receipt ledger says an incident is open; a resolved (or
+            # different) state file is a stale tombstone from a crashed
+            # declare, not permission to write.
+            raise OSError("incident state disagrees with the receipt ledger")
         return None if state.status == "resolved" else state
 
     def _log(self, event: str, actor: Principal, **detail: Any) -> None:
@@ -331,7 +365,7 @@ class IncidentMutationLock:
             raise IncidentLockError("declaring needs the incident_commander capability")
         if not isinstance(incident_id, str) or not _INCIDENT_ID.fullmatch(incident_id):
             raise IncidentLockError("incident_id must match [A-Za-z0-9._:-]{1,128}")
-        with self._lock:
+        with self._locked():
             try:
                 existing = self.state()
             except (OSError, ValueError) as exc:
@@ -343,6 +377,7 @@ class IncidentMutationLock:
             self._write(self._payload(state, None))
             self._ever_declared = True
             self._ledger_open = self._pdp is not None
+            self._ledger_incident = incident_id if self._ledger_open else None
             self._log("declare", commander, incident_id=incident_id)
             return state
 
@@ -354,7 +389,7 @@ class IncidentMutationLock:
         """
         if not isinstance(principal, Principal):
             raise IncidentLockError("holder must be a Principal")
-        with self._lock:
+        with self._locked():
             state = self._require_commander(commander)
             if state.incident_id != incident_id:
                 raise IncidentLockError("incident id mismatch")
@@ -367,7 +402,7 @@ class IncidentMutationLock:
     def transfer(self, commander: Principal, new_holder: Principal) -> LockToken:
         if not isinstance(new_holder, Principal):
             raise IncidentLockError("holder must be a Principal")
-        with self._lock:
+        with self._locked():
             state = self._require_commander(commander)
             self._write(self._payload(state, new_holder))
             self._log("transfer", commander, holder=_principal_dict(new_holder))
@@ -375,46 +410,59 @@ class IncidentMutationLock:
 
     def release(self, commander: Principal) -> None:
         """Release the holder; the incident stays declared (nobody may write)."""
-        with self._lock:
+        with self._locked():
             state = self._require_commander(commander)
             self._write(self._payload(state, None))
             self._log("release", commander)
 
     def resolve(self, commander: Principal) -> None:
         """End the incident."""
-        with self._lock:
+        with self._locked():
             state = self._require_commander(commander)
             self._decide(commander, RESOLVE_ACTION, state.incident_id)
             self._write(self._payload(state, None, status="resolved"))
             self._ledger_open = False
+            self._ledger_incident = None
             self._log("resolve", commander, incident_id=state.incident_id)
 
     def heartbeat(self, principal: Principal) -> None:
         """The commander or the holder proves it is still active."""
-        with self._lock:
+        with self._locked():
             try:
                 state = self.state()
             except (OSError, ValueError) as exc:
                 raise IncidentLockError(f"incident state unreadable: {type(exc).__name__}") from exc
             if state is None:
                 raise IncidentLockError("no incident is declared")
-            if not isinstance(principal, Principal) or principal.canonical_id not in {
-                state.commander_id,
-                state.holder_id,
-            }:
+            # Id *and* kind, as in write_denial(): an AGENT sharing the
+            # commander's id must not keep the incident fresh.
+            is_commander = (
+                isinstance(principal, Principal)
+                and principal.kind is PrincipalKind.HUMAN
+                and principal.canonical_id == state.commander_id
+            )
+            is_holder = (
+                isinstance(principal, Principal)
+                and state.holder_id is not None
+                and principal.canonical_id == state.holder_id
+                and principal.kind.value == state.holder_kind
+            )
+            if not (is_commander or is_holder):
                 raise IncidentLockError("only the commander or the holder sends heartbeats")
             self._log("heartbeat", principal, incident_id=state.incident_id)
 
     def last_activity(self, state: IncidentState) -> float:
         """Latest lifecycle event or heartbeat by the commander or the holder."""
-        active = {state.commander_id, state.holder_id}
+        active: set[tuple[str, str | None]] = {(state.commander_id, PrincipalKind.HUMAN.value)}
+        if state.holder_id is not None:
+            active.add((state.holder_id, state.holder_kind))
         latest = state.declared_at
         for event in self.history():
             actor = event.get("actor")
             at = event.get("at")
             if (
                 isinstance(actor, Mapping)
-                and actor.get("id") in active
+                and (actor.get("id"), actor.get("kind")) in active
                 and isinstance(at, (int, float))
                 and not isinstance(at, bool)
             ):
@@ -453,7 +501,7 @@ class IncidentMutationLock:
             raise IncidentLockError("takeover needs the incident_admin capability")
         if not isinstance(reason, str) or not reason.strip():
             raise IncidentLockError("a takeover needs a reason")
-        with self._lock:
+        with self._locked():
             try:
                 state = self.state()
             except (OSError, ValueError) as exc:

@@ -65,9 +65,14 @@ class ChangeOwnership:
 class ChangeOwnershipRegistry:
     """Harness-side change -> (writer, worktree, branch) table."""
 
-    def __init__(self, registry: ImmutableCoreRegistry) -> None:
+    def __init__(self, registry: ImmutableCoreRegistry, *, admin: Principal) -> None:
         if not isinstance(registry, ImmutableCoreRegistry):
             raise TypeError("registry must be an ImmutableCoreRegistry")
+        if not isinstance(admin, Principal) or admin.kind is not PrincipalKind.HUMAN:
+            raise TypeError("admin must be the configured HUMAN admin Principal")
+        # Bound like RoleAssignments: "a HUMAN" is not "the admin"; any other
+        # human could otherwise release a change and re-assign (or widen) it.
+        self._admin = admin
         self._registry = registry
         self._lock = threading.Lock()
         self._changes: dict[str, ChangeOwnership] = {}
@@ -76,11 +81,22 @@ class ChangeOwnershipRegistry:
     def registry(self) -> ImmutableCoreRegistry:
         return self._registry
 
+    @property
+    def admin(self) -> Principal:
+        return self._admin
+
+    def _require_admin(self, admin: object, verb: str) -> None:
+        if (
+            not isinstance(admin, Principal)
+            or admin.kind is not PrincipalKind.HUMAN
+            or admin.canonical_id != self._admin.canonical_id
+        ):
+            raise OwnershipDenied(f"only the configured HUMAN admin {verb} change ownership")
+
     def assign(
         self, admin: Principal, change_id: str, writer: Principal, worktree_root: str
     ) -> ChangeOwnership:
-        if not isinstance(admin, Principal) or admin.kind is not PrincipalKind.HUMAN:
-            raise OwnershipDenied("only a HUMAN admin assigns change ownership")
+        self._require_admin(admin, "assigns")
         if not isinstance(writer, Principal):
             raise OwnershipDenied("writer must be a Principal")
         if not isinstance(change_id, str) or not _CHANGE_ID.fullmatch(change_id):
@@ -104,8 +120,7 @@ class ChangeOwnershipRegistry:
         return ownership
 
     def release(self, admin: Principal, change_id: str) -> bool:
-        if not isinstance(admin, Principal) or admin.kind is not PrincipalKind.HUMAN:
-            raise OwnershipDenied("only a HUMAN admin releases change ownership")
+        self._require_admin(admin, "releases")
         with self._lock:
             return self._changes.pop(change_id, None) is not None
 
@@ -153,17 +168,17 @@ class ChangeOwnershipRegistry:
             # TODO(control-plane-gap): without repo_root, symlinks cannot be
             # checked; the sandbox filesystem must refuse them.
             return
-        # Every existing component from the worktree root down must be a real
-        # directory/file, not a symlink that could point into the core.
-        current = posixpath.join(root, ownership.worktree_root)
-        if os.path.islink(current):
-            raise OwnershipDenied("worktree root is a symlink")
-        relative = normalized[len(ownership.worktree_root) :].lstrip("/")
-        for segment in [s for s in relative.split("/") if s]:
+        # Every existing component from the *repository* root down (the
+        # worktree's ancestors included) must be a real directory/file, not a
+        # symlink that could point into the core.
+        current = root
+        for segment in [s for s in normalized.split("/") if s]:
             current = posixpath.join(current, segment)
             if os.path.islink(current):
                 raise OwnershipDenied(f"path {path!r} traverses a symlink")
-        real_root = os.path.realpath(posixpath.join(root, ownership.worktree_root))
+        # Containment is checked against the lexical worktree under the real
+        # repository root, never against a resolved (possibly redirected) one.
+        real_root = posixpath.join(os.path.realpath(root), ownership.worktree_root)
         real_target = os.path.realpath(posixpath.join(root, normalized))
         if real_target != real_root and not real_target.startswith(real_root.rstrip("/") + "/"):
             raise OwnershipDenied(f"path {path!r} resolves outside the worktree")

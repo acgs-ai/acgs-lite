@@ -25,6 +25,7 @@ from acgs_lite.control_plane.evidence import (
     ExternalRunRef,
     ExternalRunVerifier,
     RunValidation,
+    _attests_digest,
 )
 from acgs_lite.control_plane.telemetry import TelemetryRecorder
 
@@ -146,6 +147,11 @@ class VerifierPolicy:
             if not isinstance(result, RunValidation) or result.valid is not True:
                 reasons.append(f"run {ref.label} not independently validated")
                 continue
+            if not _attests_digest(self._runs, ref):
+                # A green run whose verifier never checked artifact_digest says
+                # nothing about *this* candidate (any digest could be attached).
+                reasons.append(f"run {ref.label}: its verifier does not attest the artifact digest")
+                continue
             anchored += 1
         if anchored == 0:
             reasons.append("verdict is not anchored on a validated executable artifact")
@@ -160,7 +166,12 @@ class VerifierPolicy:
         proposer_model_family: str,
         proposer_vendor: str,
     ) -> VerifierVerdict:
-        """Independence + anchoring; on success record VERIFIER_VERDICT telemetry."""
+        """Independence + anchoring + a PASS outcome.
+
+        Every anchored verdict is recorded as VERIFIER_VERDICT telemetry
+        (FAIL included); only a PASS is returned -- a FAIL raises, so a
+        caller treating a normal return as "may promote" stays correct.
+        """
         self.require_independent(proposer_model_family, proposer_vendor, verifier)
         if verdict.verifier_id != verifier.verifier_id:
             raise VerifierRejected("verdict was not produced by this verifier")
@@ -171,6 +182,8 @@ class VerifierPolicy:
             self._telemetry.record_verifier_verdict(
                 candidate_digest, verifier.verifier_id, verdict.outcome.value
             )
+        if verdict.outcome is not VerdictOutcome.PASS:
+            raise VerifierRejected(f"independent verifier verdict is {verdict.outcome.value}")
         return verdict
 
 
@@ -203,6 +216,7 @@ class ReplayVerifier:
             if isinstance(ref, ExternalRunRef)
             and ref.source in ANCHOR_SOURCES
             and ref.artifact_digest == candidate_digest
+            and _attests_digest(self._runs, ref)
             and self._runs.validate(ref).valid is True
         )
         return VerifierVerdict(

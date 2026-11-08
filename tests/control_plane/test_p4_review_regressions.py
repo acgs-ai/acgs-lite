@@ -71,7 +71,7 @@ def _dispatcher(
         breaker=breaker,
         **kw,
     )
-    d.register("write", lambda path: calls.append(path), path_params={"path"})
+    d.register("write", lambda path: calls.append(path), path_params={"path"}, merge_capable=False)
     return d
 
 

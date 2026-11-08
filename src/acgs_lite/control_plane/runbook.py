@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, ValidationError
 
+from acgs_lite.control_plane.evidence import ExternalRunRef, ExternalRunVerifier
 from acgs_lite.control_plane.iam import _overlapping_core_pattern
 from acgs_lite.control_plane.immutable_core import (
     CoreCategory,
@@ -327,6 +328,34 @@ def _require_human(principal: object, label: str) -> Principal:
     return principal
 
 
+def predicate_satisfied(
+    predicate: SuccessPredicate, value: object, run_verifier: ExternalRunVerifier | None
+) -> bool:
+    """``exit_code``: an int result, a mapping's ``exit_code`` or a
+    ``returncode`` attribute must equal ``equals``. ``external_run``: the
+    result must be (or carry under ``external_run``) an ExternalRunRef of
+    ``provider`` that *run_verifier* validates."""
+    if isinstance(predicate, ExitCodePredicate):
+        code: object = value
+        if isinstance(value, Mapping):
+            code = value.get("exit_code")
+        elif not isinstance(value, int):
+            code = getattr(value, "returncode", getattr(value, "exit_code", None))
+        return isinstance(code, int) and not isinstance(code, bool) and code == predicate.equals
+    if isinstance(predicate, ExternalRunPredicate):
+        # TODO(control-plane-gap): ExternalRunRef carries no workflow, so the
+        # predicate's workflow is enforced only by verifiers that allow-list
+        # workflows (GitHubActionsRunVerifier).
+        raw = value.get("external_run") if isinstance(value, Mapping) else value
+        ref = ExternalRunRef.from_dict(raw) if isinstance(raw, Mapping) else raw
+        if not isinstance(ref, ExternalRunRef) or ref.provider != predicate.provider:
+            return False
+        if run_verifier is None:
+            return False
+        return run_verifier.validate(ref).valid is True
+    return False
+
+
 class RunbookRegistry:
     """Harness-side store of approved runbooks (the agent never holds it)."""
 
@@ -466,6 +495,19 @@ class RunbookRegistry:
         with self._lock:
             entry = self._approved.get(runbook_id)
             return None if entry is None else (entry.runbook, entry.digest)
+
+    def outcome_succeeded(
+        self, runbook_id: str, value: object, run_verifier: ExternalRunVerifier | None
+    ) -> bool:
+        """Evaluate the approved runbook's ``success_predicate`` against what
+        the tool returned. Missing or unverifiable evidence is a failure."""
+        approved = self.approved(runbook_id)
+        if approved is None:
+            return False
+        try:
+            return predicate_satisfied(approved[0].success_predicate, value, run_verifier)
+        except Exception:
+            return False
 
     def record_outcome(self, runbook_id: str, *, success: bool) -> None:
         """Harness: count one execution outcome (feeds the stop conditions)."""

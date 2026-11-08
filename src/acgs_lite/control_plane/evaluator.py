@@ -53,7 +53,12 @@ from acgs_lite.control_plane import evidence as _evidence_module
 from acgs_lite.control_plane import immutable_core as _core_module
 from acgs_lite.control_plane import principal as _principal_module
 from acgs_lite.control_plane.budgets import BudgetLedger
-from acgs_lite.control_plane.evidence import EvidenceSource, ExternalRunRef, TrustedRunRegistry
+from acgs_lite.control_plane.evidence import (
+    EvidenceSource,
+    ExternalRunRef,
+    RunRegistrationRejected,
+    TrustedRunRegistry,
+)
 from acgs_lite.control_plane.immutable_core import CoreCategory, ImmutableCoreRegistry
 from acgs_lite.control_plane.principal import Principal, PrincipalKind
 
@@ -340,19 +345,33 @@ class EvaluatorService:
             if existing is not None and existing[0] == result:
                 return existing
             self._count += 1
-            run_id = f"eval-{self._count}-{result.result_digest[7:23]}"
+            # Derived from the result (not a process-local counter), so a
+            # restarted service -- or a second one over the same registry --
+            # names the same run for the same result instead of colliding.
+            run_id = f"eval-{result.result_digest[7:39]}"
             ref = ExternalRunRef(
                 provider=self._provider,
                 run_id=run_id,
                 source=EvidenceSource.EVALUATOR_SERVICE,
                 artifact_digest=result.candidate_digest,
             )
-            self._registry.register_run(
-                self._principal,
-                ref,
-                conclusion="success" if result.passed else "failure",
-                artifact_digest=result.candidate_digest,
-            )
+            conclusion = "success" if result.passed else "failure"
+            prior = self._registry.registered_conclusion(ref)
+            if prior is None:
+                try:
+                    self._registry.register_run(
+                        self._principal,
+                        ref,
+                        conclusion=conclusion,
+                        artifact_digest=result.candidate_digest,
+                    )
+                except RunRegistrationRejected:
+                    # Another service over the same registry got there first;
+                    # reuse only an identical registration.
+                    if self._registry.registered_conclusion(ref) != conclusion:
+                        raise
+            elif prior != conclusion:
+                raise EvaluatorError(f"run {ref.label} is registered with conclusion {prior}")
             self._latest[result.candidate_digest] = (result, ref)
         return result, ref
 
@@ -392,7 +411,6 @@ class EvaluatorService:
         lock = self._lock
         with lock:
             window = self._windows.setdefault(principal.canonical_id, collections.deque())
-        steps = round(1 / granularity)
 
         def submit_for_evaluation(candidate: Mapping[str, str]) -> float:
             with lock:
@@ -407,6 +425,8 @@ class EvaluatorService:
                     raise SubmissionRefused("budget exhausted")
                 window.append(now)
             score = evaluator.evaluate(dict(candidate)).score
-            return round(math.floor(score * steps + 1e-9) / steps, 6)
+            # Floor by the configured granularity itself (0.3 -> multiples of
+            # 0.3), not by a rounded reciprocal.
+            return round(math.floor(score / granularity + 1e-9) * granularity, 6)
 
         return submit_for_evaluation

@@ -25,7 +25,9 @@ WT = "workspace/wt/agent-1/c1"
 @pytest.fixture()
 def owners(tmp_path: Path) -> ChangeOwnershipRegistry:
     (tmp_path / WT).mkdir(parents=True)
-    registry = ChangeOwnershipRegistry(DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)))
+    registry = ChangeOwnershipRegistry(
+        DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)), admin=ADMIN
+    )
     registry.assign(ADMIN, "c1", AGENT, WT)
     return registry
 
@@ -82,7 +84,9 @@ def test_symlink_escape_denied(tmp_path: Path, owners: ChangeOwnershipRegistry) 
 def test_symlinked_root_denied(tmp_path: Path) -> None:
     (tmp_path / "workspace" / "real").mkdir(parents=True)
     os.symlink(tmp_path / "workspace" / "real", tmp_path / "workspace" / "wtlink")
-    registry = ChangeOwnershipRegistry(DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)))
+    registry = ChangeOwnershipRegistry(
+        DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)), admin=ADMIN
+    )
     registry.assign(ADMIN, "c1", AGENT, "workspace/wtlink")
     with pytest.raises(OwnershipDenied, match="symlink"):
         registry.assert_writer(AGENT, "c1", "workspace/wtlink/a.md")
@@ -105,12 +109,12 @@ def test_assignment_rules(owners: ChangeOwnershipRegistry) -> None:
     assert owners.release(ADMIN, "c1") is True
     assert owners.release(ADMIN, "c1") is False
     with pytest.raises(TypeError):
-        ChangeOwnershipRegistry("core")  # type: ignore[arg-type]
+        ChangeOwnershipRegistry("core", admin=ADMIN)  # type: ignore[arg-type]
     assert owners.registry.repo_root is not None
 
 
 def test_without_repo_root_still_checks_prefix() -> None:
-    registry = ChangeOwnershipRegistry(DEFAULT_IMMUTABLE_CORE)
+    registry = ChangeOwnershipRegistry(DEFAULT_IMMUTABLE_CORE, admin=ADMIN)
     registry.assign(ADMIN, "c1", AGENT, WT)
     registry.assert_writer(AGENT, "c1", f"{WT}/a.md")
     with pytest.raises(OwnershipDenied):

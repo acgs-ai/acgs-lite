@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -53,7 +54,7 @@ from acgs_lite.control_plane.roles import CAP_PROMOTION_APPROVE, Role, RoleConfl
 from acgs_lite.control_plane.runbook import RunbookRejected
 from acgs_lite.control_plane.tier_policy import ActionProfile
 from acgs_lite.control_plane.tiers import ActionTier
-from acgs_lite.control_plane.verifier import ReplayVerifier, VerifierRejected
+from acgs_lite.control_plane.verifier import ReplayVerifier, VerdictOutcome, VerifierRejected
 
 __all__ = [
     "ARTIFACT_FILES",
@@ -235,11 +236,9 @@ def _runbook(today: str) -> dict[str, Any]:
         "rate_limit": {"max_executions": 500, "per_seconds": 3600},
         "required_approver_role": "sre",
         "rollback_command": ["git", "checkout", "--", WORKTREE],
-        "success_predicate": {
-            "kind": "external_run",
-            "provider": "acgs-deterministic-evaluator",
-            "workflow": "heldout/demo-suite.json",
-        },
+        # The demo write tool reports an exit status; promotion evidence is
+        # the evaluator run, checked separately by the promotion gate.
+        "success_predicate": {"kind": "exit_code", "equals": 0},
         "stop_conditions": [
             {"kind": "max_failures", "count": 5},
             {"kind": "budget_fraction", "max_fraction": 0.9},
@@ -252,19 +251,24 @@ def _runbook(today: str) -> dict[str, Any]:
 
 def _install_tools(env_root: Path, cp: ControlPlane, calls: list[tuple[str, str]]) -> None:
     def resolve(path: str) -> Path:
-        return env_root / path
+        # Act on exactly the normalised path the control plane authorised
+        # (posixpath.normpath), never on the raw string's lexical parents.
+        normalized = posixpath.normpath(path)
+        if posixpath.isabs(normalized) or normalized.split("/", 1)[0] in ("..", "."):
+            raise ValueError(f"path {path!r} escapes the demo environment")
+        return env_root / normalized
 
     def read_file(path: str) -> str:
         calls.append(("read_file", path))
         target = resolve(path)
         return target.read_text(encoding="utf-8") if target.is_file() else ""
 
-    def write_file(path: str, content: str) -> str:
+    def write_file(path: str, content: str) -> int:
         calls.append(("write_file", path))
         target = resolve(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-        return "written"
+        return 0  # exit status, judged by the runbook's success_predicate
 
     def delete_file(path: str) -> str:
         calls.append(("delete_file", path))
@@ -658,6 +662,8 @@ class SelfImprovementLoop:
             )
         except VerifierRejected as exc:
             return f"verifier rejected: {exc}"
+        if verdict.outcome is not VerdictOutcome.PASS:  # accept() raises too
+            return f"verifier rejected: verdict is {verdict.outcome.value}"
         return self._promote(f"demo-candidate-{iteration}", digest, ref)
 
     def _promote(self, candidate_id: str, digest: str, ref: ExternalRunRef) -> str:

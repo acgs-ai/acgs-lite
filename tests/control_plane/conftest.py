@@ -321,7 +321,7 @@ def p5(
         )
         runbooks = RunbookRegistry(registry, pdp=pdp, roles=roles)
         review = ReviewQueue()
-        ownership = ChangeOwnershipRegistry(registry)
+        ownership = ChangeOwnershipRegistry(registry, admin=ADMIN)
         ownership.assign(ADMIN, "c1", Principal("agent-1", PrincipalKind.AGENT, "sys-a"), worktree)
         incident = IncidentMutationLock(registry=registry)
         runs = TrustedRunRegistry()

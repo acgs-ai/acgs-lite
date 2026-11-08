@@ -1350,13 +1350,26 @@ class GovernedToolDispatcher:
         return _Authorized(spec, args, decisions, plan)
 
     def _after_run(
-        self, principal: Principal, tool_name: str, auth: _Authorized, *, success: bool
+        self,
+        principal: Principal,
+        tool_name: str,
+        auth: _Authorized,
+        *,
+        success: bool,
+        value: object = None,
     ) -> None:
-        """T1 bookkeeping: runbook outcome (stop conditions) + post-hoc review."""
+        """T1 bookkeeping: runbook outcome (stop conditions) + post-hoc review.
+
+        A normal return is a success only if the approved runbook's
+        ``success_predicate`` holds for the returned value."""
         plan = auth.plan
         if plan.runbook_id is None or plan.runbook_hash is None:
             return
         if self._runbooks is not None:
+            if success:
+                success = self._runbooks.outcome_succeeded(
+                    plan.runbook_id, value, self._run_verifier
+                )
             self._runbooks.record_outcome(plan.runbook_id, success=success)
         if self._review_queue is not None:
             self._review_queue.record(
@@ -1482,7 +1495,7 @@ class GovernedToolDispatcher:
         except BaseException:
             self._after_run(principal, tool_name, auth, success=False)
             raise
-        self._after_run(principal, tool_name, auth, success=True)
+        self._after_run(principal, tool_name, auth, success=True, value=value)
         return ToolResult(tool_name, value, auth.decisions)
 
     async def adispatch(
@@ -1531,5 +1544,5 @@ class GovernedToolDispatcher:
         except BaseException:
             self._after_run(principal, tool_name, auth, success=False)
             raise
-        self._after_run(principal, tool_name, auth, success=True)
+        self._after_run(principal, tool_name, auth, success=True, value=value)
         return ToolResult(tool_name, value, auth.decisions)

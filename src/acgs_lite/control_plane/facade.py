@@ -290,7 +290,7 @@ def build_control_plane(config: ControlPlaneConfig) -> ControlPlane:
             registry, pdp=pdp, roles=roles, max_runbook_age_days=config.max_runbook_age_days
         )
         review_queue = ReviewQueue()
-        ownership = ChangeOwnershipRegistry(registry)
+        ownership = ChangeOwnershipRegistry(registry, admin=admin)
         incident_lock = IncidentMutationLock(registry=registry, roles=roles, pdp=pdp)
         evaluator = DeterministicEvaluator(suite_path, registry=registry)
         evaluator_service = EvaluatorService(evaluator, harness, runs)

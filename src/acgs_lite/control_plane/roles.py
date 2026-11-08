@@ -226,9 +226,13 @@ class RoleAssignments:
             return tuple(self._roles.get(change_id, {}).get(Role(role), {}).values())
 
     def has_role(self, change_id: str, role: Role | str, principal: Principal) -> bool:
+        if not isinstance(principal, Principal):
+            return False
         with self._lock:
             members = self._roles.get(change_id, {}).get(Role(role), {})
-            return isinstance(principal, Principal) and principal.canonical_id in members
+            holder = members.get(principal.canonical_id)
+        # Same id *and* kind: an AGENT named like the human approver is not it.
+        return holder is not None and holder.kind is principal.kind
 
     def require(self, change_id: str, role: Role | str, principal: Principal) -> None:
         if not self.has_role(change_id, role, principal):

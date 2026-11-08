@@ -242,6 +242,12 @@ class PromotionGate:
         decision, decided = self._pdp._decide_attested(request)
         if not decision.allowed or decided is None:
             raise PromotionRejected(f"PDP denied promotion: {decision.reason}", decision)
+        if self._incident_lock is not None:
+            # A PDP listener may have declared an incident (or moved the
+            # holder) during the decision: re-check before the receipt.
+            denial = self._incident_lock.write_denial(principal)
+            if denial is not None:
+                raise PromotionRejected(f"incident: {denial}", decision)
         try:
             # The receipt cites the gate-attested approvers, not host input.
             return self._append_promotion(decision, decided)

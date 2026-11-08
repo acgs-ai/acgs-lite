@@ -190,7 +190,9 @@ class TestDispatcherChecksBothSwitches:
                 tool_tiers={"write": ActionTier.T1},
                 kill_switch=dispatcher_switch,
             )
-            d.register("write", lambda path: calls.append(path), path_params={"path"})
+            d.register(
+                "write", lambda path: calls.append(path), path_params={"path"}, merge_capable=False
+            )
             with pytest.raises(ToolDenied, match="kill switch"):
                 d.dispatch(ALICE, "write", {"path": "workspace/a.py"})
         assert calls == []

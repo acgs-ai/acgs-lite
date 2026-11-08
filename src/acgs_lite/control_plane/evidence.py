@@ -474,6 +474,19 @@ class TrustedRunRegistry:
         with self._lock:
             return len(self._records)
 
+    def registered_conclusion(self, ref: ExternalRunRef) -> str | None:
+        """The conclusion recorded for *ref*'s run if it is registered with the
+        same source and artifact digest, else ``None``."""
+        if not isinstance(ref, ExternalRunRef):
+            return None
+        with self._lock:
+            record = self._records.get((ref.provider, ref.run_id))
+        if record is None or record.source is not ref.source:
+            return None
+        if record.artifact_digest != ref.artifact_digest:
+            return None
+        return record.conclusion
+
     @property
     def signing_public_key_hex(self) -> str | None:
         return None if self._signer is None else self._signer.public_key_hex()
