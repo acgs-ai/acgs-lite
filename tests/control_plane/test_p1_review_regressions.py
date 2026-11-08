@@ -404,6 +404,66 @@ class TestRepoRootImportShadows:
         assert sink.calls == []
 
 
+class TestOpaqueSubclassBoundary:
+    @pytest.mark.parametrize("base", [str, bytes, dict, list, tuple, set, frozenset])
+    @pytest.mark.parametrize("use_default", [False, True])
+    def test_rejects_before_overridden_methods(
+        self, pdp: PolicyDecisionPoint, base: type, use_default: bool
+    ) -> None:
+        invoked: list[str] = []
+
+        def disguised(self: Any, *args: Any, **kwargs: Any) -> Any:
+            invoked.append("override")
+            return self
+
+        deceptive = type(
+            "Deceptive",
+            (base,),
+            {
+                "__deepcopy__": disguised,
+                "strip": disguised,
+                "decode": disguised,
+                "items": disguised,
+                "__iter__": disguised,
+            },
+        )
+        if base is bytes:
+            value = deceptive(b"evaluator/score.py")
+        elif base is dict:
+            value = deceptive({"path": "evaluator/score.py"})
+        elif base is str:
+            value = deceptive("evaluator/score.py")
+        else:
+            value = deceptive(["evaluator/score.py"])
+        calls: list[Any] = []
+
+        def opaque(payload: Any = value) -> None:
+            calls.append(payload)
+
+        dispatcher = GovernedToolDispatcher(
+            pdp, permissions=_permissions(), tool_tiers={"opaque": ActionTier.T1}
+        )
+        dispatcher.register("opaque", opaque, opaque_params={"payload"})
+        with pytest.raises(ToolDenied):
+            dispatcher.dispatch(AGENT, "opaque", {} if use_default else {"payload": value})
+        assert invoked == []
+        assert calls == []
+
+    def test_opaque_string_cannot_hide_core_path(self, pdp: PolicyDecisionPoint) -> None:
+        class Deceptive(str):
+            def strip(self, chars: str | None = None) -> str:
+                return ""
+
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied):
+            dispatcher.dispatch(
+                AGENT,
+                "write",
+                {"path": "workspace/ok.txt", "content": Deceptive("evaluator/score.py")},
+            )
+        assert sink.calls == []
+
+
 class TestDottedDirectoryTargets:
     @pytest.mark.parametrize("path", ["app/v1.2", "app/v1.2/", "app/report.txt"])
     def test_unknown_target_kind_outside_scratch_is_denied(
