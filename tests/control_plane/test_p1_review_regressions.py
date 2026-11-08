@@ -513,7 +513,7 @@ class TestFinalReviewBoundaries:
                 tool_tiers={"access": ActionTier.T1},
                 read_only_tools=frozenset({"access"}) if read_only else frozenset(),
             )
-            dispatcher.register("access", access, path_params={"path"})
+            dispatcher.register("access", access, path_params={"path"}, merge_capable=False)
             result = dispatcher.dispatch(AGENT, "access", {"path": "workspace/file.txt"})
             assert result.value == ("leaf" if read_only else "updated")
 
@@ -552,7 +552,7 @@ class TestFinalReviewBoundaries:
                 tool_tiers={"recursive": ActionTier.T1},
                 read_only_tools=frozenset({"recursive"}) if read_only else frozenset(),
             )
-            dispatcher.register("recursive", recursive, path_params={"path"})
+            dispatcher.register("recursive", recursive, path_params={"path"}, merge_capable=False)
             with pytest.raises(ToolDenied):
                 dispatcher.dispatch(AGENT, "recursive", {"path": "workspace/v1.2"})
         assert calls == []
