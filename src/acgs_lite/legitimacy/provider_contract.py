@@ -218,6 +218,11 @@ class ContractedEffectStore:
                     "SELECT key, ? FROM external_effects WHERE key=? AND state=?",
                     (bind.digest, key, EffectState.RESERVED.value),
                 )
+            row = db.execute(
+                "SELECT contract_digest FROM effect_contract_bindings WHERE key=?", (key,)
+            ).fetchone()
+            if bind is not None and row is not None and row[0] != bind.digest:
+                raise ProviderNotDispatchable("effect was dispatched under a different contract")
             if decision_identity is not None:
                 if bind is not None:
                     db.execute(
@@ -230,9 +235,6 @@ class ContractedEffectStore:
                 ).fetchone()
                 if decision is None or decision[0] != decision_identity:
                     raise ProviderNotDispatchable("effect has no matching durable decision binding")
-            row = db.execute(
-                "SELECT contract_digest FROM effect_contract_bindings WHERE key=?", (key,)
-            ).fetchone()
             return None if row is None else row[0]
 
     def _checked(

@@ -316,6 +316,33 @@ def test_decision_binding_survives_store_restart(contracted):
     assert built.decision_receipt_identity == receipt_identity(grant().receipt)
 
 
+def test_stale_reserved_read_cannot_backfill_decision(contracted, monkeypatch):
+    provider = Provider()
+    reserved = reserve(contracted)
+    contracted.store.send(reserved.key, provider)
+    monkeypatch.setattr(contracted.store, "get", lambda _key: reserved)
+    with pytest.raises(ProviderNotDispatchable, match="durable decision binding"):
+        contracted.send(reserved.key, provider, grant=grant())
+    assert contracted.decision_for(reserved.key) is None
+    assert len(provider.sends) == 1
+
+
+def test_refused_contract_cannot_pin_a_decision(contracted):
+    reserved = reserve(contracted)
+    # Model a crash after the contract transaction but before dispatch.
+    contracted._bound_digest(reserved.key, contract())
+    registry = ProviderContractRegistry()
+    registry.register(
+        ProviderContract("payments", ProviderContractClass.FENCEABLE, "2", True, True)
+    )
+    changed = ContractedEffectStore(contracted.store, registry)
+    provider = Provider()
+    with pytest.raises(ProviderNotDispatchable, match="different contract"):
+        changed.send(reserved.key, provider, grant=grant())
+    assert changed.decision_for(reserved.key) is None
+    assert provider.sends == []
+
+
 def test_fenceable_send_done_signed_outcome_verifies(contracted):
     key = signer()
     provider = Provider()
