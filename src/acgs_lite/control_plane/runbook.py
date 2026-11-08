@@ -486,6 +486,14 @@ class RunbookRegistry:
         decision, decided = self._pdp._decide_attested(request)
         if not decision.allowed or decided is None:
             raise RunbookRejected(f"PDP denied runbook approval: {decision.reason}")
+        qualified = [
+            approver
+            for approver in decided.approvers
+            if approver.canonical_id not in {owner, human.canonical_id}
+            and self._roles.has_capability(approver, parsed.required_approver_role)
+        ]
+        if not qualified:
+            raise RunbookRejected("final approval lacks an independent required-role approver")
         with self._lock:
             self._approved[parsed.runbook_id] = _Approved(
                 parsed, digest, qualified[0].id, resolved, {}

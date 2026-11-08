@@ -625,9 +625,17 @@ class IncidentMutationLock:
                 raise IncidentLockError(
                     "takeover needs a signed approval from a second incident_admin"
                 )
-            decision, _ = self._pdp._decide_attested(request)
-            if not decision.allowed:
+            decision, decided = self._pdp._decide_attested(request)
+            if not decision.allowed or decided is None:
                 raise IncidentLockError(f"PDP denied takeover: {decision.reason}")
+            seconds = [
+                a
+                for a in decided.approvers
+                if a.canonical_id not in {admin.canonical_id, state.commander_id}
+                and self._roles.has_capability(a, CAP_INCIDENT_ADMIN)
+            ]
+            if not seconds:
+                raise IncidentLockError("final approval lacks a second incident_admin approver")
             self._write(self._payload(state, None, commander_id=admin.canonical_id))
             self._log(
                 "takeover",
