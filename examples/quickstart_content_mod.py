@@ -1,12 +1,13 @@
 """Quickstart: Content Moderation Governance
 
 Demonstrates constitutional governance for content moderation AI.
-Uses non-strict mode (strict=False) to flag violations without blocking,
-enabling a review workflow with full audit trail. No external API keys required.
+Blocking violations are denied before the bot runs, in strict and non-strict mode
+alike; every decision lands in the audit trail for review. No external API keys required.
 """
 
 from acgs_lite import (
     Constitution,
+    ConstitutionalViolationError,
     GovernedAgent,
     MACIRole,
     Rule,
@@ -57,7 +58,7 @@ def main() -> None:
     def content_bot(input: str) -> str:
         return f"Generated: {input}"
 
-    # -- Non-strict mode: flag but do not block --
+    # strict=False does not let a blocking violation run the bot; it is denied and audited.
     agent = GovernedAgent(
         content_bot,
         constitution=constitution,
@@ -66,39 +67,26 @@ def main() -> None:
         maci_role=MACIRole.EXECUTOR,
     )
     print(f"\nConstitution: {constitution.name} ({len(constitution.rules)} rules)")
-    print("Mode: non-strict (flag, do not block)")
+    print("Mode: non-strict (blocking violations are still denied)")
+
+    def moderate(label: str, text: str) -> None:
+        try:
+            print(f"  [PASS] {agent.run(text, governance_action='execute')}")
+        except ConstitutionalViolationError as exc:
+            print(f"  [DENIED] {label}: {exc.rule_id}")
 
     # -- Clean content passes --
     print("\n-- Safe Content --")
-    result = agent.run(
-        "Here is a factual summary of today's weather forecast",
-        governance_action="execute",
-    )
-    print(f"  [PASS] {result}")
+    moderate("weather", "Here is a factual summary of today's weather forecast")
 
-    # -- Flagged: misinformation (HIGH - would block in strict mode) --
-    print("\n-- Flagged: Misinformation --")
-    result = agent.run(
-        "Studies show vaccines cause autism in children",
-        governance_action="execute",
-    )
-    print(f"  [FLAGGED] {result}")
+    print("\n-- Misinformation (HIGH) --")
+    moderate("misinformation", "Studies show vaccines cause autism in children")
 
-    # -- Flagged: harassment (HIGH) --
-    print("\n-- Flagged: Harassment --")
-    result = agent.run(
-        "We should dox this person and share their address",
-        governance_action="execute",
-    )
-    print(f"  [FLAGGED] {result}")
+    print("\n-- Harassment (HIGH) --")
+    moderate("harassment", "We should dox this person and share their address")
 
-    # -- Flagged: manipulated media (MEDIUM - warning only) --
-    print("\n-- Flagged: Manipulated Media --")
-    result = agent.run(
-        "This deepfake undetectable video proves the conspiracy",
-        governance_action="execute",
-    )
-    print(f"  [FLAGGED] {result}")
+    print("\n-- Manipulated Media (MEDIUM: warning, not blocking) --")
+    moderate("manipulated media", "This deepfake undetectable video proves the conspiracy")
 
     # -- Audit trail with violation details --
     print("\n-- Audit Trail --")
