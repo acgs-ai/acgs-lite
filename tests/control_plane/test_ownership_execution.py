@@ -137,7 +137,11 @@ async def test_cancelled_client_cannot_release_active_sync_worker(pdp):
 
 def test_reassignment_before_invocation_rechecks_new_worktree(pdp, monkeypatch):
     calls = []
-    d, owners = setup(pdp, lambda path: calls.append(path))
+
+    def write(path):
+        calls.append(path)
+
+    d, owners = setup(pdp, write)
     authorize = d._authorize
 
     def changed(*args, **kwargs):
