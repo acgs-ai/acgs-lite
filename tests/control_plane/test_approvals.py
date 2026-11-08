@@ -673,3 +673,30 @@ class TestActionHash:
             deep = [deep]
         with pytest.raises(ValueError):
             arguments_digest({"d": deep})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("change", ["expiry", "revoke"])
+async def test_consume_rechecks_after_pdp_evaluation(
+    setup, approver_factory, approval_gate, approval_authority, monkeypatch, change, asynchronous
+):
+    dispatcher, calls = setup
+    approval = approver_factory("bob")(_hash(dispatcher, ALICE, "edit", "workspace/a"))
+    original = approval_gate.consume
+
+    def consume(result):
+        if change == "expiry":
+            monkeypatch.setattr(approval_gate, "_clock", lambda: approval.expires_at)
+        else:
+            approval_authority.revoke_approver(ADMIN, approval.key_id)
+        return original(result)
+
+    monkeypatch.setattr(approval_gate, "consume", consume)
+    with pytest.raises(ToolDenied):
+        if asynchronous:
+            await dispatcher.adispatch(ALICE, "edit", {"path": "workspace/a"}, approvals=[approval])
+        else:
+            dispatcher.dispatch(ALICE, "edit", {"path": "workspace/a"}, approvals=[approval])
+    assert calls.paths == []
+    assert not approval_gate.is_consumed(approval)
