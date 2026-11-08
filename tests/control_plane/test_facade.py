@@ -169,8 +169,9 @@ def test_dispatch_external_run_outcome_controls_runbook_stop(tmp_path: Path, wor
     from datetime import datetime, timezone
 
     from acgs_lite.control_plane.approvals import SignedApproval
-    from acgs_lite.control_plane.demo_loop import _runbook
+    from acgs_lite.control_plane.demo_loop import _runbook, authenticate_human
     from acgs_lite.control_plane.evidence import ExternalRunRef, RunValidation
+    from acgs_lite.control_plane.identity import ADMIN_SCOPE
     from acgs_lite.control_plane.tier_policy import ActionProfile
 
     class WorkflowVerifier:
@@ -180,15 +181,31 @@ def test_dispatch_external_run_outcome_controls_runbook_stop(tmp_path: Path, wor
         def validate(self, ref: ExternalRunRef) -> RunValidation:
             return RunValidation(True, "checked CI", self.verifier_id, workflow=workflow)
 
-    cp = build_control_plane(_config(tmp_path, run_verifier=WorkflowVerifier()))
+    requester = Principal("requester", PrincipalKind.HUMAN)
+    approver = Principal("approver", PrincipalKind.HUMAN)
+    signer = Ed25519ReceiptSigner.from_seed(b"s" * 32, key_id="approver")
+    requester_key = Ed25519ReceiptSigner.from_seed(b"q" * 32)
+    identities = _identities()
+    identities["identities"].extend(
+        [
+            {"id": requester.id, "kind": "human", "public_key": requester_key.public_key_hex()},
+            {"id": approver.id, "kind": "human", "public_key": signer.public_key_hex()},
+        ]
+    )
+    cp = build_control_plane(_config(tmp_path, identities, run_verifier=WorkflowVerifier()))
+
+    def admin_token() -> str:
+        return authenticate_human(cp, cp.config.admin, ADMIN_KEY, [ADMIN_SCOPE])
+
     try:
-        requester = Principal("requester", PrincipalKind.HUMAN)
-        approver = Principal("approver", PrincipalKind.HUMAN)
-        signer = Ed25519ReceiptSigner.from_seed(b"a" * 32, key_id="approver")
         cp.authority.register_approver(
-            cp.config.admin, approver, signer.public_key_hex(), key_id="approver"
+            cp.config.admin,
+            approver,
+            signer.public_key_hex(),
+            key_id="approver",
+            admin_credential=admin_token(),
         )
-        cp.roles.grant_capability(cp.config.admin, "sre", approver)
+        cp.roles.grant_capability(cp.config.admin, "sre", approver, admin_credential=admin_token())
         book = _runbook(datetime.now(timezone.utc).date().isoformat())
         book["owner"] = requester.id
         book["scope_selector"]["principals"] = [AGENT.id]
@@ -202,9 +219,18 @@ def test_dispatch_external_run_outcome_controls_runbook_stop(tmp_path: Path, wor
         approval = SignedApproval.create(
             signer, approver=approver, action_hash=cp.runbooks.approval_hash(requester, book)
         )
-        digest = cp.runbooks.approve(requester, book, approvals=[approval])
-        cp.ownership.assign(cp.config.admin, "change-1", AGENT, "workspace/test")
-        cp.triggers.bind(cp.config.admin, "loop", principals=[AGENT])
+        digest = cp.runbooks.approve(
+            requester,
+            book,
+            approvals=[approval],
+            admin_credential=authenticate_human(cp, requester, requester_key, [ADMIN_SCOPE]),
+        )
+        cp.ownership.assign(
+            cp.config.admin, "change-1", AGENT, "workspace/test", admin_credential=admin_token()
+        )
+        cp.triggers.bind(
+            cp.config.admin, "loop", principals=[AGENT], admin_credential=admin_token()
+        )
         cp.start_agent_run(AGENT)
         calls: list[str] = []
         ref = ExternalRunRef("github-actions", "123", "ci_system")
