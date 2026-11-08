@@ -815,8 +815,21 @@ acgs audit --verify-chain
 acgs serve --port 8080
 
 # EU AI Act Art. 14(4)(e) kill switch
-acgs halt --agent-id agent-01 --reason "anomalous behaviour detected"
-acgs resume --agent-id agent-01
+# Halt and check must share a signal dir. Set ACGS_HALT_SIGNAL_DIR (or pass
+# --signal-dir) when agents may run with a different TMPDIR than the operator.
+# GovernedAgent builds a default breaker only when ACGS_HALT_SIGNAL_DIR or
+# ACGS_HALT_WEBHOOK_URL is set (opt-in); otherwise pass circuit_breaker=.
+# GovernedCallable also honors ACGS_HALT_SIGNAL_DIR or circuit_breaker=.
+# Pre-create the trusted directory before starting agents: a missing or
+# untrusted directory fails closed on every operation, including async calls.
+# If agents run as a different user than the operator, pre-create the dir so
+# both can read it (acgs halt creates new dirs as 0700, and an agent that cannot
+# read the dir treats itself as halted until access is fixed):
+#   sudo install -d -o root -g acgs -m 0750 /var/run/acgs
+export ACGS_HALT_SIGNAL_DIR=/var/run/acgs
+acgs halt --system-id agent-01 --reason "anomalous behaviour detected"
+acgs breaker-status --system-id agent-01   # exit 1 while halted
+acgs resume --system-id agent-01
 ```
 
 ---
