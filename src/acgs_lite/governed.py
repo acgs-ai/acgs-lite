@@ -30,7 +30,12 @@ _log = logging.getLogger(__name__)
 _MAX_RETRIES_LIMIT = 10
 
 from acgs_lite.audit import AuditEntry, AuditLog
-from acgs_lite.circuit_breaker import GovernanceCircuitBreaker, WebhookNotificationChannel
+from acgs_lite.circuit_breaker import (
+    HALT_SIGNAL_DIR_ENV,
+    GovernanceCircuitBreaker,
+    NotificationChannel,
+    WebhookNotificationChannel,
+)
 from acgs_lite.constitution import Constitution
 from acgs_lite.constitution.refusal_reasoning import RefusalReasoningEngine
 from acgs_lite.constrained_output import attach_response_format
@@ -166,15 +171,21 @@ class GovernedAgent:
         intervention_engine: Any | None = None,
     ) -> None:
         webhook_url = os.getenv("ACGS_HALT_WEBHOOK_URL")
-        if circuit_breaker is None and webhook_url:
-            circuit_breaker = GovernanceCircuitBreaker(
-                system_id=agent_id,
-                notification_channels=[
+        halt_signal_dir = os.getenv(HALT_SIGNAL_DIR_ENV, "").strip()
+        # Opt-in default breaker: built only when a halt webhook or a shared halt
+        # signal dir is configured. With neither, there is no default breaker.
+        if circuit_breaker is None and (webhook_url or halt_signal_dir):
+            channels: list[NotificationChannel] = []
+            if webhook_url:
+                channels.append(
                     WebhookNotificationChannel(
                         webhook_url,
                         secret=os.getenv("ACGS_HALT_WEBHOOK_SECRET"),
                     )
-                ],
+                )
+            circuit_breaker = GovernanceCircuitBreaker(
+                system_id=agent_id,
+                notification_channels=channels,
             )
         self._agent = agent
         self.agent_id = agent_id
@@ -266,6 +277,8 @@ class GovernedAgent:
 
     def _execute_agent(self, input: str, **kwargs: Any) -> Any:
         """Execute the underlying agent (sync)."""
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.check()
         if hasattr(self._agent, "run"):
             return self._agent.run(input, **kwargs)
         elif callable(self._agent):
@@ -544,6 +557,8 @@ class GovernedAgent:
 
     async def _aexecute_agent(self, input: str, **kwargs: Any) -> Any:
         """Execute the underlying agent (async)."""
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.check()
         if hasattr(self._agent, "arun"):
             return await self._agent.arun(input, **kwargs)
         elif hasattr(self._agent, "run"):
@@ -570,6 +585,8 @@ class GovernedAgent:
         **kwargs: Any,
     ) -> Any:
         """Async version of run() with output-violation retry support."""
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.check()
         # Step 1: Enforce MACI boundary before any wrapped side effect
         self._check_maci(governance_action)
         execution_kwargs, governance_kwargs = self._prepare_execution_kwargs(kwargs)
@@ -751,7 +768,11 @@ class GovernedCallable:
         require_restart_recovery: bool = False,
         trusted_execution_context: TrustedExecutionContext | None = None,
         require_trusted_context: bool = False,
+        circuit_breaker: GovernanceCircuitBreaker | None = None,
     ) -> None:
+        if circuit_breaker is None and os.getenv(HALT_SIGNAL_DIR_ENV, "").strip():
+            circuit_breaker = GovernanceCircuitBreaker(system_id=agent_id)
+        self._circuit_breaker = circuit_breaker
         self.constitution = constitution or Constitution.default()
         self.agent_id = agent_id
         self.audit_log = audit_log if audit_log is not None else AuditLog()
@@ -903,6 +924,8 @@ class GovernedCallable:
     def _gate(
         self, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> ConsumeDecision | None:
+        if self._circuit_breaker is not None:
+            self._circuit_breaker.check()
         if self.require_durable_audit:
             self.audit_log.validate_durable_state()
         tokens = extract_authorization_kwargs(kwargs)

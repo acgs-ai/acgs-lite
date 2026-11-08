@@ -14,7 +14,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Packaging: removed the experimental `gove` optional extra from the package
   metadata and its README section. No runtime or API changes.
 
+### Fixed
+
+- `acgs halt` / `resume` / `breaker-status` and `GovernanceCircuitBreaker` now resolve the
+  cross-process halt signal directory at construction time: explicit `signal_dir` >
+  `ACGS_HALT_SIGNAL_DIR` > `tempfile.gettempdir()`. Previously the directory was fixed to
+  the import-time temp dir, so a process with a different `TMPDIR` silently missed a halt.
+- The three CLI commands accept `--signal-dir PATH` (overrides the env var) and print the
+  resolved signal dir, warning when it is the `TMPDIR` fallback.
+- `acgs halt` creates the signal dir if missing and exits non-zero without printing
+  `HALTED` when the signal file cannot be written (fail closed).
+- `GovernedAgent` now builds its default circuit breaker when `ACGS_HALT_SIGNAL_DIR` is set
+  (opt-in), not only when `ACGS_HALT_WEBHOOK_URL` is set; with neither, there is still no
+  default breaker.
+
 ### Security
+
+- Halt signal inspection fails closed: any entry at the signal path (file, directory,
+  dangling symlink, FIFO) counts as tripped, and a signal path that cannot be inspected
+  (e.g. `PermissionError`) is reported as tripped with `check()` raising
+  `GovernanceHaltError("halt signal unreadable: ...")`, instead of `Path.exists()` returning
+  `False` (Python 3.12+) or raising `PermissionError` (3.10). Unreadable signal files get a
+  fallback reason; the reason is read without following symlinks.
+- `trip()` writes the signal atomically via `tempfile.mkstemp` in the signal dir + fsync +
+  `os.replace`, cleaning up on failure. This no longer follows a planted `<signal>.tmp`
+  symlink, and dotted ids such as `a.v1` / `a.v2` / `a.tmp` no longer share a temp file.
+- `GovernanceCircuitBreaker` rejects a `system_id` that is empty, `.`/`..`, or contains a
+  path separator or NUL (`ValueError`).
+- `acgs halt` creates the signal dir (and any missing parents) with mode `0o700` and
+  refuses (exit 2, "NOT halted") a signal dir that is a symlink, not a directory, owned by
+  another non-root user, or group/world-writable without the sticky bit, or whose
+  ancestors (as spelled or resolved) fail the same ownership/writability rules. The check
+  also runs when the system is already halted. A signal path under a non-directory
+  (`ENOTDIR`) counts as tripped. Trusted owners are the current user and root only;
+  extra ancestor-owner uids (e.g. the user-namespace overflow uid 65534) must be opted
+  in via `ACGS_HALT_TRUSTED_UIDS` (comma-separated; never applies to the signal dir
+  itself).
+- **Behaviour change:** a breaker whose signal dir is missing or fails these checks
+  counts as tripped (`check()` raises `GovernanceHaltError("halted (untrusted signal
+  dir: ...)")`, `breaker-status` reports HALTED, `resume` exits 2). This includes the
+  `tempdir` fallback. Pre-create a trusted signal directory before starting agents.
+- `acgs halt` confirms that an existing or newly published signal is a regular file
+  owned by the operator or root before reporting success. A foreign-owned file in a
+  sticky shared directory cannot masquerade as a durable operator halt.
+- Async `GovernedAgent.arun()` now checks the breaker before execution, like `run()`.
+  Both agent modes recheck before output retries so a newly raised halt stops retries.
+  Both sync and async `GovernedCallable` wrappers also honor `ACGS_HALT_SIGNAL_DIR`
+  or an explicit `circuit_breaker`, before consuming authorization or executing.
+- Relative signal dirs (argument or env) are made absolute against the cwd once, at
+  construction, without following symlinks.
+- `acgs resume` exits 2 and reports the system as still HALTED if the signal file is still
+  present after the reset.
 
 - Rust companion (`acgs_lite_rust`): rule patterns are now compiled
   case-insensitively, matching the Python engine. Before, a pattern with an
