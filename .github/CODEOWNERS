@@ -176,6 +176,13 @@
 
 # control_plane: import-path shadows (src/*.py, site hooks, .pth)
 /*.py @acgs-ai/governance-humans
+/*.pyc @acgs-ai/governance-humans
+/*.so @acgs-ai/governance-humans
+/*.pyd @acgs-ai/governance-humans
+/*/__init__.py @acgs-ai/governance-humans
+/*/__init__.pyc @acgs-ai/governance-humans
+/*/__init__*.so @acgs-ai/governance-humans
+/*/__init__*.pyd @acgs-ai/governance-humans
 **/conftest.py @acgs-ai/governance-humans
 /src/*.py @acgs-ai/governance-humans
 **/sitecustomize* @acgs-ai/governance-humans
