@@ -890,10 +890,12 @@ class GovernedToolDispatcher:
                 admission_sink.append(admission)
         return spec, args, decisions
 
-    def _recheck_kill_switch(self, principal: Principal, tool_name: str) -> None:
+    def _recheck_kill_switch(
+        self, principal: Principal, tool_name: str, *, group_id: str | None
+    ) -> None:
         """Closes the authorise-then-invoke window (TOCTOU), sync and async."""
         if self._kill_switch_engaged():
-            raise self._pre_denial(principal, tool_name, "kill switch engaged")
+            raise self._pre_denial(principal, tool_name, "kill switch engaged", group_id=group_id)
 
     def _recheck_credential(
         self, principal: Principal, tool_name: str, credential: object, *, group_id: str | None
@@ -982,7 +984,11 @@ class GovernedToolDispatcher:
             credential,
             group_id=decisions[0].decision_id if decisions else None,
         )
-        self._recheck_kill_switch(principal, tool_name)
+        self._recheck_kill_switch(
+            principal,
+            tool_name,
+            group_id=decisions[0].decision_id if decisions else None,
+        )
         return ToolResult(tool_name, spec.fn(**args), decisions)
 
     async def adispatch(
@@ -1023,13 +1029,21 @@ class GovernedToolDispatcher:
                 credential,
                 group_id=decisions[0].decision_id if decisions else None,
             )
-            self._recheck_kill_switch(principal, tool_name)
+            self._recheck_kill_switch(
+                principal,
+                tool_name,
+                group_id=decisions[0].decision_id if decisions else None,
+            )
             return spec, spec.fn(**args), decisions
 
         spec, value, decisions = await asyncio.to_thread(invoke)
         if inspect.isawaitable(value):
             try:
-                self._recheck_kill_switch(principal, tool_name)
+                self._recheck_kill_switch(
+                    principal,
+                    tool_name,
+                    group_id=decisions[0].decision_id if decisions else None,
+                )
                 session = self._verify_credential(principal, tool_name, credential)
                 admission = admissions[0] if admissions else None
                 self._final_admission(
