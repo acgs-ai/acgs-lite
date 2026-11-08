@@ -123,6 +123,131 @@ def test_builds_every_layer(tmp_path: Path) -> None:
         cp.close()
 
 
+@pytest.mark.parametrize(
+    "workflow,valid,expected",
+    [
+        ("ci.yml", True, True),
+        ("other.yml", True, False),
+        ("ci.yml", False, False),
+    ],
+)
+def test_configured_workflow_verifier_reaches_runbook_predicate(
+    tmp_path: Path, workflow: str, valid: bool, expected: bool
+) -> None:
+    from acgs_lite.control_plane.evidence import ExternalRunRef, RunValidation
+    from acgs_lite.control_plane.runbook import ExternalRunPredicate, predicate_satisfied
+
+    class WorkflowVerifier:
+        verifier_id = "trusted-workflow-verifier"
+        attests_artifact_digest = False
+
+        def validate(self, ref: ExternalRunRef) -> RunValidation:
+            return RunValidation(
+                valid, "independently checked", self.verifier_id, workflow=workflow
+            )
+
+    verifier = WorkflowVerifier()
+    cp = build_control_plane(_config(tmp_path, run_verifier=verifier))
+    try:
+        predicate = ExternalRunPredicate(
+            kind="external_run", provider="github-actions", workflow="ci.yml"
+        )
+        ref = ExternalRunRef(provider="github-actions", run_id="123", source="ci_system")
+        assert predicate_satisfied(predicate, ref, cp.dispatcher._run_verifier) is expected
+        assert cp.dispatcher._run_verifier is verifier
+    finally:
+        cp.close()
+
+
+def test_invalid_configured_run_verifier_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ControlPlaneConfigError, match="run_verifier"):
+        build_control_plane(_config(tmp_path, run_verifier=object()))
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "wrong.yml"])
+def test_dispatch_external_run_outcome_controls_runbook_stop(tmp_path: Path, workflow: str) -> None:
+    from datetime import datetime, timezone
+
+    from acgs_lite.control_plane.approvals import SignedApproval
+    from acgs_lite.control_plane.demo_loop import _runbook
+    from acgs_lite.control_plane.evidence import ExternalRunRef, RunValidation
+    from acgs_lite.control_plane.tier_policy import ActionProfile
+
+    class WorkflowVerifier:
+        verifier_id = "trusted-ci"
+        attests_artifact_digest = False
+
+        def validate(self, ref: ExternalRunRef) -> RunValidation:
+            return RunValidation(True, "checked CI", self.verifier_id, workflow=workflow)
+
+    cp = build_control_plane(_config(tmp_path, run_verifier=WorkflowVerifier()))
+    try:
+        requester = Principal("requester", PrincipalKind.HUMAN)
+        approver = Principal("approver", PrincipalKind.HUMAN)
+        signer = Ed25519ReceiptSigner.from_seed(b"a" * 32, key_id="approver")
+        cp.authority.register_approver(
+            cp.config.admin, approver, signer.public_key_hex(), key_id="approver"
+        )
+        cp.roles.grant_capability(cp.config.admin, "sre", approver)
+        book = _runbook(datetime.now(timezone.utc).date().isoformat())
+        book["owner"] = requester.id
+        book["scope_selector"]["principals"] = [AGENT.id]
+        book["scope_selector"]["paths"] = ["workspace/test/**"]
+        book["success_predicate"] = {
+            "kind": "external_run",
+            "provider": "github-actions",
+            "workflow": "ci.yml",
+        }
+        book["stop_conditions"] = [{"kind": "max_failures", "count": 1}]
+        approval = SignedApproval.create(
+            signer, approver=approver, action_hash=cp.runbooks.approval_hash(requester, book)
+        )
+        digest = cp.runbooks.approve(requester, book, approvals=[approval])
+        cp.ownership.assign(cp.config.admin, "change-1", AGENT, "workspace/test")
+        cp.triggers.bind(cp.config.admin, "loop", principals=[AGENT])
+        cp.start_agent_run(AGENT)
+        calls: list[str] = []
+        ref = ExternalRunRef("github-actions", "123", "ci_system")
+
+        def write_file(path: str) -> ExternalRunRef:
+            calls.append(path)
+            return ref
+
+        def profile(arguments: Any) -> ActionProfile:
+            return ActionProfile(
+                reversible=True, data_destroying=False, blast_radius=1, novel=False
+            )
+
+        cp.dispatcher.register(
+            "write_file", write_file, path_params={"path"}, profile=profile, merge_capable=False
+        )
+        token = cp.credentials.issue(AGENT, scopes={"tool:write_file"}).token
+        kwargs = dict(
+            credential=token,
+            trigger_id="loop",
+            change_id="change-1",
+            runbook_id=book["runbook_id"],
+            runbook_hash=digest,
+        )
+        cp.dispatcher.dispatch(
+            AGENT, "write_file", {"path": "workspace/test/prompts/x.md"}, **kwargs
+        )
+        if workflow == "ci.yml":
+            cp.dispatcher.dispatch(
+                AGENT, "write_file", {"path": "workspace/test/prompts/x.md"}, **kwargs
+            )
+            assert len(calls) == 2
+        else:
+            with pytest.raises(ToolDenied, match="max_failures"):
+                cp.dispatcher.dispatch(
+                    AGENT, "write_file", {"path": "workspace/test/prompts/x.md"}, **kwargs
+                )
+            assert len(calls) == 1
+        assert cp.promotion._verifier is cp.runs
+    finally:
+        cp.close()
+
+
 REQUIRED = [
     "repo_root",
     "system_id",

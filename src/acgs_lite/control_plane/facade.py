@@ -140,6 +140,13 @@ class ControlPlaneConfig:
     """``None`` receipts every pre-denial (no rate-limited suppression)."""
     backup_workflows: frozenset[str] = frozenset()
     """Run providers whose runs may prove a backup for agent T3 actions."""
+    run_verifier: ExternalRunVerifier | None = None
+    """Trusted verifier for dispatcher runbook outcomes and backup evidence.
+
+    Supply a workflow-aware verifier for ``external_run`` predicates. The
+    default remains the local signed run registry; evaluator, promotion and
+    receipt verification continue to use that registry independently.
+    """
     submissions_per_window: int = DEFAULT_SUBMISSIONS_PER_WINDOW
     submission_window_s: float = DEFAULT_SUBMISSION_WINDOW_S
     score_granularity: float = DEFAULT_SCORE_GRANULARITY
@@ -243,6 +250,8 @@ def build_control_plane(config: ControlPlaneConfig) -> ControlPlane:
     for any missing or inconsistent input."""
     if not isinstance(config, ControlPlaneConfig):
         raise ControlPlaneConfigError("config must be a ControlPlaneConfig")
+    if config.run_verifier is not None and not isinstance(config.run_verifier, ExternalRunVerifier):
+        raise ControlPlaneConfigError("run_verifier must be an ExternalRunVerifier")
     repo_root = _require(config, "repo_root", str)
     if not Path(repo_root).is_absolute() or not Path(repo_root).is_dir():
         raise ControlPlaneConfigError("repo_root must be an existing absolute directory")
@@ -369,7 +378,7 @@ def build_control_plane(config: ControlPlaneConfig) -> ControlPlane:
             review_queue=review_queue,
             ownership=ownership,
             incident_lock=incident_lock,
-            run_verifier=runs,
+            run_verifier=config.run_verifier if config.run_verifier is not None else runs,
             backup_workflows=config.backup_workflows,
             narrow_max_blast_radius=config.narrow_max_blast_radius,
         )

@@ -9,9 +9,9 @@ counts as engaged.
 
 It reuses :class:`acgs_lite.circuit_breaker.GovernanceCircuitBreaker` (an
 in-process ``threading.Event`` plus an atomically renamed cross-process
-signal file ``acgs-halt-<system_id>``), but reads the signal file itself
-with fail-closed error handling: the breaker's ``Path.exists`` probe would
-report "not tripped" for some I/O errors.
+signal file ``acgs-halt-<system_id>``). It also retains an injectable signal
+probe while honoring the breaker's fail-closed signal-entry and directory
+trust checks.
 
 The default signal directory, ``control-plane/halt/``, lies under the
 ``control-plane/**`` CONTROL_PLANE core pattern, so no agent tool may write
@@ -186,7 +186,7 @@ class KillSwitch:
             if self._engaged:
                 return True
         try:
-            if not self._dir.is_dir():
+            if self._breaker.is_tripped:
                 return True
             return bool(self._probe(self.signal_path))
         except Exception:
