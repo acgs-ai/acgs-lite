@@ -46,14 +46,19 @@ def switch(tmp_path: Path) -> KillSwitch:
 
 @pytest.fixture()
 def wired(
-    constitution: Constitution, permit_all: PolicySet, switch: KillSwitch
+    constitution: Constitution, permit_all: PolicySet, switch: KillSwitch, tmp_path: Path
 ) -> Iterator[tuple[GovernedToolDispatcher, PolicyDecisionPoint, list[str]]]:
     calls: list[str] = []
-    with PolicyDecisionPoint.for_constitution(constitution, permit_all, kill_switch=switch) as pdp:
+    with PolicyDecisionPoint.for_constitution(
+        constitution,
+        permit_all,
+        kill_switch=switch,
+        registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)),
+    ) as pdp:
         d = GovernedToolDispatcher(
             pdp,
             permissions=RepositoryPermissions(
-                DEFAULT_IMMUTABLE_CORE,
+                pdp.registry,
                 [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))],
             ),
             tool_tiers={"read": ActionTier.T0, "rm": ActionTier.T1},

@@ -10,7 +10,6 @@ import pytest
 from acgs_lite.audit import AuditLog, JSONLAuditBackend
 from acgs_lite.constitution import Constitution
 from acgs_lite.control_plane import (
-    DEFAULT_IMMUTABLE_CORE,
     ActionTier,
     Decision,
     GovernedToolDispatcher,
@@ -52,7 +51,7 @@ def _dispatcher(
     d = GovernedToolDispatcher(
         pdp,
         permissions=RepositoryPermissions(
-            DEFAULT_IMMUTABLE_CORE, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
+            pdp.registry, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
         ),
         tool_tiers={"read": ActionTier.T0, "write": ActionTier.T1},
         read_only_tools=frozenset({"read"}),
@@ -203,7 +202,7 @@ class TestLevels:
             AutonomyController(ErrorBudget(), budgets="x")  # type: ignore[arg-type]
 
     def test_dispatcher_rejects_bad_components(self, pdp: PolicyDecisionPoint) -> None:
-        permissions = RepositoryPermissions(DEFAULT_IMMUTABLE_CORE)
+        permissions = RepositoryPermissions(pdp.registry)
         for kwargs in ({"budgets": object()}, {"autonomy": object()}):
             with pytest.raises(TypeError):
                 GovernedToolDispatcher(pdp, permissions=permissions, tool_tiers={}, **kwargs)  # type: ignore[arg-type]

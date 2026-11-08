@@ -27,6 +27,7 @@ from acgs_lite.control_plane import (
     DecisionContext,
     DecisionRequest,
     GovernedToolDispatcher,
+    ImmutableCoreRegistry,
     PolicyDecisionPoint,
     PolicyEffect,
     PolicySet,
@@ -47,9 +48,9 @@ AGENT = Principal("agent-1", PrincipalKind.AGENT)
 HUMAN = Principal("alice", PrincipalKind.HUMAN)
 
 
-def _permissions() -> RepositoryPermissions:
+def _permissions(registry: ImmutableCoreRegistry = DEFAULT_IMMUTABLE_CORE) -> RepositoryPermissions:
     return RepositoryPermissions(
-        DEFAULT_IMMUTABLE_CORE,
+        registry,
         [
             WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**", "examples/**", "app/**")),
             WriteGrant("alice", PrincipalKind.HUMAN, ("**",)),
@@ -76,7 +77,7 @@ def dispatcher(gated_pdp: PolicyDecisionPoint, sink: Sink) -> GovernedToolDispat
     # The shell tool is T2, which needs an ApprovalGate on the PDP (Phase 3).
     d = GovernedToolDispatcher(
         gated_pdp,
-        permissions=_permissions(),
+        permissions=_permissions(gated_pdp.registry),
         tool_tiers={"write": ActionTier.T1, "rm": ActionTier.T1, "shell": ActionTier.T2},
     )
 
@@ -219,7 +220,7 @@ class TestCritical1PathExtraction:
 
     def test_shell_tool_must_be_t2(self, pdp: PolicyDecisionPoint) -> None:
         d = GovernedToolDispatcher(
-            pdp, permissions=_permissions(), tool_tiers={"sh": ActionTier.T1}
+            pdp, permissions=_permissions(pdp.registry), tool_tiers={"sh": ActionTier.T1}
         )
 
         def sh(command: str) -> None:
@@ -330,14 +331,24 @@ class TestMedium3Toctou:
         assert sink.calls == []
 
     def _mutating_dispatcher(
-        self, constitution: Constitution, permit_all: PolicySet, sink: Sink, target: list[str]
+        self,
+        constitution: Constitution,
+        permit_all: PolicySet,
+        sink: Sink,
+        target: list[str],
+        tmp_path: Path,
     ) -> tuple[GovernedToolDispatcher, PolicyDecisionPoint]:
         def mutate(decision: Decision) -> None:
             target[0] = "evaluator/x.py"
 
-        pdp = PolicyDecisionPoint.for_constitution(constitution, permit_all, listeners=[mutate])
+        pdp = PolicyDecisionPoint.for_constitution(
+            constitution,
+            permit_all,
+            listeners=[mutate],
+            registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)),
+        )
         d = GovernedToolDispatcher(
-            pdp, permissions=_permissions(), tool_tiers={"many": ActionTier.T1}
+            pdp, permissions=_permissions(pdp.registry), tool_tiers={"many": ActionTier.T1}
         )
 
         def many(paths: list[str]) -> str:
@@ -347,20 +358,20 @@ class TestMedium3Toctou:
         return d, pdp
 
     def test_argument_mutated_during_authorisation(
-        self, constitution: Constitution, permit_all: PolicySet, sink: Sink
+        self, constitution: Constitution, permit_all: PolicySet, sink: Sink, tmp_path: Path
     ) -> None:
         target = ["workspace/a.py"]
-        d, pdp = self._mutating_dispatcher(constitution, permit_all, sink, target)
+        d, pdp = self._mutating_dispatcher(constitution, permit_all, sink, target, tmp_path)
         with pdp:
             d.dispatch(AGENT, "many", {"paths": target})
         assert target == ["evaluator/x.py"]
         assert sink.calls == [["workspace/a.py"]]
 
     async def test_argument_mutated_during_async_authorisation(
-        self, constitution: Constitution, permit_all: PolicySet, sink: Sink
+        self, constitution: Constitution, permit_all: PolicySet, sink: Sink, tmp_path: Path
     ) -> None:
         target = ["workspace/a.py"]
-        d, pdp = self._mutating_dispatcher(constitution, permit_all, sink, target)
+        d, pdp = self._mutating_dispatcher(constitution, permit_all, sink, target, tmp_path)
         with pdp:
             await d.adispatch(AGENT, "many", {"paths": target})
         assert sink.calls == [["workspace/a.py"]]

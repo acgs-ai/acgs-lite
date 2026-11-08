@@ -339,7 +339,14 @@ def _plan_attributes(
 
 
 class GovernedToolDispatcher:
-    """Gate tool functions behind PDP decisions and repository permissions."""
+    """Gate tool functions behind PDP decisions and repository permissions.
+
+    Hosts must explicitly bind the registry's ``repo_root`` to the filesystem
+    used by their tools, and share that registry with PDP and permissions.
+    Non-human declared reads and scratch write exemptions require this root;
+    process cwd is never treated as evidence of the tool's repository root.
+    The facade builder supplies the binding from its required repo_root.
+    """
 
     def __init__(
         self,
@@ -731,13 +738,14 @@ class GovernedToolDispatcher:
 
     def _in_scratch(self, raw: str) -> bool:
         normalized = self._registry.normalize(raw)
-        if normalized is None:
+        root = self._registry.repo_root
+        if normalized is None or root is None:
             return False
         # Scratch prefixes still contain globally protected names (.env,
         # conftest.py, etc.). Never exempt an existing directory or symlink:
         # a recursive operation could mutate protected descendants. Traversal
         # is not proof of confinement, so leave directory mutations denied.
-        target = posixpath.join(self._registry.repo_root or os.getcwd(), normalized)
+        target = posixpath.join(root, normalized)
         if os.path.isdir(target) or os.path.islink(target):
             return False
         candidate = normalized.lower() + "/"
@@ -841,10 +849,13 @@ class GovernedToolDispatcher:
 
         if spec.read_only and principal.kind is not PrincipalKind.HUMAN:
             for path in declared:
+                root = self._registry.repo_root
+                if root is None:
+                    raise _Denied("declared reads require an explicit repository root")
                 normalized = self._registry.normalize(path)
                 if normalized is None:
                     continue  # the PDP rejects unresolvable paths
-                target = posixpath.join(self._registry.repo_root or os.getcwd(), normalized)
+                target = posixpath.join(root, normalized)
                 directory_shaped = path.endswith("/") or "." not in normalized.rsplit("/", 1)[-1]
                 if (
                     os.path.isdir(target)
