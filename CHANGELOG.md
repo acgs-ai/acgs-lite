@@ -346,6 +346,18 @@ This is a semver-major change (4.0.0): the production profile of the stable
   matched even as top-level input; anchors are now bare words. A pattern with
   alternation (`(?:drop|truncate)`) is no longer anchor-gated on a word from one branch;
   it is always evaluated. Regression tests: `tests/test_governance_whitespace_payloads.py`.
+- `GovernanceCircuitBreaker.trip()` no longer hides a failed cross-process halt. It
+  still halts this process first, but when the signal file cannot be written (for
+  example `EPERM` because another local user pre-created `acgs-halt-<id>` in a sticky
+  shared dir such as `/tmp`), or an existing entry is not a regular file owned by this
+  user or root, it logs at CRITICAL, never overwrites or trusts that entry, and returns
+  `False` (it returns `True` once the signal is confirmed on disk). It does not raise,
+  so callers relying on the in-process halt are unaffected. `reset()` likewise returns
+  `False` and logs at CRITICAL when the signal entry cannot be removed, instead of
+  logging at debug; the breaker stays halted. `trip_reason` no longer reports the text
+  of a signal file owned by another uid. Ownership checks are skipped where
+  `os.getuid` is unavailable (Windows). `acgs halt` uses the `trip()` result.
+  Regression tests: `tests/test_circuit_breaker_signal_failures.py`.
 
 ### Added
 
