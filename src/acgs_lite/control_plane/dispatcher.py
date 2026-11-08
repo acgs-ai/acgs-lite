@@ -13,7 +13,8 @@ then requires, in order:
 
 1. well-formed arguments: declared path parameters hold a string or a flat
    list of strings; every other value is built from str/bytes/numbers/None and
-   lists/tuples/sets/mappings (anything else is opaque and denied);
+   lists/tuples/sets/frozensets/dicts. Only exact built-in types are accepted;
+   subclasses and custom mappings are denied before copying or traversal;
 2. shell-like tools (``command_param``) are human-only; for humans, no
    command token may resolve to an immutable-core path;
 3. for write tools: no *directory-like* path outside the scratch prefixes
@@ -115,20 +116,23 @@ def _as_names(values: Iterable[str], label: str) -> frozenset[str]:
 def _string_leaves(value: Any, out: list[str], depth: int = 0) -> None:
     if depth > MAX_ARGUMENT_DEPTH:
         raise _Denied("arguments nested too deeply")
-    if isinstance(value, str):
+    # Only built-ins have non-overridable traversal/decoding semantics. Check
+    # before copying too, since subclasses may customize __deepcopy__.
+    value_type = type(value)
+    if value_type is str:
         out.append(value)
-    elif isinstance(value, bytes):
+    elif value_type is bytes:
         try:
             out.append(value.decode("utf-8"))
         except UnicodeDecodeError:
             return
-    elif isinstance(value, _SCALARS):
+    elif any(value_type is scalar for scalar in _SCALARS):
         return
-    elif isinstance(value, Mapping):
+    elif value_type is dict:
         for key, item in value.items():
             _string_leaves(key, out, depth + 1)
             _string_leaves(item, out, depth + 1)
-    elif isinstance(value, (list, tuple, set, frozenset)):
+    elif any(value_type is container for container in (list, tuple, set, frozenset)):
         for item in value:
             _string_leaves(item, out, depth + 1)
     else:
@@ -291,8 +295,9 @@ class GovernedToolDispatcher:
 
     @staticmethod
     def _snapshot(arguments: object) -> dict[str, Any]:
-        if not isinstance(arguments, Mapping):
-            raise _Denied("tool arguments must be a mapping")
+        if type(arguments) is not dict:
+            raise _Denied("tool arguments must be a built-in dict")
+        _string_leaves(arguments, [])
         snapshot = copy.deepcopy(dict(arguments))
         if not all(isinstance(key, str) for key in snapshot):
             raise _Denied("argument names must be strings")
@@ -326,7 +331,10 @@ class GovernedToolDispatcher:
         # default is not shared between calls.
         bound.apply_defaults()
         try:
+            _string_leaves(bound.arguments, [])
             args = copy.deepcopy(dict(bound.arguments))
+        except _Denied:
+            raise
         except Exception as exc:
             raise _Denied(f"default arguments cannot be snapshotted: {type(exc).__name__}") from exc
 
