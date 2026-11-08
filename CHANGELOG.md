@@ -39,8 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   another non-root user, or group/world-writable without the sticky bit, or whose
   ancestors (as spelled or resolved) fail the same ownership/writability rules. The check
   also runs when the system is already halted. A signal path under a non-directory
-  (`ENOTDIR`) counts as tripped. A breaker constructed with an explicit or
-  env signal dir that fails these checks logs at CRITICAL (it does not raise).
+  (`ENOTDIR`) counts as tripped. Trusted owners are the current user and root only;
+  extra ancestor-owner uids (e.g. the user-namespace overflow uid 65534) must be opted
+  in via `ACGS_HALT_TRUSTED_UIDS` (comma-separated; never applies to the signal dir
+  itself).
+- **Behaviour change:** a breaker whose explicit or env signal dir exists but fails these
+  checks now counts as tripped (`check()` raises `GovernanceHaltError("halted (untrusted
+  signal dir: ...)")`, `breaker-status` reports HALTED, `resume` exits 2), in addition to
+  logging at CRITICAL on construction. The `tempdir` fallback and a not-yet-created dir
+  are exempt.
 - Relative signal dirs (argument or env) are made absolute against the cwd once, at
   construction, without following symlinks.
 - `acgs resume` exits 2 and reports the system as still HALTED if the signal file is still

@@ -67,6 +67,11 @@ _DEFAULT_SIGNAL_DIR = Path(tempfile.gettempdir())
 
 HALT_SIGNAL_DIR_ENV = "ACGS_HALT_SIGNAL_DIR"
 
+# Opt-in: comma-separated extra uids trusted to own signal dir *ancestors*
+# (e.g. the overflow uid 65534 that stands in for root inside a user
+# namespace). Never applies to the signal dir itself. Default: none.
+HALT_TRUSTED_UIDS_ENV = "ACGS_HALT_TRUSTED_UIDS"
+
 SignalDirSource = Literal["explicit", "env", "tempdir"]
 
 
@@ -128,9 +133,11 @@ def _signal_dir_ancestors_problem(path: Path, uid: int) -> str | None:
     resolved path must be owned by a trusted uid, and directories must not be
     group/world-writable without the sticky bit.
     """
-    # Whoever owns "/" owns the machine; trusting it keeps user-namespaced
-    # sandboxes working, where real root appears as the overflow uid.
-    trusted = {uid, 0, os.lstat("/").st_uid}
+    try:
+        extra = os.environ.get(HALT_TRUSTED_UIDS_ENV, "")
+        trusted = {uid, 0, *(int(v) for v in extra.split(",") if v.strip())}
+    except ValueError:
+        return f"invalid {HALT_TRUSTED_UIDS_ENV} value: {extra!r}"
     try:
         resolved = Path(os.path.realpath(path, strict=True))
         entries = [(p, os.lstat(p)) for p in path.parents]
@@ -362,7 +369,19 @@ class GovernanceCircuitBreaker:
         """Check if the breaker is tripped (in-process or cross-process)."""
         if self._event.is_set():
             return True
-        return self._check_file and _signal_entry_state(self.signal_path)[0]
+        if not self._check_file:
+            return False
+        return _signal_entry_state(self.signal_path)[0] or self._untrusted_dir() is not None
+
+    def _untrusted_dir(self) -> str | None:
+        """Why an existing explicit/env signal dir is untrusted, or None.
+
+        Another user could remove a signal from such a dir, so it counts as
+        tripped. The tempdir fallback and a not-yet-created dir are exempt.
+        """
+        if self.signal_dir_source == "tempdir" or not os.path.lexists(self._signal_dir):
+            return None
+        return _signal_dir_problem(self._signal_dir)
 
     @property
     def trip_reason(self) -> str:
@@ -375,7 +394,8 @@ class GovernanceCircuitBreaker:
         if error:
             return error
         if not present:
-            return ""
+            problem = self._untrusted_dir()
+            return f"halted (untrusted signal dir: {problem})" if problem else ""
         try:
             # O_NOFOLLOW: never read through a planted symlink.
             # O_NONBLOCK: a planted FIFO must not hang the check.

@@ -15,9 +15,11 @@ import pytest
 import acgs_lite.cli as cli
 from acgs_lite.circuit_breaker import (
     HALT_SIGNAL_DIR_ENV,
+    HALT_TRUSTED_UIDS_ENV,
     GovernanceCircuitBreaker,
     GovernanceHaltError,
     WebhookNotificationChannel,
+    _signal_dir_ancestors_problem,
 )
 from acgs_lite.governed import GovernedAgent
 from acgs_lite.maci import MACIRole
@@ -33,8 +35,17 @@ def _run_cli(argv: list[str]) -> int:
 
 
 @pytest.fixture(autouse=True)
-def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _clear_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv(HALT_SIGNAL_DIR_ENV, raising=False)
+    # Opt in only the uids that own tmp_path's ancestors in *this* environment
+    # (e.g. 65534 for /tmp inside a user-namespace sandbox). Empty on a normal
+    # host, where those ancestors are owned by root or the current user.
+    if hasattr(os, "getuid"):
+        foreign = {os.lstat(p).st_uid for p in tmp_path.parents} - {os.getuid(), 0}
+        if foreign:
+            monkeypatch.setenv(HALT_TRUSTED_UIDS_ENV, ",".join(map(str, sorted(foreign))))
+            return
+    monkeypatch.delenv(HALT_TRUSTED_UIDS_ENV, raising=False)
 
 
 # ── Resolution precedence ────────────────────────────────────────────────────
@@ -643,3 +654,118 @@ def test_trip_works_for_system_id_near_name_max(tmp_path: Path) -> None:
 
     assert breaker.signal_path.read_text() == "long"
     assert [p.name for p in tmp_path.iterdir()] == [breaker.signal_path.name]
+
+
+# ── Security review of c495619c ──────────────────────────────────────────────
+
+
+def _fake_owner(monkeypatch: pytest.MonkeyPatch, target: Path, uid: int) -> None:
+    """Make os.lstat/os.stat report ``uid`` as the owner of ``target``."""
+
+    def wrap(real):  # type: ignore[no-untyped-def]
+        def fake(path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            st = real(path, *args, **kwargs)
+            if isinstance(path, (str, os.PathLike)) and Path(path) == target:
+                fields = list(st[:10])
+                fields[4] = uid
+                return os.stat_result(fields)
+            return st
+
+        return fake
+
+    monkeypatch.setattr(os, "lstat", wrap(os.lstat))
+    monkeypatch.setattr(os, "stat", wrap(os.stat))
+
+
+_FOREIGN_UID = 4242
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership required")
+def test_cli_halt_refuses_foreign_owned_ancestor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    _fake_owner(monkeypatch, shared, _FOREIGN_UID)
+
+    rc = _run_cli(["halt", "--system-id", "sys-foreign", "--signal-dir", str(shared / "mine")])
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert f"ancestor {shared} is owned by uid {_FOREIGN_UID}" in err
+    assert "was NOT halted" in err
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership required")
+def test_overflow_uid_ancestor_untrusted_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # 65534 is the user-namespace overflow uid; it must not be trusted
+    # implicitly (it also stands in for every unmapped host user).
+    monkeypatch.delenv(HALT_TRUSTED_UIDS_ENV, raising=False)
+    shared = tmp_path / "shared"
+    (shared / "mine").mkdir(parents=True)
+    _fake_owner(monkeypatch, shared, 65534)
+
+    problem = _signal_dir_ancestors_problem(shared / "mine", os.getuid())
+
+    assert problem is not None
+    assert "owned by uid 65534" in problem
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership required")
+def test_trusted_uids_env_opt_in_allows_ancestor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    existing = os.environ.get(HALT_TRUSTED_UIDS_ENV, "")
+    monkeypatch.setenv(HALT_TRUSTED_UIDS_ENV, ",".join(filter(None, [existing, str(_FOREIGN_UID)])))
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    _fake_owner(monkeypatch, shared, _FOREIGN_UID)
+
+    signal_dir = shared / "mine"
+    assert _run_cli(["halt", "--system-id", "sys-optin", "--signal-dir", str(signal_dir)]) == 0
+    assert (signal_dir / "acgs-halt-sys-optin").is_file()
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership required")
+def test_cli_halt_invalid_trusted_uids_env_fails_closed_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv(HALT_TRUSTED_UIDS_ENV, "root")
+
+    rc = _run_cli(["halt", "--system-id", "sys-badenv", "--signal-dir", str(tmp_path / "s")])
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert f"invalid {HALT_TRUSTED_UIDS_ENV} value" in err
+    assert "was NOT halted" in err
+
+
+def test_untrusted_env_signal_dir_counts_as_tripped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    signal_dir = tmp_path / "open"
+    signal_dir.mkdir()
+    signal_dir.chmod(0o777)
+    monkeypatch.setenv(HALT_SIGNAL_DIR_ENV, str(signal_dir))
+
+    breaker = GovernanceCircuitBreaker(system_id="sys-untrusted")
+    assert breaker.is_tripped is True
+    with pytest.raises(GovernanceHaltError, match="untrusted signal dir"):
+        breaker.check()
+
+    assert _run_cli(["breaker-status", "--system-id", "sys-untrusted"]) == 1
+    assert _run_cli(["resume", "--system-id", "sys-untrusted"]) == 2
+    out = capsys.readouterr()
+    assert "RESUMED" not in out.out
+    assert "still HALTED" in out.err
+
+    signal_dir.chmod(0o700)
+    assert breaker.is_tripped is False
+
+
+def test_missing_explicit_signal_dir_is_not_tripped(tmp_path: Path) -> None:
+    # An agent may start before `acgs halt` creates the dir.
+    breaker = GovernanceCircuitBreaker(system_id="sys-later", signal_dir=tmp_path / "later")
+    assert breaker.is_tripped is False

@@ -145,7 +145,7 @@ def cmd_halt(args: argparse.Namespace) -> int:
         if problem:
             print(
                 f"error: untrusted halt signal dir: {problem}. "
-                f"Cannot guarantee System '{system_id}' stays halted.",
+                f"System '{system_id}' was NOT halted by this command.",
                 file=sys.stderr,
             )
             return 2
@@ -222,9 +222,10 @@ def cmd_resume(args: argparse.Namespace) -> int:
         return 0
 
     breaker.reset()
-    still_present, entry_error = _signal_entry_state(breaker.signal_path)
-    if still_present:
-        detail = entry_error or "signal file still present"
+    # is_tripped also covers an untrusted signal dir, which reset() cannot clear.
+    if breaker.is_tripped:
+        _present, entry_error = _signal_entry_state(breaker.signal_path)
+        detail = entry_error or breaker.trip_reason or "signal file still present"
         print(
             f"error: failed to remove halt signal {breaker.signal_path}: {detail}. "
             f"System '{system_id}' is still HALTED.",
