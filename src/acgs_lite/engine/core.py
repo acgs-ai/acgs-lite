@@ -262,15 +262,13 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                         if w not in _stopwords4:
                             anchor = w
                             break
+                # The anchor gates the regex, so it must be a literal substring of
+                # every match: a bare word only. Suffixes such as "drop " or
+                # "drop table" missed "please drop" and "drop\ttable", and a word
+                # from one alternation branch misses matches of the other branch.
+                if "|" in pat_str:
+                    anchor = None
                 if anchor:
-                    if re.fullmatch(r"\\b[a-z]+\\b", pat_str, re.IGNORECASE):
-                        anchor = anchor + " "
-                    elif re.fullmatch(r"\\b[a-z]+\.[a-z]+\\b", pat_str, re.IGNORECASE):
-                        anchor = anchor + "-"
-                    elif re.fullmatch(r"\\b[a-z]+\\s\+[a-z]+\\b", pat_str, re.IGNORECASE):
-                        words2 = re.findall(r"[a-z]{2,}", cleaned.lower())
-                        if len(words2) >= 2:
-                            anchor = words2[0] + " " + words2[1]
                     _anchor_patterns[anchor].append((idx, pat))
                 else:
                     _no_anchor_patterns.append((idx, pat))

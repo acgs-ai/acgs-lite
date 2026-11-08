@@ -333,6 +333,19 @@ This is a semver-major change (4.0.0): the production profile of the stable
   `allow` record when the output passes and a `deny` record when the output is finally
   denied, and a `GovernanceHaltError` from the configured intervention engine reaches
   the caller. Regression tests: `tests/test_governed_agent_arun_parity.py`.
+- Tab, newline and carriage-return splices in nested governed values no longer evade
+  `\s+`/`\b` rules. The JSON projection escaped them to the two characters `\t`/`\n`,
+  so `run(..., q="x\nrm -rf /")` (and any nested list/dict/tuple value, bytes value or
+  dict key) never matched `\brm\s+-rf\b`. `governance_payloads_for_enforcement` now
+  returns, after each value's JSON payload, every distinct nested text or key that JSON
+  escapes (tab, newline, CR, `"`, `\`) as raw text, so every entry point
+  (`GovernedAgent.run`/`arun`, `GovernedCallable` issue and sync/async execute, input
+  and output) validates it as written. Multi-line text is still allowed. Separately,
+  the engine's literal pattern prefilter gated `\bdrop\s+table\b` on `"drop table"` and
+  `\bdrop\b` on `"drop "`, so `drop\ttable`, `drop  table` and `please drop` were never
+  matched even as top-level input; anchors are now bare words. A pattern with
+  alternation (`(?:drop|truncate)`) is no longer anchor-gated on a word from one branch;
+  it is always evaluated. Regression tests: `tests/test_governance_whitespace_payloads.py`.
 
 ### Added
 

@@ -32,6 +32,12 @@ def _has_hidden_json_control(text: str) -> bool:
     return _HIDDEN_JSON_CONTROL.search(text) is not None
 
 
+# Characters json.dumps escapes in otherwise-valid text. Inside the JSON blob a tab
+# or newline becomes the two characters ``\t``/``\n``, which defeats ``\s+``/``\b``
+# rules and multi-word keywords, so any text containing one is also validated raw.
+_JSON_ESCAPED_TEXT = re.compile(r'[\t\n\r"\\]')
+
+
 class GovernancePayloadError(ConstitutionalViolationError):
     """A governed payload could not be evaluated in full, so the call is denied."""
 
@@ -158,14 +164,18 @@ class _Projector:
     exhaustion raise :class:`GovernancePayloadError`. Hidden C0 controls in any
     text or key also deny; ordinary tab/newline/carriage-return remain valid.
     There is no skip mode.
+
+    Every text leaf (``str`` value, decoded bytes, dict key) is recorded in
+    ``texts`` so the caller can validate it raw as well as inside the JSON blob.
     """
 
-    __slots__ = ("budget", "index", "path")
+    __slots__ = ("budget", "index", "path", "texts")
 
     def __init__(self, *, index: int, budget: _Budget) -> None:
         self.index = index
         self.budget = budget
         self.path: set[int] = set()
+        self.texts: list[str] = []
 
     def _text(self, value: bytes | bytearray) -> str:
         try:
@@ -175,6 +185,7 @@ class _Projector:
         if _has_hidden_json_control(text):
             # Includes NUL padding used to disguise UTF-16/UTF-32 text.
             raise _unevaluable(value, self.index)
+        self.texts.append(text)
         return text
 
     def project(self, value: Any, depth: int = 0) -> Any:
@@ -186,8 +197,10 @@ class _Projector:
             )
         kind = type(value)
         if value is None or kind is str or kind is int or kind is bool:
-            if kind is str and _has_hidden_json_control(value):
-                raise _unevaluable(value, self.index)
+            if kind is str:
+                if _has_hidden_json_control(value):
+                    raise _unevaluable(value, self.index)
+                self.texts.append(value)
             self.budget.spend(len(value) if kind is str else 1, self.index)
             return value
         if kind is float:
@@ -223,19 +236,25 @@ class _Projector:
                 raise _unevaluable(key, self.index)
             if _has_hidden_json_control(key):
                 raise _unevaluable(key, self.index)
+            self.texts.append(key)
             self.budget.spend(len(key), self.index)
             projected[key] = self.project(dict.__getitem__(mapping, key), depth + 1)
         return projected
 
 
-def _enforcement_payload(value: Any, index: int, *, max_chars: int) -> str | None:
-    """Project one value for enforcement; ``None`` means nothing to evaluate."""
+def _enforcement_payloads(value: Any, index: int, *, max_chars: int) -> list[str]:
+    """Project one value for enforcement; an empty list means nothing to evaluate.
+
+    The first payload is the whole value (raw text, or its JSON blob). It is
+    followed by every distinct text leaf or key whose JSON form differs from its
+    raw form, so whitespace-sensitive rules see ``"drop\\ttable"`` as written.
+    """
     if value is None:
-        return None
+        return []
     if type(value) is str:
         if _has_hidden_json_control(value):
             raise _unevaluable(value, index)
-        return value
+        return [value] if value else []
     projector = _Projector(index=index, budget=_Budget(max_chars))
     try:
         projected = projector.project(value)
@@ -246,12 +265,14 @@ def _enforcement_payload(value: Any, index: int, *, max_chars: int) -> str | Non
         # full, so it denies like any other unevaluable value.
         raise _unevaluable(value, index) from None
     if type(projected) is str:
-        return projected
+        return [projected] if projected else []
     try:
-        return json.dumps(projected, ensure_ascii=False, sort_keys=True, allow_nan=False)
+        blob = json.dumps(projected, ensure_ascii=False, sort_keys=True, allow_nan=False)
     except (TypeError, ValueError):
         # ValueError includes Python's int-to-str digit limit for huge integers.
         raise _unevaluable(value, index) from None
+    leaves = dict.fromkeys(text for text in projector.texts if _JSON_ESCAPED_TEXT.search(text))
+    return [blob, *leaves]
 
 
 def governance_payloads_for_enforcement(
@@ -269,7 +290,9 @@ def governance_payloads_for_enforcement(
     that decode as strict UTF-8 with no NUL (evaluated as text); ``list``;
     ``tuple`` (evaluated as a list); ``dict`` whose keys are all exact ``str``.
     Text and keys containing C0 controls other than tab, newline and carriage
-    return deny: JSON escaping would conceal them from rule matching.
+    return deny: JSON escaping would conceal them from rule matching. Tab,
+    newline, carriage return, ``"`` and ``\\`` stay valid, so any nested text or
+    key containing one is returned again raw, after its value's JSON payload.
 
     Everything else denies with ``GOVERNANCE-PAYLOAD-UNEVALUABLE`` at any depth:
     ``Enum`` members, dataclasses, pydantic models, ``datetime``/``date``/``time``,
@@ -280,20 +303,19 @@ def governance_payloads_for_enforcement(
     e.g. ``model.model_dump(mode="json")``, ``value.isoformat()``, ``str(uuid)``.
     """
     payloads: list[str] = []
-    skipped = 0
+    accounted = 0
     for index, value in enumerate(values):
-        payload = _enforcement_payload(value, index, max_chars=max_chars)
-        if not payload:
-            skipped += 1
-            continue
-        if len(payload) > max_chars:
-            raise GovernancePayloadError(
-                f"governed value #{index} is {len(payload)} characters; the governance "
-                f"payload limit is {max_chars} and oversize payloads are denied, not truncated",
-                rule_id=_OVERSIZE_RULE_ID,
-            )
-        payloads.append(payload)
-    if len(payloads) + skipped != len(values):
+        for payload in _enforcement_payloads(value, index, max_chars=max_chars):
+            if len(payload) > max_chars:
+                raise GovernancePayloadError(
+                    f"governed value #{index} is {len(payload)} characters; the governance "
+                    f"payload limit is {max_chars} and oversize payloads are denied, "
+                    "not truncated",
+                    rule_id=_OVERSIZE_RULE_ID,
+                )
+            payloads.append(payload)
+        accounted += 1
+    if accounted != len(values):
         raise GovernancePayloadError(
             "governed values were not all accounted for", rule_id=_UNEVALUABLE_RULE_ID
         )
