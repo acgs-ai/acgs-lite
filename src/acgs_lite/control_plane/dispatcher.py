@@ -895,12 +895,14 @@ class GovernedToolDispatcher:
         if self._kill_switch_engaged():
             raise self._pre_denial(principal, tool_name, "kill switch engaged")
 
-    def _recheck_credential(self, principal: Principal, tool_name: str, credential: object) -> None:
+    def _recheck_credential(
+        self, principal: Principal, tool_name: str, credential: object, *, group_id: str | None
+    ) -> None:
         """Revalidate after PDP/listener work, immediately before invocation."""
         try:
             self._verify_credential(principal, tool_name, credential)
         except _Denied as exc:
-            raise self._pre_denial(principal, tool_name, str(exc)) from exc
+            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
 
     def authorize_without_consuming(
         self,
@@ -974,7 +976,12 @@ class GovernedToolDispatcher:
         )
         if inspect.iscoroutinefunction(spec.fn):
             raise TypeError(f"tool {tool_name!r} is async; use adispatch()")
-        self._recheck_credential(principal, tool_name, credential)
+        self._recheck_credential(
+            principal,
+            tool_name,
+            credential,
+            group_id=decisions[0].decision_id if decisions else None,
+        )
         self._recheck_kill_switch(principal, tool_name)
         return ToolResult(tool_name, spec.fn(**args), decisions)
 
@@ -1010,7 +1017,12 @@ class GovernedToolDispatcher:
                 trigger_id,
                 admission_sink=admissions,
             )
-            self._recheck_credential(principal, tool_name, credential)
+            self._recheck_credential(
+                principal,
+                tool_name,
+                credential,
+                group_id=decisions[0].decision_id if decisions else None,
+            )
             self._recheck_kill_switch(principal, tool_name)
             return spec, spec.fn(**args), decisions
 
