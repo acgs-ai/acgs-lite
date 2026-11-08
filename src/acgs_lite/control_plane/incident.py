@@ -190,7 +190,12 @@ class IncidentMutationLock:
 
     def _ledger_unresolved(self) -> str | None:
         """The incident id of the PDP ledger's last incident.declare with no
-        later resolve, else ``None``."""
+        later resolve, else ``None``.
+
+        Cross-instance visibility holds only for instances sharing one PDP /
+        receipt ledger (consistent with the single-writer receipt store); an
+        instance with its own ledger never sees another's declare.
+        """
         pdp = self._pdp
         ledger = None if pdp is None else pdp.receipt_ledger
         if ledger is None:
@@ -290,6 +295,12 @@ class IncidentMutationLock:
         except FileNotFoundError:
             if self._ever_declared or self._ledger_open or self._history.exists():
                 raise OSError("incident state file missing after an incident") from None
+            if self._pdp is not None and self._ledger_unresolved() is not None:
+                # Fresh deployment: another instance's declare is receipted but
+                # its state write failed -- the ledger, not the file, decides.
+                raise OSError(
+                    "incident declared in the receipt ledger; state file missing"
+                ) from None
             return None
         state = _parse(json.loads(text))
         self._ever_declared = True

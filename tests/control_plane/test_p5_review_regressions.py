@@ -451,3 +451,25 @@ class TestCommitHoldsIncidentLock:
                 ),
             )
         assert outcome[0].receipt.kind is ReceiptKind.PROMOTION
+
+
+class TestFreshDeploymentDeclareFailure:
+    """Round-2 re-review (HIGH): no state file yet, failed first declare."""
+
+    def test_instance_built_before_declare_denies(
+        self, tmp_path: Path, ledger_pdp: PolicyDecisionPoint, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        declarer = _lock(tmp_path, pdp=ledger_pdp)
+        other = _lock(tmp_path, pdp=ledger_pdp)
+        assert not declarer.state_path.exists()
+        assert other.write_denial(BOB) is None
+
+        def crash(payload: Any) -> None:
+            raise OSError("disk gone")
+
+        monkeypatch.setattr(declarer, "_write", crash)
+        with pytest.raises(OSError):
+            declarer.declare_incident(COMMANDER, "inc-first")
+        assert not declarer.state_path.exists()
+        assert other.write_denial(BOB) is not None
+        assert declarer.write_denial(BOB) is not None
