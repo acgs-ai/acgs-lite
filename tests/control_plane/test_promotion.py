@@ -339,6 +339,7 @@ def _gh_verifier(artifact_fetch: Any = None) -> Any:
         "head_branch": "main",
         "event": "push",
         "repository": {"full_name": "org/repo"},
+        "head_repository": {"full_name": "org/repo"},
     }
     return GitHubActionsRunVerifier(
         lambda path: payload,

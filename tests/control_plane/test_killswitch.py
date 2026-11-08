@@ -82,21 +82,21 @@ class TestKillSwitch:
         switch: KillSwitch,
     ) -> None:
         d, pdp, calls = wired
-        d.dispatch(AGENT, "read", {"path": "workspace/a"})
+        d.dispatch(AGENT, "read", {"path": "workspace/a.txt"})
         switch.engage(ALICE, "incident 42")
         assert switch.signal_path.exists()
         assert "incident 42" in switch.reason
         for tool in ("read", "rm"):
             with pytest.raises(ToolDenied, match="kill switch"):
-                d.dispatch(AGENT, tool, {"path": "workspace/a"})
+                d.dispatch(AGENT, tool, {"path": "workspace/a.txt"})
             with pytest.raises(ToolDenied, match="kill switch"):
-                d.dispatch(ALICE, tool, {"path": "workspace/a"})
-        decision = pdp.decide(DecisionRequest(ALICE, "file.read", "workspace/a", ActionTier.T0))
+                d.dispatch(ALICE, tool, {"path": "workspace/a.txt"})
+        decision = pdp.decide(DecisionRequest(ALICE, "file.read", "workspace/a.txt", ActionTier.T0))
         assert not decision.allowed and decision.error == "kill_switch"
-        assert calls == ["read:workspace/a"]
+        assert calls == ["read:workspace/a.txt"]
         switch.release(ALICE)
         assert not switch.is_engaged()
-        d.dispatch(AGENT, "read", {"path": "workspace/a"})
+        d.dispatch(AGENT, "read", {"path": "workspace/a.txt"})
         assert len(calls) == 2
 
     def test_engaged_by_another_process(
@@ -120,7 +120,7 @@ class TestKillSwitch:
         assert switch.is_engaged()
         assert switch.reason == "remote"
         with pytest.raises(ToolDenied, match="kill switch"):
-            d.dispatch(AGENT, "read", {"path": "workspace/a"})
+            d.dispatch(AGENT, "read", {"path": "workspace/a.txt"})
         assert calls == []
 
     def test_unreadable_state_counts_as_engaged(self, tmp_path: Path) -> None:
@@ -154,7 +154,7 @@ class TestKillSwitch:
         with PolicyDecisionPoint.for_constitution(
             constitution, permit_all, kill_switch=switch
         ) as pdp:
-            request = DecisionRequest(ALICE, "file.read", "workspace/a", ActionTier.T0)
+            request = DecisionRequest(ALICE, "file.read", "workspace/a.txt", ActionTier.T0)
             assert pdp.decide(request).error == "kill_switch"
             d = GovernedToolDispatcher(
                 pdp, permissions=RepositoryPermissions(DEFAULT_IMMUTABLE_CORE), tool_tiers={}

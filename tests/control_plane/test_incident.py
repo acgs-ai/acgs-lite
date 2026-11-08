@@ -166,7 +166,7 @@ class TestDispatcherIncident:
         p5.incident.declare_incident(COMMANDER, "inc-1")
         with pytest.raises(ToolDenied, match="held by nobody"):
             p5.dispatcher.dispatch(AGENT, "write_file", write, **kw)
-        assert p5.dispatcher.dispatch(AGENT, "read_file", {"path": "workspace/a"}).value
+        assert p5.dispatcher.dispatch(AGENT, "read_file", {"path": "workspace/a.txt"}).value
         p5.incident.acquire(BOB, "inc-1", commander=COMMANDER)
         with pytest.raises(ToolDenied, match="held by bob"):
             p5.dispatcher.dispatch(AGENT, "write_file", write, **kw)
@@ -177,7 +177,7 @@ class TestDispatcherIncident:
         p5.incident.state_path.write_text("garbage")
         with pytest.raises(ToolDenied, match="unreadable"):
             p5.dispatcher.dispatch(AGENT, "write_file", write, **kw)
-        assert p5.dispatcher.dispatch(AGENT, "read_file", {"path": "workspace/a"}).value
+        assert p5.dispatcher.dispatch(AGENT, "read_file", {"path": "workspace/a.txt"}).value
 
 
 class TestIncidentHardening:

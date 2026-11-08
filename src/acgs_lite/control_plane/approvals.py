@@ -55,7 +55,7 @@ from acgs_lite.legitimacy.signing import SIGNATURE_ALGORITHM, ReceiptSigner, ver
 
 if TYPE_CHECKING:
     from acgs_lite.control_plane.identity import AdminAttestor
-    from acgs_lite.control_plane.telemetry import TelemetryRecorder
+    from acgs_lite.control_plane.telemetry import OversightEvent, TelemetryRecorder
 
 __all__ = [
     "APPROVAL_SIGNATURE_DOMAIN",
@@ -403,8 +403,10 @@ class ApprovalGate:
         self._consumed: set[tuple[str, str]] = set()
         self._telemetry = telemetry
         self._requested: collections.OrderedDict[str, tuple[float, str]] = collections.OrderedDict()
-        self._resolved: set[str] = set()  # requested hashes whose quorum was consumed
+        self._resolved: set[str] = set()  # quorum consumed or human denied
         self.telemetry_failures = 0
+        if telemetry is not None:
+            self._telemetry_call(telemetry.store.subscribe, self._observe_approval_denial)
 
     @property
     def authority(self) -> ApprovalAuthority:
@@ -472,6 +474,20 @@ class ApprovalGate:
             with self._lock:
                 self.telemetry_failures += 1
 
+    def _observe_approval_denial(self, event: OversightEvent) -> None:
+        """Resolve telemetry cycles only; a denial never changes authorization."""
+        from acgs_lite.control_plane.telemetry import ApprovalDenied
+
+        if not isinstance(event, ApprovalDenied):
+            return
+        with self._lock:
+            current = self._requested.get(event.action_hash)
+            if current is None or event.at < current[0]:
+                return
+            if event.cycle_id is not None and event.cycle_id != current[1]:
+                return
+            self._resolved.add(event.action_hash)
+
     def _evict_one(self) -> None:
         """Drop the oldest resolved request; only if none is resolved, the
         oldest pending one (lock held).
@@ -490,7 +506,7 @@ class ApprovalGate:
     def note_approval_requested(
         self, action_hash: str, *, principal_kind: PrincipalKind | None = None
     ) -> tuple[float, str] | None:
-        """Record one pending approval cycle; start another after consumption."""
+        """Record one pending cycle; start another after consumption or human denial."""
         telemetry = self._telemetry
         if telemetry is None or not isinstance(action_hash, str) or not action_hash:
             return None

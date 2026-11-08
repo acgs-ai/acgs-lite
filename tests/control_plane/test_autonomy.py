@@ -134,9 +134,9 @@ class TestErrorBudget:
                 d.dispatch(AGENT, "write", {"path": target})
         assert autonomy.level(AGENT) is AutonomyLevel.P0_ONLY
         with pytest.raises(ToolDenied, match="P0_ONLY"):
-            d.dispatch(AGENT, "write", {"path": "workspace/a"})
-        d.dispatch(AGENT, "read", {"path": "workspace/a"})
-        assert calls == ["read:workspace/a"]
+            d.dispatch(AGENT, "write", {"path": "workspace/a.txt"})
+        d.dispatch(AGENT, "read", {"path": "workspace/a.txt"})
+        assert calls == ["read:workspace/a.txt"]
 
     def test_humans_are_not_demoted(self) -> None:
         autonomy = AutonomyController(ErrorBudget(max_failures=1, max_rollbacks=1))
@@ -156,7 +156,7 @@ class TestLevels:
         switch.engage(ALICE, "freeze")
         assert autonomy.level(AGENT) is AutonomyLevel.SUSPENDED
         with pytest.raises(ToolDenied, match="suspended"):
-            d.dispatch(AGENT, "read", {"path": "workspace/a"})
+            d.dispatch(AGENT, "read", {"path": "workspace/a.txt"})
         assert calls == []
 
     def test_level_errors_suspend(self, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -6,6 +6,7 @@ was allowed (or the configuration was silently accepted).
 
 from __future__ import annotations
 
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -478,6 +479,80 @@ class TestOpaqueSubclassBoundary:
 
 
 class TestFinalReviewBoundaries:
+    def test_workflow_and_make_gate_scripts_are_protected(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        callers = [root / "Makefile", *(root / ".github/workflows").glob("*.yml")]
+        scripts = {
+            path
+            for caller in callers
+            for path in re.findall(r"scripts/[A-Za-z0-9_/-]+\.py", caller.read_text())
+        }
+        assert scripts
+        assert all(DEFAULT_IMMUTABLE_CORE.is_core(path) for path in scripts)
+
+    def test_policy_read_permit_does_not_fold_path_case(self, constitution: Constitution) -> None:
+        policy = PolicySet.from_mapping(
+            {
+                "version": 1,
+                "statements": [
+                    {
+                        "id": "read",
+                        "effect": "permit",
+                        "actions": ["file.read"],
+                        "resources": ["workspace/alice/**"],
+                    }
+                ],
+            }
+        )
+        with PolicyDecisionPoint.for_constitution(constitution, policy) as pdp:
+            assert pdp.decide(
+                DecisionRequest(AGENT, "file.read", "workspace/alice/file.txt", ActionTier.T0)
+            ).allowed
+            assert not pdp.decide(
+                DecisionRequest(AGENT, "file.read", "workspace/ALICE/file.txt", ActionTier.T0)
+            ).allowed
+
+    @pytest.mark.parametrize("character_class", ["[!0-9]", "[.-0]"])
+    def test_negated_glob_class_cannot_cross_directory(self, character_class: str) -> None:
+        permissions = RepositoryPermissions(
+            DEFAULT_IMMUTABLE_CORE,
+            [
+                WriteGrant(
+                    AGENT.id, PrincipalKind.AGENT, (f"workspace/report{character_class}*.txt",)
+                )
+            ],
+        )
+        assert permissions.can_write(AGENT, "workspace/report.final.txt")
+        assert not permissions.can_write(AGENT, "workspace/report/private.txt")
+
+    @pytest.mark.parametrize("directory", ["workspace", "policies", "workspace/sub.txt"])
+    def test_recursive_reads_cannot_reach_sensitive_children(
+        self, constitution: Constitution, permit_all: PolicySet, tmp_path: Path, directory: str
+    ) -> None:
+        target = tmp_path / directory
+        target.mkdir(parents=True)
+        (target / ".env").write_text("secret")
+        registry = DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
+        calls: list[str] = []
+
+        def read_tree(path: str) -> list[str]:
+            calls.append(path)
+            return [p.read_text() for p in (tmp_path / path).rglob("*") if p.is_file()]
+
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, registry=registry
+        ) as pdp:
+            dispatcher = GovernedToolDispatcher(
+                pdp,
+                permissions=RepositoryPermissions(registry),
+                tool_tiers={"read_tree": ActionTier.T0},
+                read_only_tools=frozenset({"read_tree"}),
+            )
+            dispatcher.register("read_tree", read_tree, path_params={"path"}, merge_capable=False)
+            with pytest.raises(ToolDenied):
+                dispatcher.dispatch(AGENT, "read_tree", {"path": directory})
+        assert calls == []
+
     @pytest.mark.parametrize("absolute", [False, True])
     def test_parent_segments_cannot_create_outside_grant(
         self, constitution: Constitution, permit_all: PolicySet, tmp_path: Path, absolute: bool
@@ -524,6 +599,11 @@ class TestFinalReviewBoundaries:
             "src/acgs_lite/evals/schema.py",
             "src/acgs_lite/evals/report.py",
             "scripts/check_critical_coverage.py",
+            "scripts/release_candidate.py",
+            "scripts/qualify_wheel.py",
+            "scripts/run_governance_regression.py",
+            "scripts/check_links.py",
+            "tests/red_team/governance_fail_closed_cases.py",
             "Makefile",
         ],
     )
@@ -607,7 +687,11 @@ class TestFinalReviewBoundaries:
         dispatcher = GovernedToolDispatcher(
             pdp, permissions=_permissions(), tool_tiers={"thread_id": ActionTier.T1}
         )
-        dispatcher.register("thread_id", lambda: threading.get_ident(), merge_capable=False)
+
+        def thread_id() -> int:
+            return threading.get_ident()
+
+        dispatcher.register("thread_id", thread_id, merge_capable=False)
         result = await dispatcher.adispatch(AGENT, "thread_id", {})
         assert result.value != threading.get_ident()
 

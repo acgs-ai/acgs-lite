@@ -297,6 +297,7 @@ class TestSuccessPredicate:
         payload = {
             "id": 1,
             "repository": {"full_name": "acgs-ai/acgs-lite"},
+            "head_repository": {"full_name": "acgs-ai/acgs-lite"},
             "status": "completed",
             "conclusion": "success",
             "head_sha": "a" * 40,

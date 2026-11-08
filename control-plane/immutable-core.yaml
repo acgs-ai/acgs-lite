@@ -59,6 +59,11 @@ categories:
   - .pre-commit-config.yaml
   - Makefile
   - scripts/check_critical_coverage.py
+  - scripts/check_links.py
+  - scripts/qualify_wheel.py
+  - scripts/release_candidate.py
+  - scripts/run_governance_regression.py
+  - tests/red_team/governance_fail_closed_cases.py
   control_plane:
   - control-plane/**
   - pyproject.toml

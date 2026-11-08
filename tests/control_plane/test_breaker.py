@@ -419,16 +419,16 @@ class TestDispatcherIntegration:
         calls: list[str] = []
         breaker, rec, _ = _setup(BreakerPolicy(max_rollbacks=1, cohort_suspension=False))
         d = _dispatcher(pdp, breaker, calls)
-        d.dispatch(AGENT, "write", {"path": "workspace/a"}, trigger_id="loop-a")
+        d.dispatch(AGENT, "write", {"path": "workspace/a.txt"}, trigger_id="loop-a")
         rec.record_rollback("loop-a", "c1", agent=AGENT)
         for tool in ("write", "read"):  # T0 reads too: the trigger is suspended
             with pytest.raises(ToolDenied, match="autonomous mode suspended"):
-                d.dispatch(AGENT, tool, {"path": "workspace/b"}, trigger_id="loop-a")
+                d.dispatch(AGENT, tool, {"path": "workspace/b.txt"}, trigger_id="loop-a")
         d.dispatch(OTHER, "write", {"path": "workspace/c"}, trigger_id="loop-x")
         d.dispatch(ALICE, "write", {"path": "workspace/d"}, trigger_id="loop-a")
         d.dispatch(ALICE, "write", {"path": "workspace/e"})
         assert calls == [
-            "write:workspace/a",
+            "write:workspace/a.txt",
             "write:workspace/c",
             "write:workspace/d",
             "write:workspace/e",
@@ -444,7 +444,7 @@ class TestDispatcherIntegration:
         rec.record_rollback("loop-a", "c1")  # unattributed
         for fresh in ("fresh-1", "loop-x"):
             with pytest.raises(ToolDenied, match="not bound to principal"):
-                d.dispatch(AGENT, "write", {"path": "workspace/x"}, trigger_id=fresh)
+                d.dispatch(AGENT, "write", {"path": "workspace/x.txt"}, trigger_id=fresh)
         assert calls == []
 
     def test_h1_cohort_suspension_covers_all_bound_triggers(self, pdp: PolicyDecisionPoint) -> None:
@@ -453,7 +453,7 @@ class TestDispatcherIntegration:
         d = _dispatcher(pdp, breaker, calls)
         rec.record_rollback("loop-a", "c1")
         with pytest.raises(ToolDenied, match="cohort sys-a suspended"):
-            d.dispatch(AGENT, "write", {"path": "workspace/x"}, trigger_id="loop-b")
+            d.dispatch(AGENT, "write", {"path": "workspace/x.txt"}, trigger_id="loop-b")
         d.dispatch(OTHER, "write", {"path": "workspace/y"}, trigger_id="loop-x")  # sys-b
         assert calls == ["write:workspace/y"]
 
@@ -467,15 +467,15 @@ class TestDispatcherIntegration:
         breaker, rec, _ = _setup(BreakerPolicy(max_rollbacks=1, cohort_suspension=False))
         d = _dispatcher(pdp, breaker, calls, credential_issuer=issuer, require_credential=True)
         token = issuer.issue(AGENT, scopes=["tool:write"], trigger_id="loop-a").token
-        d.dispatch(AGENT, "write", {"path": "workspace/a"}, credential=token)  # uses loop-a
+        d.dispatch(AGENT, "write", {"path": "workspace/a.txt"}, credential=token)  # uses loop-a
         with pytest.raises(ToolDenied, match="does not match the credential session"):
             d.dispatch(
-                AGENT, "write", {"path": "workspace/b"}, credential=token, trigger_id="loop-b"
+                AGENT, "write", {"path": "workspace/b.txt"}, credential=token, trigger_id="loop-b"
             )
         rec.record_rollback("loop-a", "c1")
         with pytest.raises(ToolDenied, match="autonomous mode suspended"):
             d.dispatch(AGENT, "write", {"path": "workspace/c"}, credential=token)
-        assert calls == ["write:workspace/a"]
+        assert calls == ["write:workspace/a.txt"]
         with pytest.raises(CredentialIssuanceRefused):
             issuer.issue(AGENT, scopes=["tool:write"], requester=AGENT, trigger_id="loop-b")
         with pytest.raises(CredentialIssuanceRefused):
@@ -487,24 +487,24 @@ class TestDispatcherIntegration:
         calls: list[str] = []
         breaker, rec, _ = _setup(BreakerPolicy(max_rollbacks=1, cohort_suspension=False))
         d = _dispatcher(pdp, breaker, calls)
-        d.dispatch(SVC, "read", {"path": "workspace/x"}, trigger_id="loop-a")
+        d.dispatch(SVC, "read", {"path": "workspace/x.txt"}, trigger_id="loop-a")
         with pytest.raises(ToolDenied, match="must name its trigger_id"):
-            d.dispatch(SVC, "read", {"path": "workspace/x"})
+            d.dispatch(SVC, "read", {"path": "workspace/x.txt"})
         rec.record_rollback("loop-a", "c1")
         with pytest.raises(ToolDenied, match="autonomous mode suspended"):
-            d.dispatch(SVC, "read", {"path": "workspace/x"}, trigger_id="loop-a")
-        assert calls == ["read:workspace/x"]
+            d.dispatch(SVC, "read", {"path": "workspace/x.txt"}, trigger_id="loop-a")
+        assert calls == ["read:workspace/x.txt"]
 
     def test_agent_must_name_a_valid_trigger(self, pdp: PolicyDecisionPoint) -> None:
         calls: list[str] = []
         breaker, _, _ = _setup()
         d = _dispatcher(pdp, breaker, calls)
         with pytest.raises(ToolDenied, match="must name its trigger_id"):
-            d.dispatch(AGENT, "read", {"path": "workspace/a"})
+            d.dispatch(AGENT, "read", {"path": "workspace/a.txt"})
         with pytest.raises(ToolDenied, match="invalid trigger_id"):
-            d.dispatch(AGENT, "read", {"path": "workspace/a"}, trigger_id="<script>")
+            d.dispatch(AGENT, "read", {"path": "workspace/a.txt"}, trigger_id="<script>")
         with pytest.raises(ToolDenied, match="must name its trigger_id"):
-            d.authorize_without_consuming(AGENT, "read", {"path": "workspace/a"})
+            d.authorize_without_consuming(AGENT, "read", {"path": "workspace/a.txt"})
         assert calls == []
 
     def test_l1_dry_run_does_not_burn_the_probe(self, pdp: PolicyDecisionPoint) -> None:
@@ -517,7 +517,7 @@ class TestDispatcherIntegration:
         clock.now += 11
         for _ in range(3):
             d.authorize_without_consuming(
-                AGENT, "read", {"path": "workspace/x"}, trigger_id="loop-a"
+                AGENT, "read", {"path": "workspace/x.txt"}, trigger_id="loop-a"
             )
         assert breaker.state("loop-a") is BreakerState.HALF_OPEN
         d.dispatch(AGENT, "write", {"path": "workspace/p0"}, trigger_id="loop-a")  # the probe
@@ -542,11 +542,11 @@ class TestDispatcherIntegration:
         rec.record_rollback("loop-a", "c1")
         clock.now += 11
         with pytest.raises(ToolDenied, match="cohort sys-a suspended"):  # other trigger
-            d.dispatch(AGENT, "write", {"path": "workspace/b"}, trigger_id="loop-b")
-        d.dispatch(AGENT, "write", {"path": "workspace/a"}, trigger_id="loop-a")  # the probe
+            d.dispatch(AGENT, "write", {"path": "workspace/b.txt"}, trigger_id="loop-b")
+        d.dispatch(AGENT, "write", {"path": "workspace/a.txt"}, trigger_id="loop-a")  # the probe
         with pytest.raises(ToolDenied, match="cohort sys-a suspended"):
-            d.dispatch(AGENT, "write", {"path": "workspace/b"}, trigger_id="loop-b")
-        assert calls == ["write:workspace/a"]
+            d.dispatch(AGENT, "write", {"path": "workspace/b.txt"}, trigger_id="loop-b")
+        assert calls == ["write:workspace/a.txt"]
 
     @pytest.mark.parametrize("presented", [None, "sys-zzz"])
     def test_m1_changing_system_id_does_not_escape_cohort(
@@ -561,9 +561,9 @@ class TestDispatcherIntegration:
         rec.record_rollback("loop-a", "c1")
         alias = Principal("agent-1", PrincipalKind.AGENT, system_id=presented)
         with pytest.raises(ToolDenied, match="not bound to principal"):
-            d.dispatch(alias, "write", {"path": "workspace/x"}, trigger_id="loop-b")
+            d.dispatch(alias, "write", {"path": "workspace/x.txt"}, trigger_id="loop-b")
         with pytest.raises(ToolDenied, match="cohort sys-a suspended"):
-            d.dispatch(AGENT, "write", {"path": "workspace/x"}, trigger_id="loop-b")
+            d.dispatch(AGENT, "write", {"path": "workspace/x.txt"}, trigger_id="loop-b")
         assert calls == []
 
     def test_m1_conflicting_pin_refused(self) -> None:
@@ -601,7 +601,7 @@ class TestDispatcherIntegration:
             return "ok"
 
         d.register("write", write, path_params={"path"}, merge_capable=False)
-        d.dispatch(AGENT, "write", {"path": "workspace/a"})  # identity sys-a recorded
+        d.dispatch(AGENT, "write", {"path": "workspace/a.txt"})  # identity sys-a recorded
         rec.record_rollback("loop-a", "c1")  # unattributed -> cohort sys-a demoted
         for alias in (
             Principal("agent-1", PrincipalKind.AGENT),
@@ -609,8 +609,8 @@ class TestDispatcherIntegration:
         ):
             assert autonomy.level(alias) is AutonomyLevel.P0_ONLY
             with pytest.raises(ToolDenied, match="P0_ONLY"):
-                d.dispatch(alias, "write", {"path": "workspace/b"})
-        assert calls == ["workspace/a"]
+                d.dispatch(alias, "write", {"path": "workspace/b.txt"})
+        assert calls == ["workspace/a.txt"]
 
     def test_m1_dispatcher_enforces_the_breakers_demotions(self, pdp: PolicyDecisionPoint) -> None:
         calls: list[str] = []
@@ -623,14 +623,14 @@ class TestDispatcherIntegration:
         d = _dispatcher(pdp, breaker, calls)  # no autonomy= of its own
         # agent-1 is pinned to system None here, so as sys-a it is unbound...
         with pytest.raises(ToolDenied, match="not bound to principal"):
-            d.dispatch(AGENT, "write", {"path": "workspace/a"}, trigger_id="loop-a")
+            d.dispatch(AGENT, "write", {"path": "workspace/a.txt"}, trigger_id="loop-a")
         # ...but the controller has seen it as sys-a (e.g. under another harness).
         assert autonomy.level(AGENT) is AutonomyLevel.T1_PREAUTHORIZED
-        d.dispatch(nosys, "write", {"path": "workspace/a"}, trigger_id="loop-b")
+        d.dispatch(nosys, "write", {"path": "workspace/a.txt"}, trigger_id="loop-b")
         rec.record_rollback("loop-a", "c1")  # unattributed -> cohort sys-a demoted
         with pytest.raises(ToolDenied, match="P0_ONLY"):
-            d.dispatch(nosys, "write", {"path": "workspace/b"}, trigger_id="loop-b")
-        assert calls == ["write:workspace/a"]
+            d.dispatch(nosys, "write", {"path": "workspace/b.txt"}, trigger_id="loop-b")
+        assert calls == ["write:workspace/a.txt"]
 
     def test_m1_credential_signs_system_id(self, pdp: PolicyDecisionPoint) -> None:
         calls: list[str] = []
@@ -642,9 +642,9 @@ class TestDispatcherIntegration:
         for presented in (None, "sys-zzz"):
             alias = Principal("agent-1", PrincipalKind.AGENT, system_id=presented)
             with pytest.raises(ToolDenied, match="another system_id"):
-                d.dispatch(alias, "write", {"path": "workspace/x"}, credential=credential.token)
-        d.dispatch(AGENT, "write", {"path": "workspace/x"}, credential=credential.token)
-        assert calls == ["write:workspace/x"]
+                d.dispatch(alias, "write", {"path": "workspace/x.txt"}, credential=credential.token)
+        d.dispatch(AGENT, "write", {"path": "workspace/x.txt"}, credential=credential.token)
+        assert calls == ["write:workspace/x.txt"]
         unscoped = Principal("agent-7", PrincipalKind.AGENT)
         token = issuer.issue(unscoped, scopes=["tool:write"]).token
         assert (
@@ -655,11 +655,11 @@ class TestDispatcherIntegration:
         calls: list[str] = []
         breaker, rec, _ = _setup(BreakerPolicy(max_rollbacks=1))
         d = _dispatcher(pdp, breaker, calls)
-        await d.adispatch(AGENT, "read", {"path": "workspace/a"}, trigger_id="loop-a")
+        await d.adispatch(AGENT, "read", {"path": "workspace/a.txt"}, trigger_id="loop-a")
         rec.record_rollback("loop-a", "c1")
         with pytest.raises(ToolDenied):
-            await d.adispatch(AGENT, "read", {"path": "workspace/a"}, trigger_id="loop-a")
-        assert calls == ["read:workspace/a"]
+            await d.adispatch(AGENT, "read", {"path": "workspace/a.txt"}, trigger_id="loop-a")
+        assert calls == ["read:workspace/a.txt"]
 
     def test_breaker_type_checked(self, pdp: PolicyDecisionPoint) -> None:
         with pytest.raises(TypeError):
@@ -689,5 +689,48 @@ class TestEndToEnd:
         assert breaker.state("loop-a") is BreakerState.OPEN
         assert autonomy.level(AGENT) is AutonomyLevel.P0_ONLY
         with pytest.raises(ToolDenied):
-            d.dispatch(AGENT, "read", {"path": "workspace/a"}, trigger_id="loop-a")
+            d.dispatch(AGENT, "read", {"path": "workspace/a.txt"}, trigger_id="loop-a")
         assert calls == []
+
+
+def test_unscoped_principal_cannot_switch_to_sibling_trigger(pdp: PolicyDecisionPoint) -> None:
+    agent = Principal("agent-1", PrincipalKind.AGENT)
+    unrelated = Principal("agent-9", PrincipalKind.AGENT)
+    registry = TriggerRegistry()
+    registry.bind(ALICE, "loop-a", principals=[agent])
+    registry.bind(ALICE, "loop-b", principals=[agent])
+    registry.bind(ALICE, "loop-x", principals=[unrelated])
+    breaker, rec, clock = _setup(BreakerPolicy(max_rollbacks=1, cooldown_s=10), registry=registry)
+    calls: list[str] = []
+    dispatcher = _dispatcher(pdp, breaker, calls)
+    rec.record_rollback("loop-a", "trip")
+    with pytest.raises(ToolDenied, match="principal.*suspended"):
+        dispatcher.dispatch(agent, "write", {"path": "workspace/blocked"}, trigger_id="loop-b")
+    dispatcher.dispatch(unrelated, "write", {"path": "workspace/unrelated"}, trigger_id="loop-x")
+    clock.now += 11
+    dispatcher.dispatch(agent, "write", {"path": "workspace/probe"}, trigger_id="loop-a")
+    assert breaker.status("loop-a").probes == 1
+    with pytest.raises(ToolDenied, match="principal.*suspended"):
+        dispatcher.dispatch(agent, "write", {"path": "workspace/blocked"}, trigger_id="loop-b")
+    breaker.reset(ALICE, "loop-a")
+    dispatcher.dispatch(agent, "write", {"path": "workspace/resumed"}, trigger_id="loop-b")
+    assert calls == [
+        "write:workspace/unrelated",
+        "write:workspace/probe",
+        "write:workspace/resumed",
+    ]
+
+
+def test_unscoped_cohort_suspension_can_be_disabled(pdp: PolicyDecisionPoint) -> None:
+    agent = Principal("agent-1", PrincipalKind.AGENT)
+    registry = TriggerRegistry()
+    for trigger in ("loop-a", "loop-b"):
+        registry.bind(ALICE, trigger, principals=[agent])
+    breaker, rec, _ = _setup(
+        BreakerPolicy(max_rollbacks=1, cohort_suspension=False), registry=registry
+    )
+    calls: list[str] = []
+    dispatcher = _dispatcher(pdp, breaker, calls)
+    rec.record_rollback("loop-a", "trip")
+    dispatcher.dispatch(agent, "write", {"path": "workspace/allowed"}, trigger_id="loop-b")
+    assert calls == ["write:workspace/allowed"]

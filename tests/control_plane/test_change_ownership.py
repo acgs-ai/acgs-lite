@@ -36,6 +36,14 @@ def test_branch_name() -> None:
     assert branch_for(AGENT, "c1") == "agent/agent-1/c1"
 
 
+def test_worktree_containment_preserves_case_without_repo_root() -> None:
+    owners = ChangeOwnershipRegistry(DEFAULT_IMMUTABLE_CORE, admin=ADMIN)
+    owners.assign(ADMIN, "c1", AGENT, "workspace/A")
+    owners.assert_writer(AGENT, "c1", "workspace/A/payload.md")
+    with pytest.raises(OwnershipDenied, match="outside"):
+        owners.assert_writer(AGENT, "c1", "workspace/a/payload.md")
+
+
 def test_owner_inside_worktree(owners: ChangeOwnershipRegistry) -> None:
     ownership = owners.assert_writer(AGENT, "c1", f"{WT}/prompts/a.md", branch="agent/agent-1/c1")
     assert ownership.worktree_root == WT
