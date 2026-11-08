@@ -681,6 +681,7 @@ class TestFinalReviewBoundaries:
             "scripts/subprocess.cpython-310-x86_64-linux-gnu.so",
             "tests/red_team/governance_fail_closed_cases.py",
             "Makefile",
+            "requirements-test-optional.txt",
         ],
     )
     def test_real_grader_and_gate_files_are_core(self, pdp: PolicyDecisionPoint, path: str) -> None:

@@ -576,6 +576,8 @@ DEFAULT_IMMUTABLE_CORE = ImmutableCoreRegistry(
             ".gitlab-ci.yml",
             ".pre-commit-config.yaml",
             "Makefile",
+            # CI installs this input; requirement entries can execute build code.
+            "requirements-test-optional.txt",
             # Directly executed trusted scripts put this directory first on
             # sys.path. Sibling modules, packages and native extensions can
             # replace any dependency imported by a release or validation gate.
