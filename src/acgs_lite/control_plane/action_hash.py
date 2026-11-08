@@ -35,7 +35,7 @@ __all__ = [
 
 ACTION_HASH_DOMAIN = b"acgs-control-plane-action-v1\x00"
 _ATTRIBUTES_DOMAIN = b"acgs-control-plane-action-attributes-v1\x00"
-_ARGUMENTS_DOMAIN = b"acgs-control-plane-tool-arguments-v1\x00"
+_ARGUMENTS_DOMAIN = b"acgs-control-plane-tool-arguments-v2\x00"
 MAX_CANONICAL_DEPTH = 32
 _SUB_REQUEST_ACTIONS = frozenset({"file.read", "file.write"})
 
@@ -73,15 +73,24 @@ def _canonical_value(value: object, depth: int = 0) -> object:
             for k, v in value.items()
         ]
         return {"$map": sorted(items, key=canonical_json)}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list):
         return [_canonical_value(item, depth + 1) for item in value]
+    if isinstance(value, tuple):
+        return {"$tuple": [_canonical_value(item, depth + 1) for item in value]}
     if isinstance(value, (set, frozenset)):
-        return {"$set": sorted((_canonical_value(i, depth + 1) for i in value), key=canonical_json)}
+        tag = "$frozenset" if isinstance(value, frozenset) else "$set"
+        return {tag: sorted((_canonical_value(i, depth + 1) for i in value), key=canonical_json)}
     raise TypeError(f"unsupported argument type {type(value).__name__}")
 
 
 def arguments_digest(arguments: Mapping[str, Any]) -> str:
-    """Digest of tool arguments (str/bytes/numbers/None, lists, sets, mappings)."""
+    """Digest of tool arguments, preserving list/tuple and set/frozenset identity.
+
+    Tuples and frozensets have distinct tags because invocation preserves
+    these types. Mappings are tagged separately, so user keys cannot imitate
+    a container tag. The v2 domain invalidates approvals made with the older,
+    ambiguous container encoding; those approvals must be issued again.
+    """
     return _sha256(_ARGUMENTS_DOMAIN, canonical_json(_canonical_value(dict(arguments))))
 
 
