@@ -245,3 +245,40 @@ def test_cli_halt_uses_trip_result(
     captured = capsys.readouterr()
     assert "HALTED" not in captured.out
     assert "failed to write halt signal file" in captured.err
+
+
+@needs_uid
+def test_signal_entry_owner_trusts_same_uids_as_dir_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    breaker = GovernanceCircuitBreaker("sys-trusted-uid", signal_dir=tmp_path)
+    breaker.signal_path.write_text("halted")
+    foreign = os.lstat(breaker.signal_path).st_uid + 1
+    _foreign_lstat(monkeypatch, breaker.signal_path)
+    assert "owned by uid" in (_signal_entry_problem(breaker.signal_path) or "")
+
+    existing = os.environ.get(HALT_TRUSTED_UIDS_ENV, "")
+    monkeypatch.setenv(HALT_TRUSTED_UIDS_ENV, ",".join(filter(None, [existing, str(foreign)])))
+    assert _signal_entry_problem(breaker.signal_path) is None
+
+    monkeypatch.setenv(HALT_TRUSTED_UIDS_ENV, "not-a-uid")
+    assert "invalid" in (_signal_entry_problem(breaker.signal_path) or "")
+
+
+@needs_uid
+def test_trip_refuses_untrusted_signal_dir(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    signal_dir = tmp_path / "shared"
+    signal_dir.mkdir()
+    signal_dir.chmod(0o777)  # world-writable without the sticky bit
+    breaker = GovernanceCircuitBreaker("sys-untrusted-dir", signal_dir=signal_dir)
+
+    with caplog.at_level(logging.CRITICAL, logger=_LOGGER):
+        assert breaker.trip("operator halt") is False
+
+    assert _critical(caplog, "untrusted halt signal dir")
+    assert list(signal_dir.iterdir()) == [], "no signal is written into an untrusted dir"
+    assert breaker.is_tripped
+    with pytest.raises(GovernanceHaltError):
+        breaker.check()

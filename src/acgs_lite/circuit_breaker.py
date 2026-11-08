@@ -126,6 +126,12 @@ def _signal_dir_problem(path: Path) -> str | None:
     return None
 
 
+def _trusted_uids(uid: int) -> set[int]:
+    """Our uid, root and the ``ACGS_HALT_TRUSTED_UIDS`` opt-ins; ValueError if invalid."""
+    extra = os.environ.get(HALT_TRUSTED_UIDS_ENV, "")
+    return {uid, 0, *(int(v) for v in extra.split(",") if v.strip())}
+
+
 def _signal_dir_ancestors_problem(path: Path, uid: int) -> str | None:
     """Check that no other user can rename or replace an ancestor of ``path``.
 
@@ -134,10 +140,9 @@ def _signal_dir_ancestors_problem(path: Path, uid: int) -> str | None:
     group/world-writable without the sticky bit.
     """
     try:
-        extra = os.environ.get(HALT_TRUSTED_UIDS_ENV, "")
-        trusted = {uid, 0, *(int(v) for v in extra.split(",") if v.strip())}
+        trusted = _trusted_uids(uid)
     except ValueError:
-        return f"invalid {HALT_TRUSTED_UIDS_ENV} value: {extra!r}"
+        return f"invalid {HALT_TRUSTED_UIDS_ENV} value: {os.environ.get(HALT_TRUSTED_UIDS_ENV)!r}"
     try:
         resolved = Path(os.path.realpath(path, strict=True))
         pending = [*path.parents, *resolved.parents]
@@ -186,12 +191,29 @@ def _signal_entry_state(path: Path) -> tuple[bool, str | None]:
     return True, None
 
 
+def _entry_owner_problem(owner_uid: int) -> str | None:
+    """Return why a signal entry owned by ``owner_uid`` is untrusted, or None.
+
+    Trusts the same uids as the signal dir ancestor check (our uid, root and
+    ``ACGS_HALT_TRUSTED_UIDS``). Skipped where ``os.getuid`` is unavailable.
+    """
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:
+        return None
+    try:
+        trusted = _trusted_uids(getuid())
+    except ValueError:
+        return f"invalid {HALT_TRUSTED_UIDS_ENV} value: {os.environ.get(HALT_TRUSTED_UIDS_ENV)!r}"
+    if owner_uid not in trusted:
+        return f"owned by uid {owner_uid}, not a trusted uid"
+    return None
+
+
 def _signal_entry_problem(path: Path) -> str | None:
     """Return why ``path`` is not a trusted halt signal file, or None if it is.
 
-    Trusted means: a regular file (not followed through a symlink) owned by the
-    current user or root. Ownership is not checked where ``os.getuid`` is
-    unavailable (Windows).
+    Trusted means: a regular file (not followed through a symlink) owned by a
+    trusted uid (see :func:`_entry_owner_problem`).
     """
     try:
         entry = os.lstat(path)
@@ -199,9 +221,9 @@ def _signal_entry_problem(path: Path) -> str | None:
         return f"cannot inspect halt signal {path}: {exc}"
     if not stat.S_ISREG(entry.st_mode):
         return f"halt signal {path} is not a regular file"
-    getuid = getattr(os, "getuid", None)
-    if getuid is not None and entry.st_uid not in (getuid(), 0):
-        return f"halt signal {path} is owned by uid {entry.st_uid}, not {getuid()} or root"
+    owner_problem = _entry_owner_problem(entry.st_uid)
+    if owner_problem:
+        return f"halt signal {path} is {owner_problem}"
     return None
 
 
@@ -374,8 +396,14 @@ class GovernanceCircuitBreaker:
 
     def _publish_signal(self, reason: str) -> bool:
         """Atomically write the cross-process signal file; False (CRITICAL) on failure."""
-        present, entry_error = _signal_entry_state(self.signal_path)
-        problem = entry_error or (_signal_entry_problem(self.signal_path) if present else None)
+        # A signal in an untrusted dir can be removed by another user, so it is
+        # never a durable halt; this process stays halted in memory.
+        problem = self._untrusted_dir()
+        if problem:
+            problem = f"untrusted halt signal dir: {problem}"
+        else:
+            present, entry_error = _signal_entry_state(self.signal_path)
+            problem = entry_error or (_signal_entry_problem(self.signal_path) if present else None)
         if problem:
             # A planted entry may be removed by its owner at any time, so it is
             # not a durable halt, and it is never overwritten or trusted.
@@ -502,11 +530,11 @@ class GovernanceCircuitBreaker:
             if not stat.S_ISREG(entry.st_mode):
                 os.close(fd)
                 return "halted (signal entry is not a regular file)"
-            getuid = getattr(os, "getuid", None)
-            if getuid is not None and entry.st_uid not in (getuid(), 0):
+            owner_problem = _entry_owner_problem(entry.st_uid)
+            if owner_problem:
                 # Still halted (fail closed), but a foreign entry's text is not trusted.
                 os.close(fd)
-                return f"halted (signal entry is owned by uid {entry.st_uid})"
+                return f"halted (signal entry is {owner_problem})"
             with os.fdopen(fd, "rb") as fh:
                 text = fh.read(_SIGNAL_READ_LIMIT).decode("utf-8", "replace").strip()
             return text or "halted"
