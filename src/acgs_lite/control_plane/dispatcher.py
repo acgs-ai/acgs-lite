@@ -1025,6 +1025,11 @@ class GovernedToolDispatcher:
         except CredentialInvalid as exc:
             raise _Denied(f"credential rejected: {exc}") from exc
 
+    def is_async(self, tool_name: str) -> bool:
+        """True if *tool_name* is a registered coroutine function."""
+        spec = self._tools.get(tool_name)
+        return spec is not None and inspect.iscoroutinefunction(spec.fn)
+
     @staticmethod
     def _resolve_requested_by(
         principal: Principal,
@@ -1041,6 +1046,15 @@ class GovernedToolDispatcher:
             ):
                 raise _Denied("requested_by does not match the credential session")
             requested_by = session.on_behalf_of
+        if (
+            session is not None
+            and session.on_behalf_of is None
+            and principal.kind is PrincipalKind.AGENT
+            and tier >= APPROVAL_GATE_MIN_TIER
+        ):
+            # A credentialed agent's requester must come from the issuing
+            # session; a caller-supplied value could name an approver.
+            raise _Denied("credential is not bound to an original requester (on_behalf_of)")
         if principal.kind is PrincipalKind.AGENT and tier >= APPROVAL_GATE_MIN_TIER:
             # TODO(control-plane-gap): without require_credential the original
             # requester is caller-asserted; it should always be bound from the

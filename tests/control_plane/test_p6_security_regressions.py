@@ -344,8 +344,8 @@ ENTRY_POINTS: dict[str, str] = {
     "grant_capability": "roles.py:RoleAssignments.grant_capability",
     "revoke_capability": "roles.py:RoleAssignments._is_admin",
     "roles_assign": "roles.py:RoleAssignments._is_admin",
-    "ownership_assign": "change_ownership.py:ChangeOwnershipRegistry.assign",
-    "ownership_release": "change_ownership.py:ChangeOwnershipRegistry.release",
+    "ownership_assign": "change_ownership.py:ChangeOwnershipRegistry._require_admin",
+    "ownership_release": "change_ownership.py:ChangeOwnershipRegistry._require_admin",
     "runbook_revoke": "runbook.py:RunbookRegistry.revoke",
     "runbook_approve": "runbook.py:RunbookRegistry.approve",
     "autonomy_restore": "autonomy.py:AutonomyController.restore",
@@ -445,6 +445,24 @@ ALLOWLIST: dict[str, str] = {
     "directory-checked SERVICE harness as recorder",
     "telemetry.py:TelemetryRecorder._agent_fields": "kind of the subject agent of an event",
     "telemetry.py:OversightMetrics.override_rate": "metrics segmentation over recorded events",
+    # PR #237-#241 review fixes (kind checks that only narrow, never grant):
+    "breaker.py:TriggerRegistry.is_bound": "pins the subject's system on non-human cohort "
+    "admission; grants nothing",
+    "change_ownership.py:ChangeOwnershipRegistry.__init__": "construction: validates the "
+    "configured admin (the facade passes the directory admin)",
+    "dispatcher.py:GovernedToolDispatcher._autonomy_check": "harness admission over the "
+    "attested dispatcher principal (as in _authorize)",
+    "dispatcher.py:GovernedToolDispatcher._final_admission": "post-PDP re-admission of the "
+    "attested dispatcher principal; can only deny",
+    "iam.py:RepositoryPermissions.has_unrestricted_write": "IAM grant lookup (grant kind == "
+    "principal kind); narrows shell access",
+    "incident.py:IncidentMutationLock.heartbeat": "liveness only: matches the recorded "
+    "commander (HUMAN) or holder (id + kind); grants no authority",
+    "receipt_verify.py:_two_person_problems": "verifies the signed receipt's approver kinds "
+    "(T3 two-person rule)",
+    "receipts.py:ApproverRef.__post_init__": "field validation of a receipt approver",
+    "roles.py:RoleAssignments.has_role": "compares the stored assignee's kind with the "
+    "queried principal (subject); can only deny",
 }
 
 # The 7 spellings of a kind check the detector must catch (re-review probe).

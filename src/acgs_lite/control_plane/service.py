@@ -29,6 +29,7 @@ No object serialisation format other than JSON is used anywhere here.
 
 from __future__ import annotations
 
+import asyncio
 import collections
 import contextlib
 import json
@@ -60,6 +61,8 @@ __all__ = [
     "DEFAULT_MAX_DENIALS_PER_UID",
     "DEFAULT_RESERVED_HUMAN_SLOTS",
     "DEFAULT_MAX_FRAME_BYTES",
+    "DEFAULT_MAX_REPLY_BYTES",
+    "RESULT_TOO_LARGE",
     "REQUEST_KEYS",
     "SERVICE_AUDIT_PATH",
     "ControlPlaneService",
@@ -74,6 +77,9 @@ __all__ = [
 # is small; an idle or trickling agent must not pin a thread; one uid must not
 # starve another; agents must not lock humans out); tune them.
 DEFAULT_MAX_FRAME_BYTES = 64 * 1024
+# A reply larger than this is replaced by RESULT_TOO_LARGE (the tool ran).
+DEFAULT_MAX_REPLY_BYTES = DEFAULT_MAX_FRAME_BYTES
+RESULT_TOO_LARGE = "result too large (the tool ran)"
 DEFAULT_CONNECTION_TIMEOUT_S = 30.0
 DEFAULT_MAX_CONNECTIONS = 64
 DEFAULT_MAX_CONNECTIONS_PER_UID = 16
@@ -194,10 +200,14 @@ def _positive(value: object, label: str, *, integral: bool) -> float:
 
 
 def _safe_ancestor(info: os.stat_result) -> bool:
-    """Not writable by group/other, or a sticky root-owned directory (``/tmp``)."""
-    if not info.st_mode & 0o022:
+    """A sticky root-owned directory (``/tmp``), or one owned by root or the
+    service uid that group/other cannot write. The owner of any other
+    ancestor could rename the socket directory and plant its own listener."""
+    if info.st_mode & stat.S_ISVTX and info.st_uid == 0:
         return True
-    return bool(info.st_mode & stat.S_ISVTX) and info.st_uid == 0
+    if info.st_mode & 0o022:
+        return False
+    return info.st_uid in (0, os.getuid())
 
 
 def _trusted_symlink(link: Path, info: os.stat_result) -> bool:
@@ -253,11 +263,16 @@ def _prepare_directory(directory: Path, group: int | None) -> None:
     for ancestor in [real, *real.parents] if missing else list(real.parents):
         if not _safe_ancestor(os.lstat(ancestor)):
             raise ControlPlaneServiceError(
-                f"socket directory ancestor {str(ancestor)!r} is writable by others"
+                f"socket directory ancestor {str(ancestor)!r} is writable or owned by others"
             )
     for path in reversed(missing):
         os.mkdir(path, 0o700)
         os.chmod(path, 0o700)  # explicitly: the umask must not decide
+        if group is not None:
+            # Every created level must be traversable by the socket group,
+            # not only the last one.
+            os.chown(path, -1, group)
+            os.chmod(path, 0o710)
     info = os.lstat(directory)
     if not stat.S_ISDIR(info.st_mode):
         raise ControlPlaneServiceError(f"socket directory {str(directory)!r} is not a directory")
@@ -341,6 +356,7 @@ class ControlPlaneService:
         uid_kinds: Mapping[int, frozenset[PrincipalKind]],
         *,
         max_frame_bytes: int = DEFAULT_MAX_FRAME_BYTES,
+        max_reply_bytes: int = DEFAULT_MAX_REPLY_BYTES,
         connection_timeout_s: float = DEFAULT_CONNECTION_TIMEOUT_S,
         max_connections: int = DEFAULT_MAX_CONNECTIONS,
         max_connections_per_uid: int = DEFAULT_MAX_CONNECTIONS_PER_UID,
@@ -359,6 +375,7 @@ class ControlPlaneService:
         self._cp = control_plane
         self._uid_kinds = _checked_uid_kinds(uid_kinds)
         self._max_frame = int(_positive(max_frame_bytes, "max_frame_bytes", integral=True))
+        self._max_reply = int(_positive(max_reply_bytes, "max_reply_bytes", integral=True))
         self._timeout = _positive(connection_timeout_s, "connection_timeout_s", integral=False)
         self._max_connections = int(_positive(max_connections, "max_connections", integral=True))
         self._max_per_uid = int(
@@ -644,6 +661,17 @@ class ControlPlaneService:
             raise PermissionError(f"peer uid may not act as kind {entry.kind.value!r} (uid_kinds)")
         return entry.principal(), credential.credential_id
 
+    def _denial_budget_exhausted(self, uid: int) -> bool:
+        """Peek (without spending) whether *uid* has used its denial budget."""
+        now = time.monotonic()
+        with self._lock:
+            window = self._denials.get(uid)
+            if window is None:
+                return False
+            while window and window[0] <= now - self._denial_window:
+                window.popleft()
+            return len(window) >= self._max_denials
+
     def _denial_allowed(self, uid: int) -> bool:
         """Sliding-window budget of receipted authentication denials per uid,
         so one uid cannot spam fsyncs or crowd out other uids' receipts."""
@@ -688,6 +716,11 @@ class ControlPlaneService:
             system_id=principal.system_id,
         )
 
+        if self._denial_budget_exhausted(uid):
+            # Checked *before* dispatch: an exhausted uid must not cause more
+            # PDP decisions, receipts, audit fsyncs or telemetry.
+            return _encode({"id": request_id, "ok": False, "error": "rate limited"}), True
+
         def intent(decisions: tuple[Decision, ...]) -> None:
             # Attribution is durable *before* the tool runs; a failure here
             # denies the call (the dispatcher never invokes the tool).
@@ -696,14 +729,21 @@ class ControlPlaneService:
                 raise OSError("intent record not written")
 
         try:
-            result = self._cp.dispatcher.dispatch(
+            call = (
                 principal,
                 tool,
                 request.get("arguments", {}),
-                credential=request["credential"],
-                requested_by=request.get("requested_by"),
-                on_authorized=intent,
             )
+            options: dict[str, Any] = {
+                "credential": request["credential"],
+                "requested_by": request.get("requested_by"),
+                "on_authorized": intent,
+            }
+            if self._cp.dispatcher.is_async(tool):
+                # Decided before authorization, so nothing is consumed twice.
+                result = asyncio.run(self._cp.dispatcher.adispatch(*call, **options))
+            else:
+                result = self._cp.dispatcher.dispatch(*call, **options)
         except ToolDenied as exc:
             if not self._denial_allowed(uid):
                 # Over the per-uid denial budget: the PDP receipt exists, but
@@ -719,16 +759,33 @@ class ControlPlaneService:
         try:
             reply = _encode({"id": request_id, "ok": True, "result": result.value})
         except (TypeError, ValueError):
-            self._audit_record(
+            if not self._audit_record(
                 record,
                 phase="failed",
                 ok=False,
                 reason="result not JSON-serialisable",
                 decision_id=decision_id,
-            )
+            ):
+                return _encode(
+                    {"id": request_id, "ok": False, "error": "executed_unaudited"}
+                ), False
             return _encode(
                 {"id": request_id, "ok": False, "error": "result not serialisable"}
             ), False
+        if len(reply) > self._max_reply:
+            # The stock client drops frames over its limit and would report a
+            # connection failure for a call that DID run: say so instead.
+            if not self._audit_record(
+                record,
+                phase="failed",
+                ok=False,
+                reason="result too large for the client frame limit",
+                decision_id=decision_id,
+            ):
+                return _encode(
+                    {"id": request_id, "ok": False, "error": "executed_unaudited"}
+                ), False
+            return _encode({"id": request_id, "ok": False, "error": RESULT_TOO_LARGE}), False
         if not self._audit_record(record, phase="completed", ok=True, decision_id=decision_id):
             # The tool ran (the intent line attributes it); tell the client
             # not to retry blindly.

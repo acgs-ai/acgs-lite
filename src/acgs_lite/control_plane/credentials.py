@@ -306,6 +306,19 @@ class CredentialIssuer:
             if requester is not None and requester.kind is PrincipalKind.AGENT:
                 raise CredentialIssuanceRefused("an agent may not name its own requester")
             self._check_obo(obo, requester)
+        if (
+            obo is None
+            and requester is not None
+            and requester.kind is PrincipalKind.HUMAN
+            and requester_credential is not None
+            and requester.canonical_id != principal.canonical_id
+        ):
+            # A human requester who authenticates is always the bound original
+            # requester (attested below); leaving it unbound would let a caller
+            # name another. Unproven requesters stay unbound, and the
+            # dispatcher refuses unbound credentials for agent T2+ calls.
+            obo = requester.canonical_id
+            self._check_obo(obo, requester)
         if trigger_id is not None:
             if not isinstance(trigger_id, str) or not _TRIGGER_ID.fullmatch(trigger_id):
                 raise CredentialIssuanceRefused("trigger_id must match [A-Za-z0-9._:/@+-]{1,256}")
@@ -313,6 +326,10 @@ class CredentialIssuer:
                 raise CredentialIssuanceRefused("an agent may not choose its own trigger")
         # Every input is validated before the requester credential is spent.
         ttl = self._validated_ttl(scope_set, ttl_s)
+        if self._token_size_bound(principal, scope_set, obo, trigger_id) > MAX_TOKEN_CHARS:
+            raise CredentialIssuanceRefused(
+                f"credential would exceed {MAX_TOKEN_CHARS} characters (too many/long scopes)"
+            )
         if (
             self._identity is not None
             and requester is not None
@@ -380,6 +397,33 @@ class CredentialIssuer:
             label = "admin-scope " if admin else ""
             raise CredentialIssuanceRefused(f"{label}ttl_s must be in (0, {cap}]")
         return float(ttl)
+
+    def _token_size_bound(
+        self,
+        principal: Principal,
+        scope_set: frozenset[str],
+        obo: str | None,
+        trigger_id: str | None,
+    ) -> int:
+        """Upper bound of the token _mint would produce (same claims; the
+        variable-width numbers at their widest), so issuance never returns a
+        token authenticate() rejects."""
+        payload: dict[str, Any] = {
+            "cid": "0" * 32,
+            "pid": principal.canonical_id,
+            "knd": principal.kind.value,
+            "scopes": sorted(scope_set),
+            "iat": -1.0e300,
+            "exp": -1.0e300,
+            "epoch": 10**18,
+            "obo": obo,
+        }
+        if trigger_id is not None:
+            payload["trg"] = trigger_id
+        if principal.system_id is not None:
+            payload["sys"] = principal.system_id
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return len(_b64encode(raw)) + 1 + len(self._mac(raw))
 
     def _mint(
         self,

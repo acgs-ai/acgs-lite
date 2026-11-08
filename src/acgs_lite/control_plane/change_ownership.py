@@ -121,8 +121,8 @@ class ChangeOwnershipRegistry:
         *,
         admin_credential: str | None = None,
     ) -> ChangeOwnership:
-        self._require_admin(admin, "assigns")
         self._attest(admin, admin_credential)
+        self._require_admin(admin, "assigns")
         if not isinstance(writer, Principal):
             raise OwnershipDenied("writer must be a Principal")
         if not isinstance(change_id, str) or not _CHANGE_ID.fullmatch(change_id):
@@ -148,8 +148,8 @@ class ChangeOwnershipRegistry:
     def release(
         self, admin: Principal, change_id: str, *, admin_credential: str | None = None
     ) -> bool:
-        self._require_admin(admin, "releases")
         self._attest(admin, admin_credential)
+        self._require_admin(admin, "releases")
         with self._lock:
             return self._changes.pop(change_id, None) is not None
 
