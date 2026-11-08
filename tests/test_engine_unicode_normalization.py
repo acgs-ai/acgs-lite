@@ -34,6 +34,7 @@ OBFUSCATED_DELETE = [
     pytest.param(f"please de{ZWJ}le{ZWJ}te the records", id="zwj"),
     pytest.param(f"please dele{SHY}te the records", id="soft-hyphen"),
     pytest.param(f"please ｄｅ{ZWSP}ｌｅ{SHY}ｔｅ the records", id="mixed"),
+    pytest.param("please del\x00ete the records", id="nul"),
 ]
 
 # Default_Ignorable_Code_Point values outside category Cf, which NFKC keeps.
@@ -138,6 +139,8 @@ class TestNormalizeForMatching:
 
     def test_ascii_hidden_controls_dropped_whitespace_kept(self) -> None:
         assert normalize_for_matching("de\x00l\x01e\x1bt\x7fe") == "delete"
+        assert normalize_for_matching("d\x0be\x0cl\x1ce\x1dt\x1ee\x1f") == "delete"
+        assert normalize_for_matching("dé\x85lete") == "délete"
         assert normalize_for_matching("a\tb\nc\rd") == "a\tb\nc\rd"
         assert normalize_for_matching("dé\x00lete") == "délete"
 
@@ -226,7 +229,13 @@ class TestEngineValidate:
 
     @pytest.mark.parametrize(
         "action",
-        ["please del\x00ete the records", "please de\x01lete the records", "dele\x7fte it"],
+        [
+            "please del\x00ete the records",
+            "please de\x01lete the records",
+            "dele\x7fte it",
+            "please de\x1clete the records",
+            "please de\x0blete the records",
+        ],
     )
     @pytest.mark.parametrize("runtime_filtered", [False, True])
     def test_ascii_control_spliced_keyword_denied(

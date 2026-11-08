@@ -72,8 +72,9 @@ def normalize_for_matching(text: str) -> str:
     Default_Ignorable_Code_Point (variation selectors, the combining grapheme
     joiner, Hangul fillers), all of which NFKC keeps and none of which render.
     Other combining marks are kept, so accented text is not folded.
-    Non-whitespace control characters (category ``Cc``, e.g. NUL, DEL) are
-    dropped too, so ``del\\x00ete`` matches ``delete``; tab and newline stay.
+    Control characters (category ``Cc``, e.g. NUL, DEL, vertical tab, the
+    \\x1c-\\x1f separators) are dropped too, so ``del\\x00ete`` matches
+    ``delete``; only tab, newline and carriage return are kept.
     ASCII text without such controls is returned unchanged: it is NFKC-stable.
     """
     if text.isascii():
@@ -82,7 +83,7 @@ def normalize_for_matching(text: str) -> str:
     return "".join(c for c in folded if not _is_hidden_char(c))
 
 
-_ASCII_HIDDEN_CONTROL_RE = re.compile(r"[\x00-\x08\x0e-\x1b\x7f]")
+_ASCII_HIDDEN_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def _has_ascii_control(text: str) -> bool:
@@ -93,7 +94,7 @@ def _is_hidden_char(c: str) -> bool:
     if ord(c) in _DEFAULT_IGNORABLE:
         return True
     category = unicodedata.category(c)
-    return category == "Cf" or (category == "Cc" and not c.isspace())
+    return category == "Cf" or (category == "Cc" and c not in "\t\n\r")
 
 
 def _is_plain_ascii(text: str) -> bool:
