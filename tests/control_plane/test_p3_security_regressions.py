@@ -316,6 +316,55 @@ class TestL10DryRunIsNamedAsSuch:
 
 
 class TestKillSwitchToctouAndPaths:
+    @pytest.mark.parametrize("mode", ["sync", "async_sync", "async_coroutine"])
+    @pytest.mark.parametrize("invalidation", ["expiry", "revoke", "principal_revoke"])
+    async def test_listener_invalidated_credential_never_invokes_tool(
+        self, constitution: Constitution, permit_all: PolicySet, mode: str, invalidation: str
+    ) -> None:
+        now = [1000.0]
+        issuer = CredentialIssuer(clock=lambda: now[0])
+        credential = issuer.issue(AGENT, scopes={"tool:w"}, ttl_s=1)
+        calls: list[str] = []
+
+        def invalidate(decision: Any) -> None:
+            if decision.allowed:
+                if invalidation == "expiry":
+                    now[0] += 2
+                elif invalidation == "revoke":
+                    issuer.revoke(credential.credential_id)
+                else:
+                    issuer.revoke_principal(AGENT.id)
+
+        def write(path: str) -> None:
+            calls.append(path)
+
+        async def awrite(path: str) -> None:
+            calls.append(path)
+
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, listeners=[invalidate]
+        ) as point:
+            dispatcher = GovernedToolDispatcher(
+                point,
+                permissions=_permissions(),
+                tool_tiers={"w": ActionTier.T1},
+                credential_issuer=issuer,
+                require_credential=True,
+            )
+            dispatcher.register(
+                "w", awrite if mode == "async_coroutine" else write, path_params={"path"}
+            )
+            with pytest.raises(ToolDenied, match="credential"):
+                if mode == "sync":
+                    dispatcher.dispatch(
+                        AGENT, "w", {"path": "workspace/a"}, credential=credential.token
+                    )
+                else:
+                    await dispatcher.adispatch(
+                        AGENT, "w", {"path": "workspace/a"}, credential=credential.token
+                    )
+        assert calls == []
+
     @pytest.mark.parametrize("expire", [False, True])
     async def test_async_body_rechecks_halt_after_worker_returns(
         self,
