@@ -219,9 +219,13 @@ def test_callback_reassignment_denial_preserves_credential(pdp):
     issuer = CredentialIssuer()
     credential = issuer.issue(A, scopes={"tool:write"})
     calls = []
+
+    def write(path):
+        calls.append(path)
+
     d, owners = setup(
         pdp,
-        lambda path: calls.append(path),
+        write,
         credential_issuer=issuer,
         require_credential=True,
     )
