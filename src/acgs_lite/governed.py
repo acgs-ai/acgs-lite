@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import heapq
 import hmac
 import inspect
 import logging
@@ -944,6 +945,7 @@ class GovernedCallable:
         # the ledger: a signed receipt executes only on the instance that issued it.
         # Weak callable refs, so the issuer never keeps an abandoned grant's target alive.
         self._signed_grants: dict[str, _IssuedSignedGrant] = {}
+        self._signed_grant_deadlines: list[tuple[float, str]] = []
         # Grant ids between registry verification and ledger consume; never pruned.
         self._signed_grants_reserved: dict[str, int] = {}
         self._signed_grants_lock = threading.Lock()
@@ -1123,13 +1125,23 @@ class GovernedCallable:
     def _register_signed_grant(self, grant_id: str, issued: _IssuedSignedGrant) -> None:
         now = time.monotonic()
         with self._signed_grants_lock:
-            for stale in [
-                gid
-                for gid, entry in self._signed_grants.items()
-                if gid not in self._signed_grants_reserved and self._prunable(entry, gid, now)
-            ]:
-                del self._signed_grants[stale]
+            while self._signed_grant_deadlines and self._signed_grant_deadlines[0][0] < now:
+                _, stale = heapq.heappop(self._signed_grant_deadlines)
+                entry = self._signed_grants[stale]
+                if stale not in self._signed_grants_reserved and self._prunable(entry, stale, now):
+                    del self._signed_grants[stale]
+                    continue
+                # In-flight attempts remain recoverable. Revisit at most once per
+                # TTL; settled attempts retain their exact recovery deadline.
+                settled_at = self._ledger.settled_at_for_grant(stale)
+                retry_at = (
+                    max(entry.deadline, settled_at) + self.grant_ttl_seconds
+                    if settled_at is not None and stale not in self._signed_grants_reserved
+                    else now + self.grant_ttl_seconds
+                )
+                heapq.heappush(self._signed_grant_deadlines, (max(now, retry_at), stale))
             self._signed_grants[grant_id] = issued
+            heapq.heappush(self._signed_grant_deadlines, (issued.deadline, grant_id))
 
     def _prunable(self, entry: _IssuedSignedGrant, grant_id: str, now: float) -> bool:
         """Whether a registry entry can be dropped without losing anything executable.
@@ -1794,6 +1806,8 @@ class GovernedCallable:
                         raise LegitimacyInvariantError(
                             "invocation binding mismatch: arguments changed after authorization"
                         )
+                    if self._circuit_breaker is not None:
+                        self._circuit_breaker.check()
                     execution_started = True
                     result = await func(*args, **kwargs)
                     for output_payload in governance_payloads_for_enforcement(result):
@@ -1878,6 +1892,8 @@ class GovernedCallable:
                         raise LegitimacyInvariantError(
                             "invocation binding mismatch: arguments changed after authorization"
                         )
+                    if self._circuit_breaker is not None:
+                        self._circuit_breaker.check()
                     execution_started = True
                     result = func(*args, **kwargs)
                     for output_payload in governance_payloads_for_enforcement(result):
