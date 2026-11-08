@@ -1045,7 +1045,10 @@ class TestIntegration:
         )
 
         # 2. Create governed agent
+        calls: list[str] = []
+
         def assistant(input: str) -> str:
+            calls.append(input)
             return f"I can help with: {input}"
 
         agent = GovernedAgent(
@@ -1060,9 +1063,11 @@ class TestIntegration:
         r1 = agent.run("What is the weather?", governance_action="execute")
         assert r1 == "I can help with: What is the weather?"
 
-        # 4. Run violating action (non-strict, so doesn't raise)
-        r2 = agent.run("Should I invest in crypto?", governance_action="execute")
-        assert r2 == "I can help with: Should I invest in crypto?"
+        # 4. A blocking violation denies even with strict=False; the agent never runs
+        with pytest.raises(ConstitutionalViolationError) as exc_info:
+            agent.run("Should I invest in crypto?", governance_action="execute")
+        assert exc_info.value.rule_id == "SAFE-001"
+        assert calls == ["What is the weather?"]
 
         # 5. Check audit trail
         stats = agent.stats
