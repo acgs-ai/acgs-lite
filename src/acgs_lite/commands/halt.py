@@ -14,6 +14,7 @@ Constitutional Hash: 608508a9bd224290
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import stat
 import sys
@@ -21,6 +22,7 @@ from pathlib import Path
 
 from acgs_lite.circuit_breaker import (
     HALT_SIGNAL_DIR_ENV,
+    HALT_TRUSTED_UIDS_ENV,
     GovernanceCircuitBreaker,
     _signal_dir_problem,
     _signal_entry_state,
@@ -28,7 +30,8 @@ from acgs_lite.circuit_breaker import (
 
 _SIGNAL_DIR_HELP = (
     f"Directory for the cross-process halt signal file "
-    f"(default: ${HALT_SIGNAL_DIR_ENV}, else the system temp directory)"
+    f"(default: ${HALT_SIGNAL_DIR_ENV}, else the system temp directory). "
+    "Pre-create directories beneath symlink prefixes; automatic creation refuses symlinks."
 )
 
 _SOURCE_LABELS = {
@@ -123,6 +126,51 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     )
 
 
+def _create_signal_dir(path: Path) -> None:
+    """Create missing directories only through opened, trusted parents.
+
+    Existing paths retain the normal symlink-ancestor trust checks. Creation
+    deliberately refuses symlink prefixes: provision those paths separately.
+    """
+    if os.path.lexists(path):
+        return
+    if (
+        os.open not in os.supports_dir_fd
+        or not hasattr(os, "O_NOFOLLOW")
+        or not hasattr(os, "O_DIRECTORY")
+    ):
+        raise OSError("secure directory creation unavailable; pre-create the signal directory")
+    extra = os.environ.get(HALT_TRUSTED_UIDS_ENV, "")
+    try:
+        trusted = {os.getuid(), 0, *(int(value) for value in extra.split(",") if value.strip())}
+    except ValueError as exc:
+        raise OSError(f"invalid {HALT_TRUSTED_UIDS_ENV} value: {extra!r}") from exc
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent = Path(path.anchor)
+    descriptor = os.open(parent, flags)
+    try:
+        for component in path.parts[1:]:
+            info = os.fstat(descriptor)
+            if info.st_uid not in trusted:
+                raise OSError(f"signal dir ancestor {parent} is owned by uid {info.st_uid}")
+            if info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX:
+                raise OSError(
+                    f"signal dir ancestor {parent} is group/world-writable without the sticky bit"
+                )
+            try:
+                child = os.open(component, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                # A concurrent creator still must pass O_NOFOLLOW below.
+                with contextlib.suppress(FileExistsError):
+                    os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                child = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+            parent /= component
+    finally:
+        os.close(descriptor)
+
+
 def cmd_halt(args: argparse.Namespace) -> int:
     """Halt all governed agents for a system."""
     system_id: str = args.system_id
@@ -167,12 +215,7 @@ def cmd_halt(args: argparse.Namespace) -> int:
         return 0
 
     try:
-        # Create each missing component 0700 (mkdir(parents=True) would give
-        # intermediates the umask default, which the ancestor check may reject).
-        signal_dir = breaker.signal_dir
-        missing = [d for d in (signal_dir, *signal_dir.parents) if not os.path.lexists(d)]
-        for directory in reversed(missing):
-            directory.mkdir(mode=0o700, exist_ok=True)
+        _create_signal_dir(breaker.signal_dir)
     except OSError as exc:
         print(
             f"error: cannot create halt signal dir {breaker.signal_dir}: {exc}. "
