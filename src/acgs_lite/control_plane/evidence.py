@@ -657,7 +657,9 @@ class GitHubActionsRunVerifier:
     ``/repos/{owner}/{repo}/actions/runs/{id}``. A run is valid only if it
     is a completed, successful run of an allow-listed workflow file
     (``path``), branch (``head_branch``) and event in ``repository``, for the
-    ref's required ``head_sha``. Any missing field or exception -> invalid.
+    ref's required ``head_sha``. ``head_repository.full_name`` must also match
+    the configured repository; fork heads are not trusted origin evidence.
+    Any missing field or exception -> invalid.
 
     The run payload carries no artifact digest, so the verifier attests one
     (``attests_artifact_digest``) only when constructed with
@@ -714,11 +716,17 @@ class GitHubActionsRunVerifier:
             if not isinstance(payload, Mapping):
                 return invalid("run payload is not a JSON object")
             repo = payload.get("repository")
+            head_repo = payload.get("head_repository")
             checks: tuple[tuple[bool, str], ...] = (
                 (str(payload.get("id")) == ref.run_id, "run id mismatch"),
                 (
                     isinstance(repo, Mapping) and repo.get("full_name") == self._repository,
                     "repository mismatch",
+                ),
+                (
+                    isinstance(head_repo, Mapping)
+                    and head_repo.get("full_name") == self._repository,
+                    "head repository mismatch or missing origin",
                 ),
                 (payload.get("status") == "completed", f"run status is {payload.get('status')!r}"),
                 (
