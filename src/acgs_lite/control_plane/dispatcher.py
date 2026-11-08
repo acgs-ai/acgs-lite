@@ -807,5 +807,11 @@ class GovernedToolDispatcher:
 
         value, decisions = await asyncio.to_thread(invoke)
         if inspect.isawaitable(value):
+            try:
+                self._recheck_kill_switch(principal, tool_name)
+            except BaseException:
+                if inspect.iscoroutine(value):
+                    value.close()
+                raise
             value = await value
         return ToolResult(tool_name, value, decisions)
