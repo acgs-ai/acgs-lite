@@ -151,8 +151,9 @@ class ControlPlaneReceipt:
     """One link of the receipt chain. Build with :meth:`create`.
 
     ``ledger_id`` names the chain (a verifier rejects mixed chains);
-    ``candidate_digest`` is the artifact a PROMOTION receipt promotes and
-    every promotion evidence ref must carry it as ``artifact_digest``.
+    ``candidate_digest`` identifies the artifact certified by a promotion or
+    allowed success claim; every evidence ref must independently attest it
+    as ``artifact_digest``.
     ``origin`` says which code path asserted the content (see
     :data:`RECEIPT_ORIGINS`); only ``pdp``/``promotion_gate`` receipts with a
     ``principal_kind`` attribute the decision to a principal.

@@ -44,6 +44,7 @@ from acgs_lite.control_plane.evidence import (
     DEFAULT_EVIDENCE_POLICY,
     EvidencePolicy,
     ExternalRunRef,
+    _check_digest,
     parse_external_runs,
     require_audit_store_path,
 )
@@ -476,6 +477,18 @@ class ReceiptLedger:
             or self._policy.is_success_claim(decision.action)
             or (attributes is not None and attributes.get("claims_success") is True)
         )
+        if claims_success and candidate_digest is None and attributes is not None:
+            candidate = attributes.get("candidate_digest")
+            if candidate is not None:
+                try:
+                    # Use the same strict digest validation as external run refs.
+                    candidate_digest = _check_digest(candidate, "candidate_digest")
+                except (ValueError, TypeError) as exc:
+                    if decision.allowed:
+                        raise ReceiptEmissionError(
+                            "malformed candidate_digest on success claim"
+                        ) from exc
+                    logger.warning("dropping malformed candidate_digest from deny receipt")
         with self._lock:
             try:
                 head = (
