@@ -19,7 +19,9 @@ then requires, in order:
    command token may resolve to an immutable-core path;
 3. for write tools: no *directory-like* path outside the scratch prefixes
    while the registry has unanchored (``**/``) patterns, because deleting a
-   parent directory deletes the core files beneath it;
+   parent directory deletes the core files beneath it. Existing directories
+   and symlinks are not exempt even in scratch; OS confinement is still
+   required to prevent filesystem changes racing these checks;
 4. PDP permits for a ``tool.call`` decision (``attributes["paths"]`` = the
    declared paths plus every string leaf, at any depth, that classifies as
    core) and for one ``file.write`` (or ``file.read`` for read-only tools)
@@ -124,8 +126,8 @@ def _string_leaves(value: Any, out: list[str], depth: int = 0) -> None:
     elif value_type is bytes:
         try:
             out.append(value.decode("utf-8"))
-        except UnicodeDecodeError:
-            return
+        except UnicodeDecodeError as exc:
+            raise _Denied("byte arguments must be valid UTF-8 for path inspection") from exc
     elif any(value_type is scalar for scalar in _SCALARS):
         return
     elif value_type is dict:
@@ -276,11 +278,21 @@ class GovernedToolDispatcher:
         # A host that permits ordinary file updates binds a repository root
         # so the existing target can be checked before authorization.
         root = self._registry.repo_root
-        return root is None or not os.path.isfile(posixpath.join(root, normalized))
+        if root is None:
+            return True
+        target = posixpath.join(root, normalized)
+        return os.path.islink(target) or not os.path.isfile(target)
 
     def _in_scratch(self, raw: str) -> bool:
         normalized = self._registry.normalize(raw)
         if normalized is None:
+            return False
+        # Scratch prefixes still contain globally protected names (.env,
+        # conftest.py, etc.). Never exempt an existing directory or symlink:
+        # a recursive operation could mutate protected descendants. Traversal
+        # is not proof of confinement, so leave directory mutations denied.
+        target = posixpath.join(self._registry.repo_root or os.getcwd(), normalized)
+        if os.path.isdir(target) or os.path.islink(target):
             return False
         candidate = normalized.lower() + "/"
         return any(candidate.startswith(prefix) for prefix in self._scratch_prefixes)
@@ -475,10 +487,14 @@ class GovernedToolDispatcher:
     ) -> ToolResult:
         """Authorise (off the event loop) then invoke a sync or async tool."""
         approver_tuple = tuple(approvers)
-        spec, args, decisions = await asyncio.to_thread(
-            self._authorize, principal, tool_name, arguments, approver_tuple
-        )
-        value = spec.fn(**args)
+
+        def invoke() -> tuple[Any, tuple[Decision, ...]]:
+            # Keep authorization adjacent to invocation in the worker, rather
+            # than queueing a separately scheduled synchronous call afterward.
+            spec, args, decisions = self._authorize(principal, tool_name, arguments, approver_tuple)
+            return spec.fn(**args), decisions
+
+        value, decisions = await asyncio.to_thread(invoke)
         if inspect.isawaitable(value):
             value = await value
         return ToolResult(tool_name, value, decisions)

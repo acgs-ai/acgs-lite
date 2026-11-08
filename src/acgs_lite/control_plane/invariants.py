@@ -150,9 +150,6 @@ def _all_core_categories(ctx: DecisionContext) -> frozenset[CoreCategory]:
     if ctx.core_category is None:
         return frozenset()
     request = ctx.request
-    namespace = request.action.split(".", 1)[0].lower() if "." in request.action else ""
-    if namespace in ACTION_NAMESPACE_CATEGORIES:
-        return frozenset({ctx.core_category})
     return frozenset({ctx.core_category}) | ctx.registry.categories(request.resource)
 
 
