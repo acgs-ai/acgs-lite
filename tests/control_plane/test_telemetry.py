@@ -1053,3 +1053,45 @@ def test_legacy_denials_match_latest_unambiguous_cycle() -> None:
     rec.record_approval_requested(h("b"), cycle_id="overlap-b", at=3000)
     rec.record_approval_denied(h("b"), reviewer, at=3010)
     assert metrics.approval_latency().pending == 2
+
+
+@pytest.mark.parametrize("explicit_cycle", [False, True])
+@pytest.mark.parametrize("persisted", [False, True])
+def test_denied_cycle_allows_fresh_request(
+    approval_authority: ApprovalAuthority,
+    explicit_cycle: bool,
+    persisted: bool,
+    tmp_path: Path,
+) -> None:
+    clock = Clock(1000)
+    store = (
+        JSONLTelemetryStore(
+            "audit/denials.jsonl", registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
+        )
+        if persisted
+        else InMemoryTelemetryStore()
+    )
+    rec = TelemetryRecorder(store, CI, clock=clock)
+    gate = ApprovalGate(approval_authority, clock=clock, telemetry=rec)
+    first = gate.note_approval_requested(h("a"), principal_kind=PrincipalKind.AGENT)
+    assert first is not None
+    # Another harness recorder may record the human decision in the same store.
+    reviewer = Principal("reviewer", PrincipalKind.HUMAN)
+    human_rec = TelemetryRecorder(store, reviewer, clock=clock)
+    clock.now = 1010
+    human_rec.record_approval_denied(
+        h("a"), reviewer, cycle_id=first[1] if explicit_cycle else None
+    )
+    clock.now = 2000
+    second = gate.note_approval_requested(h("a"), principal_kind=PrincipalKind.AGENT)
+    assert second is not None and second[1] != first[1]
+    metrics = OversightMetrics(store)
+    result = metrics.approval_latency("agent")
+    assert (result.count, result.max_s, result.pending) == (1, 10, 1)
+    windowed = metrics.approval_latency("agent", since=2000)
+    assert (windowed.count, windowed.pending) == (0, 1)
+    # A late delivery for the previous cycle, or a backdated legacy denial,
+    # must not resolve the new request.
+    human_rec.record_approval_denied(h("a"), reviewer, cycle_id=first[1], at=2010)
+    human_rec.record_approval_denied(h("a"), reviewer, at=1020)
+    assert gate.note_approval_requested(h("a"), principal_kind=PrincipalKind.AGENT) == second

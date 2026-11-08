@@ -691,3 +691,46 @@ class TestEndToEnd:
         with pytest.raises(ToolDenied):
             d.dispatch(AGENT, "read", {"path": "workspace/a"}, trigger_id="loop-a")
         assert calls == []
+
+
+def test_unscoped_principal_cannot_switch_to_sibling_trigger(pdp: PolicyDecisionPoint) -> None:
+    agent = Principal("agent-1", PrincipalKind.AGENT)
+    unrelated = Principal("agent-9", PrincipalKind.AGENT)
+    registry = TriggerRegistry()
+    registry.bind(ALICE, "loop-a", principals=[agent])
+    registry.bind(ALICE, "loop-b", principals=[agent])
+    registry.bind(ALICE, "loop-x", principals=[unrelated])
+    breaker, rec, clock = _setup(BreakerPolicy(max_rollbacks=1, cooldown_s=10), registry=registry)
+    calls: list[str] = []
+    dispatcher = _dispatcher(pdp, breaker, calls)
+    rec.record_rollback("loop-a", "trip")
+    with pytest.raises(ToolDenied, match="principal.*suspended"):
+        dispatcher.dispatch(agent, "write", {"path": "workspace/blocked"}, trigger_id="loop-b")
+    dispatcher.dispatch(unrelated, "write", {"path": "workspace/unrelated"}, trigger_id="loop-x")
+    clock.now += 11
+    dispatcher.dispatch(agent, "write", {"path": "workspace/probe"}, trigger_id="loop-a")
+    assert breaker.status("loop-a").probes == 1
+    with pytest.raises(ToolDenied, match="principal.*suspended"):
+        dispatcher.dispatch(agent, "write", {"path": "workspace/blocked"}, trigger_id="loop-b")
+    breaker.reset(ALICE, "loop-a")
+    dispatcher.dispatch(agent, "write", {"path": "workspace/resumed"}, trigger_id="loop-b")
+    assert calls == [
+        "write:workspace/unrelated",
+        "write:workspace/probe",
+        "write:workspace/resumed",
+    ]
+
+
+def test_unscoped_cohort_suspension_can_be_disabled(pdp: PolicyDecisionPoint) -> None:
+    agent = Principal("agent-1", PrincipalKind.AGENT)
+    registry = TriggerRegistry()
+    for trigger in ("loop-a", "loop-b"):
+        registry.bind(ALICE, trigger, principals=[agent])
+    breaker, rec, _ = _setup(
+        BreakerPolicy(max_rollbacks=1, cohort_suspension=False), registry=registry
+    )
+    calls: list[str] = []
+    dispatcher = _dispatcher(pdp, breaker, calls)
+    rec.record_rollback("loop-a", "trip")
+    dispatcher.dispatch(agent, "write", {"path": "workspace/allowed"}, trigger_id="loop-b")
+    assert calls == ["write:workspace/allowed"]

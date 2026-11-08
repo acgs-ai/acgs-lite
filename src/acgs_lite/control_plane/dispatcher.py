@@ -22,11 +22,13 @@ then requires, in order:
    parent directory deletes the core files beneath it. Existing directories
    and symlinks are not exempt even in scratch; OS confinement is still
    required to prevent filesystem changes racing these checks;
-4. PDP permits for a ``tool.call`` decision (``attributes["paths"]`` = the
+4. non-human directory reads are denied because their descendants may be
+   sensitive; regular leaf-file reads still require per-path authorization;
+5. PDP permits for a ``tool.call`` decision (``attributes["paths"]`` = the
    declared paths plus every string leaf, at any depth, that classifies as
    core) and for one ``file.write`` (or ``file.read`` for read-only tools)
    decision per such path;
-5. repository permissions: ``RepositoryPermissions.can_write`` for every path
+6. repository permissions: ``RepositoryPermissions.can_write`` for every path
    a write tool receives (an independent second layer; it is required).
 
 Phase 3 adds harness-side pre-checks, all before step 1 and none operable by
@@ -815,6 +817,21 @@ class GovernedToolDispatcher:
                 # enforced on it: only a principal granted "**" may use it.
                 raise _Denied("shell-like tools need an unrestricted ('**') repository write grant")
 
+        if spec.read_only and principal.kind is not PrincipalKind.HUMAN:
+            for path in declared:
+                normalized = self._registry.normalize(path)
+                if normalized is None:
+                    continue  # the PDP rejects unresolvable paths
+                target = posixpath.join(self._registry.repo_root or os.getcwd(), normalized)
+                directory_shaped = path.endswith("/") or "." not in normalized.rsplit("/", 1)[-1]
+                if (
+                    os.path.isdir(target)
+                    or os.path.islink(target)
+                    or (directory_shaped and not os.path.isfile(target))
+                ):
+                    raise _Denied(
+                        f"directory-like read target {path!r} may contain sensitive files"
+                    )
         if not spec.read_only and self._registry.has_unanchored_patterns():
             for path in declared:
                 if self._registry.is_core(path):
@@ -1085,9 +1102,12 @@ class GovernedToolDispatcher:
             raise _Denied("invalid trigger_id")
         if not registry.is_bound(trigger_id, principal):
             raise _Denied(f"trigger {trigger_id} not bound to principal")
-        for cohort in registry.cohorts_of(principal):
+        cohorts = registry.cohorts_of(principal)
+        for cohort in cohorts:
             if breaker.cohort_suspended(cohort, probing=trigger_id):
                 raise _Denied(f"system cohort {cohort} suspended (a bound trigger is not closed)")
+        if not cohorts and breaker.principal_suspended(principal, probing=trigger_id):
+            raise _Denied("principal suspended (a bound trigger is not closed)")
         if admission is not None:
             if admission.trigger_id != trigger_id or not breaker._admission_valid(admission):
                 raise _Denied(f"trigger {trigger_id} admission invalidated")
@@ -1457,6 +1477,15 @@ class GovernedToolDispatcher:
                 if denial is not None:
                     raise self._pre_denial(principal, tool_name, denial)
 
+    def _recheck_credential(
+        self, principal: Principal, tool_name: str, credential: object, *, group_id: str | None
+    ) -> None:
+        """Revalidate after PDP/listener work, immediately before invocation."""
+        try:
+            self._verify_credential(principal, tool_name, credential)
+        except _Denied as exc:
+            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
+
     def authorize_without_consuming(
         self,
         principal: Principal,
@@ -1555,6 +1584,12 @@ class GovernedToolDispatcher:
         )
         if inspect.iscoroutinefunction(auth.spec.fn):
             raise TypeError(f"tool {tool_name!r} is async; use adispatch()")
+        self._recheck_credential(
+            principal,
+            tool_name,
+            credential,
+            group_id=auth.decisions[0].decision_id if auth.decisions else None,
+        )
         self._recheck_kill_switch(principal, tool_name, auth)
         try:
             value = auth.spec.fn(**auth.args)
@@ -1603,6 +1638,12 @@ class GovernedToolDispatcher:
                 backup_run=backup_run,
                 change_id=change_id,
                 tier=tier,
+            )
+            self._recheck_credential(
+                principal,
+                tool_name,
+                credential,
+                group_id=auth.decisions[0].decision_id if auth.decisions else None,
             )
             self._recheck_kill_switch(principal, tool_name, auth)
             try:

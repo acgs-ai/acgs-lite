@@ -205,7 +205,9 @@ def compile_glob(pattern: str, *, case_sensitive: bool = False) -> re.Pattern[st
             body = pattern[i + 1 : close]
             if body.startswith("!"):
                 body = "^" + body[1:]
-            out.append("[" + body.replace("\\", "\\\\").replace("/", "") + "]")
+            # Negated classes otherwise include '/', and ranges can include
+            # it implicitly. Every class must remain inside one segment.
+            out.append("(?!/)[" + body.replace("\\", "\\\\").replace("/", "") + "]")
             i = close + 1
             continue
         out.append(re.escape(char))
@@ -575,6 +577,11 @@ DEFAULT_IMMUTABLE_CORE = ImmutableCoreRegistry(
             ".pre-commit-config.yaml",
             "Makefile",
             "scripts/check_critical_coverage.py",
+            "scripts/release_candidate.py",
+            "scripts/qualify_wheel.py",
+            "scripts/run_governance_regression.py",
+            "scripts/check_links.py",
+            "tests/red_team/governance_fail_closed_cases.py",
         ),
         CoreCategory.CONTROL_PLANE: (
             "control-plane/**",
