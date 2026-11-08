@@ -9,6 +9,7 @@ categories:
   evaluator:
   - evals/**
   - evaluator/**
+  - src/acgs_lite/evals/**
   test_suite:
   - eval-suites/**
   - eval_suites/**
@@ -48,6 +49,8 @@ categories:
   - .github/**
   - .gitlab-ci.yml
   - .pre-commit-config.yaml
+  - Makefile
+  - scripts/check_critical_coverage.py
   control_plane:
   - control-plane/**
   - pyproject.toml
