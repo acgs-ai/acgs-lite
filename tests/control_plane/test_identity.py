@@ -309,6 +309,24 @@ class TestHumanAuthenticator:
 
 
 class TestAttestedIssuance:
+    @pytest.mark.parametrize("human", [False, True])
+    def test_fractional_clock_near_token_limit_is_rejected_before_issuance(
+        self, issuer: CredentialIssuer, clock: Clock, human: bool
+    ) -> None:
+        clock.now = 1794140000.1234567
+        scopes = {f"tool:{i:03d}" + "a" * 240 for i in range(48)}
+        scopes.add("tool:" + "b" * (32 if human else 30))
+        if human:
+            session = _session(issuer, "alice", ALICE_KEY)
+            with pytest.raises(CredentialIssuanceRefused, match="exceed"):
+                issuer.issue_for_human(session, scopes=scopes)
+            token = issuer.issue_for_human(session, scopes=["tool:x"])
+            assert issuer.authenticate(token.token).principal_id == "alice"
+        else:
+            plain = CredentialIssuer(clock=clock)
+            with pytest.raises(CredentialIssuanceRefused, match="exceed"):
+                plain.issue(Principal("agent-1", PrincipalKind.AGENT), scopes=scopes)
+
     @pytest.mark.parametrize("invalid", ["size", "scopes", "ttl"])
     def test_invalid_human_issuance_preserves_session(
         self, issuer: CredentialIssuer, invalid: str

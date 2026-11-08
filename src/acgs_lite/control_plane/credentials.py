@@ -23,6 +23,7 @@ import json
 import math
 import re
 import secrets
+import sys
 import threading
 import time
 import uuid
@@ -423,8 +424,8 @@ class CredentialIssuer:
             "pid": principal.canonical_id,
             "knd": principal.kind.value,
             "scopes": sorted(scope_set),
-            "iat": -1.0e300,
-            "exp": -1.0e300,
+            "iat": -sys.float_info.max,
+            "exp": -sys.float_info.max,
             "epoch": 10**18,
             "obo": obo,
         }
@@ -465,6 +466,8 @@ class CredentialIssuer:
             payload["sys"] = principal.system_id
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         token = _b64encode(raw) + "." + self._mac(raw)
+        if len(token) > MAX_TOKEN_CHARS:
+            raise CredentialIssuanceRefused(f"credential would exceed {MAX_TOKEN_CHARS} characters")
         return ScopedCredential(
             token=token,
             principal_id=pid,
