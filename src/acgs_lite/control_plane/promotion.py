@@ -242,6 +242,15 @@ class PromotionGate:
         decision, decided = self._pdp._decide_attested(request)
         if not decision.allowed or decided is None:
             raise PromotionRejected(f"PDP denied promotion: {decision.reason}", decision)
+        if self._roles is not None and gate is not None:
+            if not any(
+                a.canonical_id != principal.canonical_id
+                and self._roles.has_capability(a, CAP_PROMOTION_APPROVE)
+                for a in decided.approvers
+            ):
+                raise PromotionRejected(
+                    "final approval lacks an independent promotion.approve approver", decision
+                )
         if self._incident_lock is None:
             try:
                 # The receipt cites the gate-attested approvers, not host input.
