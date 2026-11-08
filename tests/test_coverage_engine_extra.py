@@ -249,6 +249,60 @@ class TestRustNoContext:
         assert result.valid is True
 
 
+def _make_uppercase_pattern_constitution() -> Constitution:
+    """Rule whose regexes have uppercase literals and no inline (?i).
+
+    The keyword never appears in the test actions, so a deny can only come from
+    the patterns.
+    """
+    return Constitution.from_rules(
+        [
+            Rule(
+                id="PAT-AWS",
+                text="No AWS access keys",
+                severity=Severity.HIGH,
+                keywords=["credential"],
+                patterns=[r"AKIA[0-9A-Z]{16}", r"[A-Z]{2}[0-9]{6}"],
+                category="security",
+            )
+        ],
+        name="uppercase-patterns",
+    )
+
+
+@pytest.mark.unit
+class TestRustPatternCaseParity:
+    """Rule patterns are case-insensitive on both paths (regression: Rust compiled
+    them case-sensitively against lowercased text, so it allowed what Python denied)."""
+
+    @pytest.mark.parametrize(
+        "rust",
+        [
+            pytest.param(
+                True,
+                marks=pytest.mark.skipif(not _HAS_RUST, reason="Rust extension not available"),
+            ),
+            False,
+        ],
+    )
+    @pytest.mark.parametrize("action", ["deploy with AKIAABCDEFGHIJKLMNOP", "passport AB123456"])
+    def test_uppercase_pattern_denies(self, rust: bool, action: str) -> None:
+        engine = _make_engine(_make_uppercase_pattern_constitution(), strict=False)
+        if rust:
+            assert engine._rust_validator is not None
+        else:
+            _disable_rust_on_engine(engine)
+        result = engine.validate(action)
+        assert result.valid is False
+        assert [v.rule_id for v in result.violations] == ["PAT-AWS"]
+
+    @pytest.mark.skipif(not _HAS_RUST, reason="Rust extension not available")
+    def test_rust_still_allows_non_matching_action(self) -> None:
+        engine = _make_engine(_make_uppercase_pattern_constitution(), strict=False)
+        assert engine._rust_validator is not None
+        assert engine.validate("deploy the akia docs site").valid is True
+
+
 # ===================================================================
 # Rust gov-context path: _validate_rust_gov_context
 # ===================================================================
