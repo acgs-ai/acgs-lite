@@ -53,7 +53,9 @@ async def test_approval_cannot_switch_container_type(
     def tool(path, payload):
         calls.append(payload)
 
-    dispatcher.register("edit", tool, path_params={"path"}, opaque_params={"payload"})
+    dispatcher.register(
+        "edit", tool, path_params={"path"}, opaque_params={"payload"}, merge_capable=False
+    )
     args = {"path": "workspace/data.txt", "payload": {"nested": approved}}
     approval = approver_factory("bob")(dispatcher.action_hash_for(HUMAN, "edit", args))
     changed = {**args, "payload": {"nested": substitute}}
