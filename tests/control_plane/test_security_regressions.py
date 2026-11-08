@@ -325,8 +325,9 @@ class TestMedium3Toctou:
             return 1
 
     def test_flipping_mapping(self, dispatcher: GovernedToolDispatcher, sink: Sink) -> None:
-        dispatcher.dispatch(AGENT, "rm", self.Flip())
-        assert sink.calls == ["workspace/ok.txt"]
+        with pytest.raises(ToolDenied, match="built-in dict"):
+            dispatcher.dispatch(AGENT, "rm", self.Flip())
+        assert sink.calls == []
 
     def _mutating_dispatcher(
         self, constitution: Constitution, permit_all: PolicySet, sink: Sink, target: list[str]
