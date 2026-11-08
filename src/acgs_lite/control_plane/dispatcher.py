@@ -546,10 +546,17 @@ class GovernedToolDispatcher:
             ):
                 raise _Denied("requested_by does not match the credential session")
             requested_by = session.on_behalf_of
+        if (
+            session is not None
+            and session.on_behalf_of is None
+            and principal.kind is PrincipalKind.AGENT
+            and spec.tier >= APPROVAL_GATE_MIN_TIER
+        ):
+            raise _Denied("credential is not bound to an original requester (on_behalf_of)")
         if principal.kind is PrincipalKind.AGENT and spec.tier >= APPROVAL_GATE_MIN_TIER:
-            # TODO(control-plane-gap): without require_credential the original
-            # requester is caller-asserted; it should always be bound from the
-            # credential-issuing session.
+            # Without credentials this is a trusted-host API: the host must
+            # authenticate principal and requested_by, never forward agent
+            # input as an assertion of the original human requester's identity.
             problem = requested_by_problem(principal, requested_by)
             if problem is not None:
                 raise _Denied(problem)
@@ -757,6 +764,9 @@ class GovernedToolDispatcher:
         authored the change and ``requested_by`` the original requester on
         whose behalf the principal acts; neither may approve it. ``approvers`` is kept for
         API compatibility and is ignored by a PDP with an ApprovalGate.
+        Without ``require_credential``, the trusted host must authenticate
+        ``principal`` and ``requested_by``; never forward agent-supplied identity
+        labels. With credentials, AGENT T2+ calls require a requester-bound token.
         """
         spec, args, decisions = self._authorize(
             principal,
