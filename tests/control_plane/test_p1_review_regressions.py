@@ -7,6 +7,7 @@ was allowed (or the configuration was silently accepted).
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -462,6 +463,66 @@ class TestOpaqueSubclassBoundary:
                 {"path": "workspace/ok.txt", "content": Deceptive("evaluator/score.py")},
             )
         assert sink.calls == []
+
+
+class TestFinalReviewBoundaries:
+    def test_namespaced_read_retains_sensitive_path_category(
+        self, pdp: PolicyDecisionPoint
+    ) -> None:
+        decision = pdp.decide(DecisionRequest(AGENT, "policy.read", "policies/.env", ActionTier.T0))
+        assert not decision.allowed
+
+    def test_undecodable_opaque_bytes_denied(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied):
+            dispatcher.dispatch(
+                AGENT,
+                "write",
+                {"path": "workspace/ok.txt", "output_file": b"evaluator/grader\xff.py"},
+            )
+        assert sink.calls == []
+
+    @pytest.mark.parametrize("directory", ["sub", "sub.txt", "link.txt"])
+    def test_existing_scratch_directory_denied(
+        self, constitution: Constitution, permit_all: PolicySet, tmp_path: Path, directory: str
+    ) -> None:
+        target = tmp_path / "workspace" / directory
+        target.mkdir(parents=True)
+        (target / ".env").write_text("protected")
+        if directory == "link.txt":
+            (tmp_path / "workspace" / "link.txt").rename(tmp_path / "protected")
+            target.symlink_to(tmp_path / "protected", target_is_directory=True)
+        registry = DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
+        permissions = RepositoryPermissions(
+            registry, [WriteGrant(AGENT.id, PrincipalKind.AGENT, ("workspace/**",))]
+        )
+        calls: list[str] = []
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, registry=registry
+        ) as pdp:
+            dispatcher = GovernedToolDispatcher(
+                pdp, permissions=permissions, tool_tiers={"remove": ActionTier.T1}
+            )
+
+            def remove(path: str) -> None:
+                calls.append(path)
+
+            dispatcher.register("remove", remove, path_params={"path"})
+            with pytest.raises(ToolDenied):
+                dispatcher.dispatch(AGENT, "remove", {"path": f"workspace/{directory}"})
+            (tmp_path / "workspace" / "ordinary.txt").write_text("ordinary")
+            dispatcher.dispatch(AGENT, "remove", {"path": "workspace/ordinary.txt"})
+            dispatcher.dispatch(AGENT, "remove", {"path": "workspace/new.txt"})
+        assert calls == ["workspace/ordinary.txt", "workspace/new.txt"]
+        assert (target / ".env").read_text() == "protected"
+
+    async def test_sync_async_dispatch_uses_worker_thread(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher = GovernedToolDispatcher(
+            pdp, permissions=_permissions(), tool_tiers={"thread_id": ActionTier.T1}
+        )
+        dispatcher.register("thread_id", lambda: threading.get_ident())
+        result = await dispatcher.adispatch(AGENT, "thread_id", {})
+        assert result.value != threading.get_ident()
 
 
 class TestDottedDirectoryTargets:

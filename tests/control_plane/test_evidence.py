@@ -372,6 +372,18 @@ class _Boom:
 
 
 class TestCompositeAndEvaluate:
+    @pytest.mark.parametrize("depth", [2, 4])
+    def test_nested_routers_preserve_digest_attestation(self, depth: int) -> None:
+        registry = TrustedRunRegistry()
+        ref = _ci(artifact_digest=DIGEST)
+        registry.register_run(CI, ref, conclusion="success")
+        verifier: Any = registry
+        for _ in range(depth):
+            verifier = CompositeRunVerifier({"ci": verifier})
+        assert verifier.validate(ref).valid
+        assert evaluate_evidence([ref], verifier, required=True) == ()
+        assert evaluate_evidence([_ci(artifact_digest=OTHER_DIGEST)], verifier, required=True)
+
     def test_routing(self) -> None:
         registry = TrustedRunRegistry()
         registry.register_run(CI, _ci(), conclusion="success")
