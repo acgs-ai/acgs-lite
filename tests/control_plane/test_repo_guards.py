@@ -95,6 +95,11 @@ class TestDiffGuard:
     def test_agent_outside_core_allowed(self) -> None:
         assert GUARD.main(["--files", "workspace/x.py", "--author", "bot[bot]"]) == 0
 
+    def test_optional_ci_dependency_input_blocks_agent_changes(self) -> None:
+        assert GUARD.main(
+            ["--files", "requirements-test-optional.txt", "--author", "bot[bot]"]
+        ) == 1
+
     def test_human_core_change_allowed_by_guard(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert GUARD.main(["--files", "policies/p.yaml", "--author", "alice"]) == 0
         assert "review required" in capsys.readouterr().out
