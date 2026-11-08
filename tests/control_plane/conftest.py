@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
 from acgs_lite.constitution import Constitution
 from acgs_lite.control_plane import (
+    DEFAULT_IMMUTABLE_CORE,
     PolicyDecisionPoint,
     PolicySet,
     Principal,
@@ -43,7 +45,10 @@ def human() -> Principal:
 
 
 @pytest.fixture()
-def pdp(constitution: Constitution, permit_all: PolicySet) -> Iterator[PolicyDecisionPoint]:
+def pdp(
+    constitution: Constitution, permit_all: PolicySet, tmp_path: Path
+) -> Iterator[PolicyDecisionPoint]:
     """A deliberately permissive PDP: only the invariants stand in the way."""
-    with PolicyDecisionPoint.for_constitution(constitution, permit_all) as point:
+    registry = DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
+    with PolicyDecisionPoint.for_constitution(constitution, permit_all, registry=registry) as point:
         yield point

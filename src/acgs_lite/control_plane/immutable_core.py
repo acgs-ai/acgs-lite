@@ -567,6 +567,7 @@ DEFAULT_IMMUTABLE_CORE = ImmutableCoreRegistry(
             "scripts/qualify_wheel.py",
             "scripts/run_governance_regression.py",
             "scripts/check_links.py",
+            "scripts/check_release_coherence.py",
             "tests/red_team/governance_fail_closed_cases.py",
         ),
         CoreCategory.CONTROL_PLANE: (

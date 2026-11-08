@@ -14,7 +14,6 @@ from mcp import Client, types  # noqa: E402
 from mcp.server import Server  # noqa: E402
 
 from acgs_lite.control_plane import (  # noqa: E402
-    DEFAULT_IMMUTABLE_CORE,
     ActionTier,
     GovernedToolDispatcher,
     PolicyDecisionPoint,
@@ -46,7 +45,7 @@ def _server(
 ) -> tuple[Server, list[Any]]:
     calls: list[Any] = []
     permissions = RepositoryPermissions(
-        DEFAULT_IMMUTABLE_CORE,
+        pdp.registry,
         [WriteGrant("mcp-agent", PrincipalKind.AGENT, ("workspace/**",))],
     )
     dispatcher = GovernedToolDispatcher(
