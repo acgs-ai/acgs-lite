@@ -205,6 +205,9 @@ class QuorumResult:
     counted_approvals: tuple[SignedApproval, ...] = ()
     rejected: tuple[tuple[str, str], ...] = ()
     missing_roles: frozenset[str] = field(default_factory=frozenset)
+    # Earliest signed-approval prefix satisfying both count and role coverage.
+    # Observability only: all counted approvals are still consumed.
+    completion_approver_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -327,7 +330,9 @@ class ApprovalGate:
     first time it sees an action hash that needs a quorum (any non-dry-run
     evaluation, satisfied or not, or :meth:`note_approval_requested` from
     ``GovernedToolDispatcher.action_hash_for``) and one APPROVAL_GRANTED per
-    counted approver when a quorum is consumed. The GRANTED time is the
+    approver in the earliest quorum-completing prefix when a quorum is consumed.
+    Later surplus approvals are still consumed but cannot inflate latency.
+    The GRANTED time is the
     approval's signed ``issued_at`` clamped to [first seen, consumption], so
     an agent sitting on a signed approval does not inflate the latency. An
     approval signed before the gate first saw the hash (pre-collected)
@@ -409,9 +414,12 @@ class ApprovalGate:
             with self._lock:
                 self.telemetry_failures += 1
             return
+        completion_ids = set(result.completion_approver_ids)
         for approver_id, approval in zip(
             result.counted_approver_ids, result.counted_approvals, strict=False
         ):
+            if approver_id not in completion_ids:
+                continue
             at = min(float(approval.issued_at), now)
             if requested_at is not None:
                 at = max(at, min(requested_at, now))
@@ -420,13 +428,13 @@ class ApprovalGate:
             )
 
     def _telemetry_call(
-        self, fn: Callable[..., object], *args: object, at: float | None = None
+        self, fn: Callable[..., object], *args: object, at: float | None = None, **kwargs: object
     ) -> None:
         try:
             if at is None:
-                fn(*args)
+                fn(*args, **kwargs)
             else:
-                fn(*args, at=at)
+                fn(*args, at=at, **kwargs)
         except Exception as exc:
             logger.warning("approval telemetry failed: %s", type(exc).__name__)
             with self._lock:
@@ -447,7 +455,9 @@ class ApprovalGate:
                 return
         self._requested.popitem(last=False)
 
-    def note_approval_requested(self, action_hash: str) -> None:
+    def note_approval_requested(
+        self, action_hash: str, *, principal_kind: PrincipalKind | None = None
+    ) -> None:
         """Record (once per hash) that *action_hash* awaits a quorum."""
         telemetry = self._telemetry
         if telemetry is None or not isinstance(action_hash, str) or not action_hash:
@@ -465,7 +475,9 @@ class ApprovalGate:
             self._requested[action_hash] = now
             while len(self._requested) > _MAX_REQUESTED_TRACKED:
                 self._evict_one()
-        self._telemetry_call(telemetry.record_approval_requested, action_hash, at=now)
+        self._telemetry_call(
+            telemetry.record_approval_requested, action_hash, principal_kind=principal_kind, at=now
+        )
 
     def evaluate(
         self,
@@ -481,7 +493,9 @@ class ApprovalGate:
         try:
             result = self._evaluate(request, tuple(approvals))
             if record_request and result.required > 0:
-                self.note_approval_requested(result.action_hash)
+                self.note_approval_requested(
+                    result.action_hash, principal_kind=request.principal.kind
+                )
             return result
         except Exception as exc:
             return QuorumResult(
@@ -550,8 +564,21 @@ class ApprovalGate:
             approvers.append(outcome)
         covered = frozenset(role for a in approvers for role in a.roles)
         missing = (policy.required_roles - covered) if policy is not None else frozenset()
+        satisfied = len(counted) >= required and not missing
+        completion: list[str] = []
+        if satisfied and required > 0:
+            completion_roles: set[str] = set()
+            for _approval, approver in sorted(
+                zip(counted, approvers, strict=False), key=lambda pair: pair[0].issued_at
+            ):
+                completion.append(approver.canonical_id)
+                completion_roles.update(approver.roles)
+                if len(completion) >= required and (
+                    policy is None or policy.required_roles <= completion_roles
+                ):
+                    break
         return QuorumResult(
-            satisfied=len(counted) >= required and not missing,
+            satisfied=satisfied,
             action_hash=expected,
             required=required,
             counted_approver_ids=tuple(a.canonical_id for a in approvers),
@@ -559,6 +586,7 @@ class ApprovalGate:
             counted_approvals=tuple(counted),
             rejected=tuple(rejected),
             missing_roles=missing,
+            completion_approver_ids=tuple(completion),
         )
 
     def _check(
