@@ -431,11 +431,12 @@ class TestDispatchGrouping:
                 }
             ),
             telemetry=rec,
+            registry=pdp.registry,
         ) as point:
             d = GovernedToolDispatcher(
                 point,
                 permissions=RepositoryPermissions(
-                    DEFAULT_IMMUTABLE_CORE,
+                    point.registry,
                     [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))],
                 ),
                 tool_tiers={"write": ActionTier.T1},
@@ -618,16 +619,21 @@ def latency_setup(
     permit_all: PolicySet,
     approval_authority: ApprovalAuthority,
     approver_factory: Callable[..., Sign],
+    tmp_path: Path,
 ) -> Iterator[tuple[GovernedToolDispatcher, Clock, InMemoryTelemetryStore, Sign, ApprovalGate]]:
     pytest.importorskip("cryptography")
     clock = Clock(1000.0)
     store, rec = _recorder(clock)
     gate = ApprovalGate(approval_authority, clock=clock, telemetry=rec)
     with PolicyDecisionPoint.for_constitution(
-        constitution, permit_all, approval_gate=gate, telemetry=rec
+        constitution,
+        permit_all,
+        approval_gate=gate,
+        telemetry=rec,
+        registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)),
     ) as pdp:
         permissions = RepositoryPermissions(
-            DEFAULT_IMMUTABLE_CORE, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
+            pdp.registry, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
         )
         d = GovernedToolDispatcher(pdp, permissions=permissions, tool_tiers={"edit": ActionTier.T2})
         d.register("edit", Calls().tool, path_params={"path"}, opaque_params={"content"})
@@ -752,6 +758,7 @@ class TestApprovalLatencyThroughDispatcher:
         approver_factory: Callable[..., Sign],
         constitution: Constitution,
         permit_all: PolicySet,
+        tmp_path: Path,
     ) -> None:
         pytest.importorskip("cryptography")
         clock = Clock(1000.0)
@@ -759,10 +766,13 @@ class TestApprovalLatencyThroughDispatcher:
             approval_authority, clock=clock, telemetry=TelemetryRecorder(_FailingStore(), CI)
         )
         with PolicyDecisionPoint.for_constitution(
-            constitution, permit_all, approval_gate=gate
+            constitution,
+            permit_all,
+            approval_gate=gate,
+            registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)),
         ) as pdp:
             permissions = RepositoryPermissions(
-                DEFAULT_IMMUTABLE_CORE,
+                pdp.registry,
                 [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))],
             )
             d = GovernedToolDispatcher(
@@ -819,7 +829,7 @@ def _autonomy_dispatcher(
     d = GovernedToolDispatcher(
         pdp,
         permissions=RepositoryPermissions(
-            DEFAULT_IMMUTABLE_CORE, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
+            pdp.registry, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
         ),
         tool_tiers={"read": ActionTier.T0, "write": ActionTier.T1},
         read_only_tools=frozenset({"read"}),
