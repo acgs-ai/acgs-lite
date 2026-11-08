@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import shutil
 import stat
@@ -17,7 +18,7 @@ import pytest
 pytest.importorskip("cryptography")
 
 from acgs_cp_client import ControlPlaneClient, ControlPlaneError  # noqa: E402
-from acgs_lite.control_plane import ActionTier, PrincipalKind  # noqa: E402
+from acgs_lite.control_plane import ActionTier, Principal, PrincipalKind, ToolDenied  # noqa: E402
 from acgs_lite.control_plane.credentials import CredentialIssuanceRefused
 from acgs_lite.control_plane.demo_loop import (
     AGENT,
@@ -30,6 +31,7 @@ from acgs_lite.control_plane.demo_loop import (
 from acgs_lite.control_plane.dispatcher import GovernedToolDispatcher, _Denied
 from acgs_lite.control_plane.service import (
     RESULT_TOO_LARGE,
+    SERVICE_AUDIT_PATH,
     ControlPlaneService,
     _prepare_directory,
     _safe_ancestor,
@@ -146,6 +148,10 @@ class TestServiceCalls:
         service = serve()
         with ControlPlaneClient(str(service.socket_path), _token(env)) as client:
             assert client.call("read_file", {"path": PROMPT}) == "async-ok"
+        # Attribution before execution holds on the async path too.
+        lines = (env.root / SERVICE_AUDIT_PATH).read_text(encoding="utf-8").splitlines()
+        phases = [json.loads(line)["metadata"].get("phase") for line in lines if line]
+        assert phases[-2:] == ["intent", "completed"]
 
     def test_oversized_result_is_bounded(
         self, env: DemoEnvironment, serve: Any, monkeypatch: pytest.MonkeyPatch
@@ -207,3 +213,41 @@ class TestCredentialBinding:
         scopes = [f"tool:{'a' * 240}{index:03d}" for index in range(80)]
         with pytest.raises(CredentialIssuanceRefused, match="exceed"):
             env.cp.credentials.issue(AGENT, scopes=scopes)
+
+
+class TestRunbookOutcomeWiring:
+    """241.2 / 241.15 at the dispatcher: a predicate-failing return is counted."""
+
+    @pytest.mark.parametrize(("exit_status", "second_allowed"), [(1, False), (0, True)])
+    def test_exit_code_feeds_stop_conditions(
+        self,
+        p5: Any,
+        runbook_data: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        exit_status: int,
+        second_allowed: bool,
+    ) -> None:
+        agent = Principal("agent-1", PrincipalKind.AGENT, "sys-a")
+        digest = p5.approve_runbook(
+            runbook_data(stop_conditions=[{"kind": "max_failures", "count": 1}])
+        )
+        tools = p5.dispatcher._tools
+        returning = dataclasses.replace(tools["write_file"], fn=lambda path, content: exit_status)
+        monkeypatch.setitem(tools, "write_file", returning)
+
+        def call(name: str) -> Any:
+            return p5.dispatcher.dispatch(
+                agent,
+                "write_file",
+                {"path": f"{p5.worktree}/{name}", "content": "x"},
+                change_id="c1",
+                runbook_id="rb-restart-cache",
+                runbook_hash=digest,
+            )
+
+        call("a")  # the tool ran and returned exit_status
+        if second_allowed:
+            call("b")
+        else:
+            with pytest.raises(ToolDenied, match="runbook rejected"):
+                call("b")
