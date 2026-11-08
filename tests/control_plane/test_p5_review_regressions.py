@@ -28,7 +28,7 @@ from acgs_lite.control_plane.budgets import BudgetLedger, BudgetLimits
 from acgs_lite.control_plane.change_ownership import ChangeOwnershipRegistry, OwnershipDenied
 from acgs_lite.control_plane.core_write import CoreChangeWriter, CoreWriteRejected
 from acgs_lite.control_plane.evaluator import DeterministicEvaluator, EvaluatorService
-from acgs_lite.control_plane.evidence import RunValidation
+from acgs_lite.control_plane.evidence import GitHubActionsRunVerifier, RunValidation
 from acgs_lite.control_plane.incident import IncidentLockError, IncidentMutationLock
 from acgs_lite.control_plane.roles import Role, RoleAssignments
 from acgs_lite.control_plane.runbook import (
@@ -285,9 +285,36 @@ class TestSuccessPredicate:
         )
         assert not predicate_satisfied(predicate, ref, runs)  # not registered
         runs.register_run(SERVICE, ref, conclusion="success")
-        assert predicate_satisfied(predicate, ref, runs)
+        assert not predicate_satisfied(predicate, ref, runs)  # no workflow attestation
         assert not predicate_satisfied(predicate, ref, None)
         assert not predicate_satisfied(predicate, "done", runs)
+
+    @pytest.mark.parametrize(
+        "workflow", [".github/workflows/ci.yml", ".github/workflows/other.yml"]
+    )
+    def test_external_run_requires_the_approved_workflow(self, workflow: str) -> None:
+        ref = ExternalRunRef("github-actions", "1", EvidenceSource.CI_SYSTEM, head_sha="a" * 40)
+        payload = {
+            "id": 1,
+            "repository": {"full_name": "acgs-ai/acgs-lite"},
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": "a" * 40,
+            "path": workflow,
+            "head_branch": "main",
+            "event": "push",
+        }
+        runs = GitHubActionsRunVerifier(
+            lambda path: payload,
+            repository="acgs-ai/acgs-lite",
+            allowed_workflows=[".github/workflows/ci.yml", ".github/workflows/other.yml"],
+            allowed_branches=["main"],
+            allowed_events=["push"],
+        )
+        predicate = ExternalRunPredicate(
+            kind="external_run", provider="github-actions", workflow=".github/workflows/ci.yml"
+        )
+        assert predicate_satisfied(predicate, ref, runs) is (workflow == predicate.workflow)
 
 
 class TestEvaluatorService:

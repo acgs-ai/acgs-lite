@@ -173,6 +173,8 @@ class RunValidation:
     valid: bool
     reason: str
     verifier_id: str
+    workflow: str | None = None
+    """Workflow independently observed by the verifier, never caller asserted."""
 
 
 @runtime_checkable
@@ -726,7 +728,9 @@ class GitHubActionsRunVerifier:
                     return invalid("artifact digest is not attested by the run")
         except Exception as exc:
             return invalid(f"fetch failed: {type(exc).__name__}")
-        return RunValidation(True, "completed successful workflow run", self.verifier_id)
+        return RunValidation(
+            True, "completed successful workflow run", self.verifier_id, str(payload["path"])
+        )
 
 
 class CompositeRunVerifier:

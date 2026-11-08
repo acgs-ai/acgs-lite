@@ -343,16 +343,14 @@ def predicate_satisfied(
             code = getattr(value, "returncode", getattr(value, "exit_code", None))
         return isinstance(code, int) and not isinstance(code, bool) and code == predicate.equals
     if isinstance(predicate, ExternalRunPredicate):
-        # TODO(control-plane-gap): ExternalRunRef carries no workflow, so the
-        # predicate's workflow is enforced only by verifiers that allow-list
-        # workflows (GitHubActionsRunVerifier).
         raw = value.get("external_run") if isinstance(value, Mapping) else value
         ref = ExternalRunRef.from_dict(raw) if isinstance(raw, Mapping) else raw
         if not isinstance(ref, ExternalRunRef) or ref.provider != predicate.provider:
             return False
         if run_verifier is None:
             return False
-        return run_verifier.validate(ref).valid is True
+        result = run_verifier.validate(ref)
+        return result.valid is True and result.workflow == predicate.workflow
     return False
 
 
