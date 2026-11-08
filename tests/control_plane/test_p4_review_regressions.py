@@ -28,6 +28,7 @@ from acgs_lite.control_plane.breaker import (
     TriggerRegistry,
 )
 from acgs_lite.control_plane.budgets import BudgetLedger
+from acgs_lite.control_plane.incident import IncidentMutationLock
 from acgs_lite.control_plane.killswitch import KillSwitch
 from acgs_lite.control_plane.telemetry import (
     DecisionObserved,
@@ -170,6 +171,7 @@ class TestAdmissionRecheckedBeforeInvoke:
         assert metric.numerator == 1
 
     @pytest.mark.parametrize("mode", ["sync", "async_sync", "async_coroutine", "await_resume"])
+    @pytest.mark.parametrize("interruption", ["halt", "incident"])
     async def test_halt_recheck_retains_dispatch_group(
         self,
         constitution: Constitution,
@@ -177,15 +179,25 @@ class TestAdmissionRecheckedBeforeInvoke:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         mode: str,
+        interruption: str,
     ) -> None:
         store = InMemoryTelemetryStore()
         recorder = TelemetryRecorder(store, CI)
         switch = KillSwitch("sys-a", signal_dir=tmp_path / "halt")
+        incident = IncidentMutationLock(
+            registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
+        )
         calls: list[str] = []
+
+        def interrupt() -> None:
+            if interruption == "halt":
+                switch.engage(ALICE, "halt during dispatch")
+            else:
+                incident.declare_incident(ALICE, "incident-during-dispatch")
 
         def halt_on_allow(decision: Any) -> None:
             if decision.allowed and mode != "await_resume":
-                switch.engage(ALICE, "halt during evaluation")
+                interrupt()
 
         def write(path: str) -> None:
             calls.append(path)
@@ -197,7 +209,7 @@ class TestAdmissionRecheckedBeforeInvoke:
 
         async def halt_after_worker(fn: Any, *args: Any, **kwargs: Any) -> Any:
             value = await original(fn, *args, **kwargs)
-            switch.engage(ALICE, "halt before coroutine resumes")
+            interrupt()
             return value
 
         if mode == "await_resume":
@@ -213,6 +225,7 @@ class TestAdmissionRecheckedBeforeInvoke:
                 ),
                 tool_tiers={"write": ActionTier.T1},
                 kill_switch=switch,
+                incident_lock=incident,
             )
             d.register(
                 "write",
@@ -220,7 +233,7 @@ class TestAdmissionRecheckedBeforeInvoke:
                 path_params={"path"},
                 merge_capable=False,
             )
-            with pytest.raises(ToolDenied, match="kill switch") as denied:
+            with pytest.raises(ToolDenied, match="kill switch|incident") as denied:
                 if mode == "sync":
                     d.dispatch(AGENT, "write", {"path": "workspace/a.txt"})
                 else:
