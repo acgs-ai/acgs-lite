@@ -89,13 +89,14 @@ core.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import inspect
 import os
 import posixpath
 import re
 import threading
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
@@ -1463,6 +1464,26 @@ class GovernedToolDispatcher:
                 tool_name=tool_name,
             )
 
+    @contextlib.contextmanager
+    def _execution_lease(
+        self, principal: Principal, tool_name: str, auth: _Authorized
+    ) -> Iterator[None]:
+        from acgs_lite.control_plane.incident import IncidentLockError
+
+        with contextlib.ExitStack() as stack:
+            lock = self._incident_lock
+            if lock is not None and not (auth.spec.read_only and auth.plan.tier == ActionTier.T0):
+                try:
+                    stack.enter_context(lock.execution(principal))
+                except IncidentLockError as exc:
+                    raise self._pre_denial(
+                        principal,
+                        tool_name,
+                        str(exc),
+                        group_id=auth.decisions[0].decision_id if auth.decisions else None,
+                    ) from exc
+            yield
+
     def _recheck_kill_switch(
         self, principal: Principal, tool_name: str, auth: _Authorized | None = None
     ) -> None:
@@ -1585,20 +1606,21 @@ class GovernedToolDispatcher:
         )
         if inspect.iscoroutinefunction(auth.spec.fn):
             raise TypeError(f"tool {tool_name!r} is async; use adispatch()")
-        self._recheck_credential(
-            principal,
-            tool_name,
-            credential,
-            group_id=auth.decisions[0].decision_id if auth.decisions else None,
-        )
-        self._recheck_kill_switch(principal, tool_name, auth)
-        try:
-            value = auth.spec.fn(**auth.args)
-        except BaseException:
-            self._after_run(principal, tool_name, auth, success=False)
-            raise
-        self._after_run(principal, tool_name, auth, success=True, value=value)
-        return ToolResult(tool_name, value, auth.decisions)
+        with self._execution_lease(principal, tool_name, auth):
+            self._recheck_credential(
+                principal,
+                tool_name,
+                credential,
+                group_id=auth.decisions[0].decision_id if auth.decisions else None,
+            )
+            self._recheck_kill_switch(principal, tool_name, auth)
+            try:
+                value = auth.spec.fn(**auth.args)
+            except BaseException:
+                self._after_run(principal, tool_name, auth, success=False)
+                raise
+            self._after_run(principal, tool_name, auth, success=True, value=value)
+            return ToolResult(tool_name, value, auth.decisions)
 
     async def adispatch(
         self,
@@ -1640,53 +1662,60 @@ class GovernedToolDispatcher:
                 change_id=change_id,
                 tier=tier,
             )
-            self._recheck_credential(
-                principal,
-                tool_name,
-                credential,
-                group_id=auth.decisions[0].decision_id if auth.decisions else None,
-            )
-            self._recheck_kill_switch(principal, tool_name, auth)
-            try:
-                value = auth.spec.fn(**auth.args)
-            except BaseException:
-                self._after_run(principal, tool_name, auth, success=False)
-                raise
-            if not inspect.isawaitable(value):
-                # Finish synchronous bookkeeping even if the awaiting client
-                # is cancelled while the worker is executing its tool.
-                self._after_run(principal, tool_name, auth, success=True, value=value)
-            return auth, value
+            with self._execution_lease(principal, tool_name, auth):
+                self._recheck_credential(
+                    principal,
+                    tool_name,
+                    credential,
+                    group_id=auth.decisions[0].decision_id if auth.decisions else None,
+                )
+                self._recheck_kill_switch(principal, tool_name, auth)
+                try:
+                    value = auth.spec.fn(**auth.args)
+                except BaseException:
+                    self._after_run(principal, tool_name, auth, success=False)
+                    raise
+                if not inspect.isawaitable(value):
+                    # Finish synchronous bookkeeping even if the awaiting client
+                    # is cancelled while the worker is executing its tool.
+                    self._after_run(principal, tool_name, auth, success=True, value=value)
+                return auth, value
 
         auth, value = await asyncio.to_thread(invoke)
         if inspect.isawaitable(value):
             try:
-                self._recheck_kill_switch(principal, tool_name, auth)
-                session = self._verify_credential(principal, tool_name, credential)
-                self._final_admission(
-                    principal,
-                    tool_name,
-                    auth.spec.read_only and auth.plan.tier == ActionTier.T0,
-                    auth.admission.trigger_id if auth.admission is not None else trigger_id,
-                    session,
-                    auth.decisions[0].decision_id if auth.decisions else None,
-                    admission=auth.admission,
-                )
-            except BaseException as exc:
+                with self._execution_lease(principal, tool_name, auth):
+                    try:
+                        self._recheck_kill_switch(principal, tool_name, auth)
+                        session = self._verify_credential(principal, tool_name, credential)
+                        self._final_admission(
+                            principal,
+                            tool_name,
+                            auth.spec.read_only and auth.plan.tier == ActionTier.T0,
+                            auth.admission.trigger_id if auth.admission is not None else trigger_id,
+                            session,
+                            auth.decisions[0].decision_id if auth.decisions else None,
+                            admission=auth.admission,
+                        )
+                    except BaseException as exc:
+                        if inspect.iscoroutine(value):
+                            value.close()
+                        if isinstance(exc, _Denied):
+                            raise self._pre_denial(
+                                principal,
+                                tool_name,
+                                str(exc),
+                                group_id=auth.decisions[0].decision_id if auth.decisions else None,
+                            ) from exc
+                        raise
+                    try:
+                        value = await value
+                    except BaseException:
+                        self._after_run(principal, tool_name, auth, success=False)
+                        raise
+                    self._after_run(principal, tool_name, auth, success=True, value=value)
+            except BaseException:
                 if inspect.iscoroutine(value):
                     value.close()
-                if isinstance(exc, _Denied):
-                    raise self._pre_denial(
-                        principal,
-                        tool_name,
-                        str(exc),
-                        group_id=auth.decisions[0].decision_id if auth.decisions else None,
-                    ) from exc
                 raise
-            try:
-                value = await value
-            except BaseException:
-                self._after_run(principal, tool_name, auth, success=False)
-                raise
-            self._after_run(principal, tool_name, auth, success=True, value=value)
         return ToolResult(tool_name, value, auth.decisions)

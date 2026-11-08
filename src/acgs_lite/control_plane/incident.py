@@ -218,6 +218,44 @@ class IncidentMutationLock:
         return open_incident
 
     @contextlib.contextmanager
+    def _execution_guard(self, *, exclusive: bool) -> Iterator[None]:
+        """Pin incident ownership without blocking an event-loop caller."""
+        try:
+            fcntl: Any = importlib.import_module("fcntl")
+        except ImportError as exc:  # pragma: no cover - non-POSIX only
+            raise IncidentLockError("incident execution lease needs POSIX flock") from exc
+        try:
+            handle = open(self._path.with_name(self._path.name + ".execution.flock"), "a+b")  # noqa: SIM115
+        except OSError as exc:
+            raise IncidentLockError("incident execution lease unavailable") from exc
+        with handle:
+            try:
+                mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+                fcntl.flock(handle.fileno(), mode | fcntl.LOCK_NB)
+            except OSError as exc:
+                raise IncidentLockError("incident execution is active or transitioning") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    @contextlib.contextmanager
+    def execution(self, principal: Principal) -> Iterator[None]:
+        """Keep the current writer authorized throughout one execution body."""
+        with self._execution_guard(exclusive=False):
+            denial = self.write_denial(principal)
+            if denial is not None:
+                raise IncidentLockError(denial)
+            yield
+
+    @contextlib.contextmanager
+    def _transition(self) -> Iterator[None]:
+        # All ownership-changing lifecycle operations refuse an active writer;
+        # a tool calling transfer itself must never wait on its own lease.
+        with self._execution_guard(exclusive=True), self._locked():
+            yield
+
+    @contextlib.contextmanager
     def _locked(self) -> Iterator[None]:
         """Serialise a lifecycle read/check/write across threads *and*
         processes (instances sharing the state file): ``flock`` on a sidecar
@@ -391,7 +429,7 @@ class IncidentMutationLock:
             raise IncidentLockError("declaring needs the incident_commander capability")
         if not isinstance(incident_id, str) or not _INCIDENT_ID.fullmatch(incident_id):
             raise IncidentLockError("incident_id must match [A-Za-z0-9._:-]{1,128}")
-        with self._locked():
+        with self._transition():
             try:
                 existing = self.state()
             except (OSError, ValueError) as exc:
@@ -417,7 +455,7 @@ class IncidentMutationLock:
         """
         if not isinstance(principal, Principal):
             raise IncidentLockError("holder must be a Principal")
-        with self._locked():
+        with self._transition():
             state = self._require_commander(commander)
             if state.incident_id != incident_id:
                 raise IncidentLockError("incident id mismatch")
@@ -430,7 +468,7 @@ class IncidentMutationLock:
     def transfer(self, commander: Principal, new_holder: Principal) -> LockToken:
         if not isinstance(new_holder, Principal):
             raise IncidentLockError("holder must be a Principal")
-        with self._locked():
+        with self._transition():
             state = self._require_commander(commander)
             self._write(self._payload(state, new_holder))
             self._log("transfer", commander, holder=_principal_dict(new_holder))
@@ -438,14 +476,14 @@ class IncidentMutationLock:
 
     def release(self, commander: Principal) -> None:
         """Release the holder; the incident stays declared (nobody may write)."""
-        with self._locked():
+        with self._transition():
             state = self._require_commander(commander)
             self._write(self._payload(state, None))
             self._log("release", commander)
 
     def resolve(self, commander: Principal) -> None:
         """End the incident."""
-        with self._locked():
+        with self._transition():
             state = self._require_commander(commander)
             self._decide(commander, RESOLVE_ACTION, state.incident_id)
             self._write(self._payload(state, None, status="resolved"))
@@ -529,7 +567,7 @@ class IncidentMutationLock:
             raise IncidentLockError("takeover needs the incident_admin capability")
         if not isinstance(reason, str) or not reason.strip():
             raise IncidentLockError("a takeover needs a reason")
-        with self._locked():
+        with self._transition():
             try:
                 state = self.state()
             except (OSError, ValueError) as exc:
