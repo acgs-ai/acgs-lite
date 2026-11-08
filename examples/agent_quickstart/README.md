@@ -7,7 +7,8 @@ all three core capabilities work end-to-end.
 
 ```bash
 # Clone required — PyPI does not ship examples/
-pip install -e .
+# The [crypto] extra provides the Ed25519 receipt signer the demo needs.
+pip install -e ".[crypto]"
 python examples/agent_quickstart/run.py
 ```
 
@@ -99,7 +100,7 @@ Exit code `1` = one or more assertions failed — investigate the output.
 TASK: Verify ACGS-Lite from a source checkout.
 
 1. Clone https://github.com/acgs-ai/acgs-lite
-2. pip install -e .
+2. pip install -e ".[crypto]"
 3. python examples/agent_quickstart/run.py
 
 Expected: all ✅ lines, exit code 0.
