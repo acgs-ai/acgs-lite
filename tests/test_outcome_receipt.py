@@ -18,6 +18,7 @@ from acgs_lite.legitimacy import (
     EffectState,
     EffectStore,
     ExecutionBoundary,
+    ExecutionGrant,
     OutcomeReceipt,
     ProviderContract,
     ProviderContractClass,
@@ -25,11 +26,10 @@ from acgs_lite.legitimacy import (
     ProviderNotDispatchable,
     ProviderResult,
     SignedOutcomeReceipt,
+    local_grant_identity,
     outcome_from_record,
     receipt_identity,
     sign_outcome,
-    sign_receipt,
-    signed_envelope_identity,
 )
 
 DECISION = "acgs:receipt:v1:sha256:" + "a" * 64
@@ -80,6 +80,7 @@ def receipt(**changes):
         provider_id="payments",
         provider_contract_digest=contract().digest,
         decision_receipt_identity=DECISION,
+        grant_identity="acgs:local-grant:v1:issuer:grant",
         outcome=EffectOutcome.DONE,
         recorded_at=WHEN,
         provider_reference="ch_123",
@@ -104,7 +105,46 @@ def contracted(tmp_path):
     return ContractedEffectStore(store, registry)
 
 
-def reserve(contracted, grant="grant"):
+def grant(grant_id="grant", goal="refund"):
+    decision = DecisionReceipt.create(
+        request_id="req-v2",
+        goal=goal,
+        proposed_method="refund",
+        decision_type="ALLOW",
+        authority_basis="test",
+        matched_constraints=(BASELINE_CONSTRAINT_MARKER,),
+        policy_version="v1",
+        execution_boundary=ExecutionBoundary(
+            allowed_method="refund",
+            allowed_scope=None,
+            allowed_subjects=(),
+            expires_at=None,
+            single_use=True,
+        ),
+        schema_version=RECEIPT_SCHEMA_V2,
+        issued_at=WHEN,
+        grant_id=grant_id,
+        policy_digest="2" * 64,
+        method_id="refund",
+        argument_digest="1" * 64,
+    )
+    return ExecutionGrant(
+        grant_id=grant_id,
+        issuer_id="issuer",
+        receipt=decision,
+        method_id="refund",
+        argument_digest="1" * 64,
+        policy_digest="2" * 64,
+        scope=None,
+        subjects=(),
+        issued_at=WHEN,
+        expires_at=None,
+        single_use=True,
+        binding_mac="test-fixture",
+    )
+
+
+def reserve(contracted, grant="acgs:local-grant:v1:issuer:grant"):
     return contracted.store.reserve(
         provider_id="payments",
         grant_identity=grant,
@@ -131,6 +171,7 @@ def test_canonical_bytes_hash_and_identity():
     "changes",
     [
         dict(outcome=EffectOutcome.NOT_DONE),
+        dict(grant_identity="acgs:local-grant:v1:issuer:other"),
         dict(decision_receipt_identity="acgs:signed-envelope:v1:sha256:" + "c" * 64),
         dict(decision_receipt_identity="acgs:receipt:v2:sha256:" + "c" * 64),
         dict(provider_contract_digest="d" * 64),
@@ -156,6 +197,8 @@ def test_hash_changes_with_every_field(changes):
         dict(effect_key="key"),
         dict(effect_key="acgs:effect:v1:" + "B" * 64),
         dict(provider_id=""),
+        dict(grant_identity=""),
+        dict(grant_identity=None),
         dict(provider_contract_digest="abc"),
         dict(provider_contract_digest=None),
         dict(provider_reference=""),
@@ -191,43 +234,99 @@ def test_receipt_dict_round_trip_and_strict_fields():
             OutcomeReceipt.from_dict(payload)
 
 
-def test_outcome_from_record_requires_terminal_matching_provider(contracted):
+def test_outcome_from_record_requires_durable_terminal_matching_evidence(contracted):
     effect = reserve(contracted)
-    with pytest.raises(ValueError, match="not terminal"):
-        outcome_from_record(effect, contract=contract(), decision_receipt_identity=DECISION)
-    for state in (EffectState.IN_FLIGHT, EffectState.UNKNOWN):
+    provider = Provider()
+    kwargs = dict(store=contracted, provider=provider, grant=grant())
+    for state in (EffectState.RESERVED, EffectState.IN_FLIGHT, EffectState.UNKNOWN):
         with pytest.raises(ValueError, match="not terminal"):
-            outcome_from_record(
-                replace(effect, state=state),
-                contract=contract(),
-                decision_receipt_identity=DECISION,
-            )
-    done = replace(effect, state=EffectState.DONE)
-    with pytest.raises(ValueError, match="different provider"):
-        outcome_from_record(done, contract=contract("refunds"), decision_receipt_identity=DECISION)
-    with pytest.raises(ValueError, match="decision receipt"):
-        outcome_from_record(done, contract=contract(), decision_receipt_identity="")
+            outcome_from_record(replace(effect, state=state), **kwargs)
+    with pytest.raises(ValueError, match="durable state"):
+        outcome_from_record(replace(effect, state=EffectState.DONE), **kwargs)
+    done = contracted.send(effect.key, provider, grant=grant())
     with pytest.raises(TypeError):
-        outcome_from_record(object(), contract=contract(), decision_receipt_identity=DECISION)
-    with pytest.raises(TypeError):
-        outcome_from_record(done, contract=object(), decision_receipt_identity=DECISION)
-    built = outcome_from_record(done, contract=contract(), decision_receipt_identity=DECISION)
+        outcome_from_record(object(), **kwargs)
+    for name in ("store", "grant"):
+        with pytest.raises(TypeError):
+            outcome_from_record(done, **{**kwargs, name: object()})
+    built = outcome_from_record(done, **kwargs)
     assert built.outcome is EffectOutcome.DONE
     assert built.provider_contract_digest == contract().digest
+    assert built.grant_identity == local_grant_identity(grant())
+    assert built.decision_receipt_identity == receipt_identity(grant().receipt)
     assert datetime.fromisoformat(built.recorded_at).utcoffset().total_seconds() == 0
+
+
+def test_factory_rejects_uncontracted_dispatch_and_mismatched_grants(contracted):
+    effect = reserve(contracted)
+    provider = Provider()
+    done = contracted.store.send(effect.key, provider)
+    with pytest.raises(ProviderNotDispatchable, match="no durable contract binding"):
+        outcome_from_record(done, store=contracted, provider=provider, grant=grant())
+
+
+def test_factory_rejects_other_grant_and_mismatched_decision(contracted):
+    provider = Provider()
+    done = contracted.send(reserve(contracted).key, provider, grant=grant())
+    with pytest.raises(ValueError, match="different grant"):
+        outcome_from_record(
+            done, store=contracted, provider=provider, grant=replace(grant(), grant_id="other")
+        )
+    wrong_decision = grant("other").receipt
+    with pytest.raises(ValueError, match="decision receipt"):
+        outcome_from_record(
+            done,
+            store=contracted,
+            provider=provider,
+            grant=replace(grant(), receipt=wrong_decision),
+        )
+
+
+def test_same_grant_id_cannot_substitute_another_valid_decision(contracted):
+    provider = Provider()
+    original = grant()
+    forged = grant(goal="different decision with the same grant id")
+    assert local_grant_identity(original) == local_grant_identity(forged)
+    assert receipt_identity(original.receipt) != receipt_identity(forged.receipt)
+    done = contracted.send(reserve(contracted).key, provider, grant=original)
+    with pytest.raises(ValueError, match="durable decision binding"):
+        outcome_from_record(done, store=contracted, provider=provider, grant=forged)
+    with pytest.raises(ProviderNotDispatchable, match="durable decision binding"):
+        contracted.send(done.key, provider, grant=forged)
+    assert len(provider.sends) == 1
+
+
+def test_decision_binding_cannot_be_backfilled_after_dispatch(contracted):
+    provider = Provider()
+    done = contracted.send(reserve(contracted).key, provider)
+    assert contracted.decision_for(done.key) is None
+    with pytest.raises(ValueError, match="durable decision binding"):
+        outcome_from_record(done, store=contracted, provider=provider, grant=grant())
+    with pytest.raises(ProviderNotDispatchable, match="durable decision binding"):
+        contracted.send(done.key, provider, grant=grant())
+    assert contracted.decision_for(done.key) is None
+    assert len(provider.sends) == 1
+
+
+def test_decision_binding_survives_store_restart(contracted):
+    provider = Provider()
+    done = contracted.send(reserve(contracted).key, provider, grant=grant())
+    reopened = ContractedEffectStore(EffectStore(contracted.store.path), contracted.registry)
+    built = outcome_from_record(done, store=reopened, provider=provider, grant=grant())
+    assert built.decision_receipt_identity == receipt_identity(grant().receipt)
 
 
 def test_fenceable_send_done_signed_outcome_verifies(contracted):
     key = signer()
     provider = Provider()
     effect = reserve(contracted)
-    record = contracted.send(effect.key, provider)
+    record = contracted.send(effect.key, provider, grant=grant())
     assert record.state is EffectState.DONE
-    pinned = contracted.contract_for(effect.key, provider)
     outcome = outcome_from_record(
         record,
-        contract=pinned,
-        decision_receipt_identity=DECISION,
+        store=contracted,
+        provider=provider,
+        grant=grant(),
         provider_reference="ch_1",
         recorded_at=WHEN,
     )
@@ -253,16 +352,14 @@ def test_timeout_unknown_has_no_receipt_until_reconciled(contracted, lands, expe
     provider.land_before_error = lands
     effect = reserve(contracted)
     with pytest.raises(TimeoutError):
-        contracted.send(effect.key, provider)
+        contracted.send(effect.key, provider, grant=grant())
     record = contracted.store.get(effect.key)
     assert record.state is EffectState.UNKNOWN
     with pytest.raises(ValueError, match="not terminal"):
-        outcome_from_record(record, contract=contract(), decision_receipt_identity=DECISION)
+        outcome_from_record(record, store=contracted, provider=Provider(), grant=grant())
     reconciled = contracted.reconcile(effect.key, provider)
     assert reconciled.state.value == expected.value
-    outcome = outcome_from_record(
-        reconciled, contract=contract(), decision_receipt_identity=DECISION
-    )
+    outcome = outcome_from_record(reconciled, store=contracted, provider=Provider(), grant=grant())
     assert outcome.outcome is expected
     assert sign_outcome(outcome, key).verify(key.public_key_hex()) is True
     assert len(provider.sends) == 1
@@ -272,6 +369,7 @@ def test_timeout_unknown_has_no_receipt_until_reconciled(contracted, lands, expe
     "changes",
     [
         dict(outcome=EffectOutcome.NOT_DONE),
+        dict(grant_identity="acgs:local-grant:v1:issuer:other"),
         dict(decision_receipt_identity="acgs:receipt:v1:sha256:" + "f" * 64),
         dict(provider_contract_digest="0" * 64),
         dict(provider_reference="ch_other"),
@@ -364,10 +462,10 @@ def test_canonical_timestamps_accepted(value):
 
 
 def test_outcome_from_record_rejects_empty_recorded_at(contracted):
-    done = replace(reserve(contracted), state=EffectState.DONE)
+    done = contracted.send(reserve(contracted).key, Provider(), grant=grant())
     with pytest.raises(ValueError, match="recorded_at"):
         outcome_from_record(
-            done, contract=contract(), decision_receipt_identity=DECISION, recorded_at=""
+            done, store=contracted, provider=Provider(), grant=grant(), recorded_at=""
         )
 
 
@@ -390,38 +488,13 @@ def test_decision_identity_grammar_enforced(identity):
         receipt(decision_receipt_identity=identity)
 
 
-def test_v2_decision_receipt_and_envelope_identities_accepted(contracted):
+def test_v2_decision_identity_is_derived_from_original_grant(contracted):
+    done = contracted.send(reserve(contracted).key, Provider(), grant=grant())
+    built = outcome_from_record(done, store=contracted, provider=Provider(), grant=grant())
+    assert built.decision_receipt_identity == receipt_identity(grant().receipt)
+    assert built.grant_identity == local_grant_identity(grant())
     key = signer()
-    decision = DecisionReceipt.create(
-        request_id="req-v2",
-        goal="tools/call refund",
-        proposed_method="refund",
-        decision_type="ALLOW",
-        authority_basis="acgs-constitution:default",
-        matched_constraints=(BASELINE_CONSTRAINT_MARKER,),
-        policy_version="v1",
-        execution_boundary=ExecutionBoundary(
-            allowed_method="refund",
-            allowed_scope="call-digest:sha256:" + "1" * 64,
-            allowed_subjects=(),
-            expires_at=None,
-            single_use=True,
-        ),
-        schema_version=RECEIPT_SCHEMA_V2,
-        grant_id="grant-v2",
-        policy_digest="2" * 64,
-        method_id="refund",
-        argument_digest="1" * 64,
-    )
-    v2_identity = receipt_identity(decision)
-    assert v2_identity.startswith("acgs:receipt:v2:sha256:")
-    envelope_identity = signed_envelope_identity(sign_receipt(decision, key))
-    assert envelope_identity.startswith("acgs:signed-envelope:v1:sha256:")
-    done = replace(reserve(contracted), state=EffectState.DONE)
-    for identity in (v2_identity, envelope_identity):
-        built = outcome_from_record(done, contract=contract(), decision_receipt_identity=identity)
-        assert built.decision_receipt_identity == identity
-        assert sign_outcome(built, key).verify(key.public_key_hex()) is True
+    assert sign_outcome(built, key).verify(key.public_key_hex())
 
 
 @pytest.mark.parametrize(
@@ -432,9 +505,12 @@ def test_v2_decision_receipt_and_envelope_identities_accepted(contracted):
     ],
 )
 def test_outcome_from_record_requires_fenceable_contract(contracted, refused):
-    done = replace(reserve(contracted), state=EffectState.DONE)
-    with pytest.raises(ValueError, match="FENCEABLE"):
-        outcome_from_record(done, contract=refused, decision_receipt_identity=DECISION)
+    done = contracted.send(reserve(contracted).key, Provider(), grant=grant())
+    registry = ProviderContractRegistry()
+    registry.register(refused)
+    reopened = ContractedEffectStore(contracted.store, registry)
+    with pytest.raises(ProviderNotDispatchable, match="not dispatchable"):
+        outcome_from_record(done, store=reopened, provider=Provider(), grant=grant())
 
 
 def test_restart_with_other_contract_version_cannot_receipt(tmp_path):

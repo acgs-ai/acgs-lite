@@ -19,12 +19,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 
+from acgs_lite.legitimacy.authorization import ExecutionGrant
 from acgs_lite.legitimacy.effects import (
     EffectProvider,
     EffectRecord,
     EffectState,
     EffectStore,
 )
+from acgs_lite.legitimacy.identity import local_grant_identity, receipt_identity
+from acgs_lite.legitimacy.receipt import RECEIPT_SCHEMA_V2
 
 _CONTRACT_DOMAIN = b"acgs-provider-contract-v1\x00"
 PROVIDER_CONTRACT_SCHEMA = "acgs-provider-contract-v1"
@@ -186,6 +189,8 @@ class ContractedEffectStore:
         with self._transaction() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS effect_contract_bindings (
                 key TEXT PRIMARY KEY, contract_digest TEXT NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS effect_decision_bindings (
+                key TEXT PRIMARY KEY, decision_identity TEXT NOT NULL)""")
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
@@ -201,7 +206,9 @@ class ContractedEffectStore:
         finally:
             db.close()
 
-    def _bound_digest(self, key: str, bind: ProviderContract | None) -> str | None:
+    def _bound_digest(
+        self, key: str, bind: ProviderContract | None, decision_identity: str | None = None
+    ) -> str | None:
         with self._transaction() as db:
             if bind is not None:
                 # Re-check RESERVED inside this write transaction: the caller's
@@ -211,18 +218,37 @@ class ContractedEffectStore:
                     "SELECT key, ? FROM external_effects WHERE key=? AND state=?",
                     (bind.digest, key, EffectState.RESERVED.value),
                 )
+            if decision_identity is not None:
+                if bind is not None:
+                    db.execute(
+                        "INSERT OR IGNORE INTO effect_decision_bindings (key, decision_identity) "
+                        "SELECT key, ? FROM external_effects WHERE key=? AND state=?",
+                        (decision_identity, key, EffectState.RESERVED.value),
+                    )
+                decision = db.execute(
+                    "SELECT decision_identity FROM effect_decision_bindings WHERE key=?", (key,)
+                ).fetchone()
+                if decision is None or decision[0] != decision_identity:
+                    raise ProviderNotDispatchable("effect has no matching durable decision binding")
             row = db.execute(
                 "SELECT contract_digest FROM effect_contract_bindings WHERE key=?", (key,)
             ).fetchone()
             return None if row is None else row[0]
 
-    def _checked(self, key: str, provider: EffectProvider, *, bind: bool) -> ProviderContract:
+    def _checked(
+        self,
+        key: str,
+        provider: EffectProvider,
+        *,
+        bind: bool,
+        decision_identity: str | None = None,
+    ) -> ProviderContract:
         contract = self.registry.require_dispatchable(provider.provider_id)
         record = self.store.get(key)
         if record.request.provider_id != contract.provider_id:
             raise ProviderNotDispatchable("effect record is bound to a different provider")
         bind = bind and record.state is EffectState.RESERVED
-        bound = self._bound_digest(key, contract if bind else None)
+        bound = self._bound_digest(key, contract if bind else None, decision_identity)
         if bound is None:
             raise ProviderNotDispatchable("effect has no durable contract binding")
         if bound != contract.digest:
@@ -237,8 +263,35 @@ class ContractedEffectStore:
         """
         return self._checked(key, provider, bind=False)
 
-    def send(self, key: str, provider: EffectProvider) -> EffectRecord:
-        self._checked(key, provider, bind=True)
+    def decision_for(self, key: str) -> str | None:
+        """Decision identity bound before dispatch, never inferred after the effect."""
+        with self._transaction() as db:
+            row = db.execute(
+                "SELECT decision_identity FROM effect_decision_bindings WHERE key=?", (key,)
+            ).fetchone()
+            return None if row is None else row[0]
+
+    def send(
+        self, key: str, provider: EffectProvider, *, grant: ExecutionGrant | None = None
+    ) -> EffectRecord:
+        """Dispatch; supply the original authenticated grant to enable outcome receipts.
+
+        The trusted host authorizes the grant before calling. This records evidence
+        of that association; it does not authenticate a process-local capability.
+        """
+        decision = None
+        if grant is not None:
+            if not isinstance(grant, ExecutionGrant):
+                raise TypeError("grant must be an ExecutionGrant")
+            if self.store.get(key).request.grant_identity != local_grant_identity(grant):
+                raise ProviderNotDispatchable("effect record is bound to a different grant")
+            if (
+                grant.receipt.schema_version != RECEIPT_SCHEMA_V2
+                or grant.receipt.grant_id != grant.grant_id
+            ):
+                raise ProviderNotDispatchable("decision receipt must bind the originating grant")
+            decision = receipt_identity(grant.receipt)
+        self._checked(key, provider, bind=True, decision_identity=decision)
         return self.store.send(key, provider)
 
     def reconcile(self, key: str, provider: EffectProvider) -> EffectRecord:

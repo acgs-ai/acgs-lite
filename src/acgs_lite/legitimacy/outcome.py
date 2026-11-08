@@ -21,8 +21,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from acgs_lite.legitimacy.effects import EffectOutcome, EffectRecord, EffectState
-from acgs_lite.legitimacy.provider_contract import ProviderContract, ProviderContractClass
+from acgs_lite.legitimacy.authorization import ExecutionGrant
+from acgs_lite.legitimacy.effects import EffectOutcome, EffectProvider, EffectRecord, EffectState
+from acgs_lite.legitimacy.identity import local_grant_identity, receipt_identity
+from acgs_lite.legitimacy.provider_contract import ContractedEffectStore
+from acgs_lite.legitimacy.receipt import RECEIPT_SCHEMA_V2
 from acgs_lite.legitimacy.signing import (
     ReceiptSigner,
     ReceiptSigningUnavailable,
@@ -46,6 +49,7 @@ _RECEIPT_FIELDS = frozenset(
         "provider_id",
         "provider_contract_digest",
         "decision_receipt_identity",
+        "grant_identity",
         "outcome",
         "provider_reference",
         "recorded_at",
@@ -83,6 +87,7 @@ class OutcomeReceipt:
     provider_id: str
     provider_contract_digest: str
     decision_receipt_identity: str
+    grant_identity: str
     outcome: EffectOutcome
     recorded_at: str
     provider_reference: str | None = None
@@ -97,6 +102,7 @@ class OutcomeReceipt:
         ):
             raise ValueError("effect_key must be an acgs:effect:v1 key")
         _nonempty(self.provider_id, "provider_id")
+        _nonempty(self.grant_identity, "grant_identity")
         if (
             not isinstance(self.provider_contract_digest, str)
             or re.fullmatch(r"[0-9a-f]{64}", self.provider_contract_digest) is None
@@ -118,6 +124,7 @@ class OutcomeReceipt:
             "provider_id": self.provider_id,
             "provider_contract_digest": self.provider_contract_digest,
             "decision_receipt_identity": self.decision_receipt_identity,
+            "grant_identity": self.grant_identity,
             "outcome": self.outcome.value,
             "provider_reference": self.provider_reference,
             "recorded_at": self.recorded_at,
@@ -136,6 +143,7 @@ class OutcomeReceipt:
             provider_id=data["provider_id"],
             provider_contract_digest=data["provider_contract_digest"],
             decision_receipt_identity=data["decision_receipt_identity"],
+            grant_identity=data["grant_identity"],
             outcome=outcome,
             recorded_at=data["recorded_at"],
             provider_reference=data["provider_reference"],
@@ -259,33 +267,49 @@ def sign_outcome(receipt: OutcomeReceipt, signer: ReceiptSigner) -> SignedOutcom
 def outcome_from_record(
     record: EffectRecord,
     *,
-    contract: ProviderContract,
-    decision_receipt_identity: str,
+    store: ContractedEffectStore,
+    provider: EffectProvider,
+    grant: ExecutionGrant,
     provider_reference: str | None = None,
     recorded_at: str | None = None,
 ) -> OutcomeReceipt:
-    """Build an outcome receipt only for a terminal record bound to ``contract``.
+    """Build evidence from a durable terminal record and its originating grant.
 
-    ``contract`` must be FENCEABLE, the only dispatchable class. Obtain it from
-    :meth:`ContractedEffectStore.contract_for`, which also checks the contract
-    digest persisted when the effect was dispatched; this function cannot see
-    that binding and only checks the provider and the class.
+    Reserve effects with ``local_grant_identity(grant)`` and dispatch through
+    ``store.send``. The factory verifies the durable record and contract binding,
+    and derives the decision identity from the supplied grant's receipt. The host
+    must supply its original authenticated grant; this factory does not recreate
+    the issuer's process-local MAC authority. Consumers deduplicate by effect key,
+    since repeated receipt issuance does not imply repeated execution.
     """
     if not isinstance(record, EffectRecord):
         raise TypeError("record must be an EffectRecord")
-    if not isinstance(contract, ProviderContract):
-        raise TypeError("contract must be a ProviderContract")
+    if not isinstance(store, ContractedEffectStore):
+        raise TypeError("store must be a ContractedEffectStore")
+    if not isinstance(grant, ExecutionGrant):
+        raise TypeError("grant must be an ExecutionGrant")
     if record.state not in (EffectState.DONE, EffectState.NOT_DONE):
         raise ValueError("effect is not terminal; no outcome receipt for UNKNOWN or pending")
-    if record.request.provider_id != contract.provider_id:
-        raise ValueError("effect record is bound to a different provider")
-    if contract.contract_class is not ProviderContractClass.FENCEABLE:
-        raise ValueError("outcome receipts require a FENCEABLE provider contract")
+    if record != store.store.get(record.key):
+        raise ValueError("effect record does not match durable state")
+    contract = store.contract_for(record.key, provider)
+    grant_ref = local_grant_identity(grant)
+    if record.request.grant_identity != grant_ref:
+        raise ValueError("effect record is bound to a different grant")
+    if (
+        grant.receipt.schema_version != RECEIPT_SCHEMA_V2
+        or grant.receipt.grant_id != grant.grant_id
+    ):
+        raise ValueError("decision receipt must bind the originating grant")
+    decision_ref = receipt_identity(grant.receipt)
+    if store.decision_for(record.key) != decision_ref:
+        raise ValueError("effect has no matching durable decision binding")
     return OutcomeReceipt(
         effect_key=record.key,
         provider_id=record.request.provider_id,
         provider_contract_digest=contract.digest,
-        decision_receipt_identity=decision_receipt_identity,
+        decision_receipt_identity=decision_ref,
+        grant_identity=grant_ref,
         outcome=EffectOutcome(record.state.value),
         recorded_at=(
             datetime.now(timezone.utc).isoformat() if recorded_at is None else recorded_at
