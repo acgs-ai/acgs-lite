@@ -354,10 +354,35 @@ class ApprovalGate:
             return (str(approval.key_id), str(approval.nonce)) in self._consumed
 
     def consume(self, result: QuorumResult) -> bool:
-        """Spend every counted approval of *result*; False if any was spent."""
+        """Spend counted approvals only while their validity and authority remain current."""
+        if not result.satisfied or len(result.approvers) != len(result.counted_approvals):
+            return False
         keys = [(str(a.key_id), str(a.nonce)) for a in result.counted_approvals]
         with self._lock:
             if any(key in self._consumed for key in keys):
+                return False
+            try:
+                now = float(self._clock())
+                if not math.isfinite(now):
+                    return False
+                for approval, approver in zip(
+                    result.counted_approvals, result.approvers, strict=True
+                ):
+                    entry = self._authority.lookup(approval.key_id)
+                    if (
+                        entry is None
+                        or entry[0] != approver
+                        or now >= approval.expires_at
+                        or approval.issued_at > now + self._skew
+                        or not verify_signature(
+                            SIGNATURE_ALGORITHM,
+                            entry[1],
+                            approval.signing_message(),
+                            approval.signature,
+                        )
+                    ):
+                        return False
+            except Exception:
                 return False
             self._consumed.update(keys)
         return True
