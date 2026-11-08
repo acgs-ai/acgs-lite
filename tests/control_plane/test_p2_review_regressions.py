@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -50,6 +52,32 @@ DIGEST = "sha256:" + "a" * 64
 CI = Principal("ci-bot", PrincipalKind.SERVICE)
 AGENT = Principal("agent-1", PrincipalKind.AGENT)
 ALICE = Principal("alice", PrincipalKind.HUMAN)
+
+
+def test_verifier_import_does_not_load_issuer_modules() -> None:
+    code = """
+import importlib.abc
+import sys
+blocked = {
+    'acgs_lite.control_plane.pdp',
+    'acgs_lite.control_plane.dispatcher',
+    'acgs_lite.control_plane.invariants',
+    'acgs_lite.control_plane.receipt_ledger',
+}
+class BlockIssuer(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in blocked:
+            raise ImportError('issuer module imported: ' + fullname)
+sys.meta_path.insert(0, BlockIssuer())
+from acgs_lite.control_plane.receipt_verify import verify_receipt
+from acgs_lite.control_plane import verify_chain
+assert callable(verify_receipt) and callable(verify_chain)
+assert not blocked.intersection(sys.modules)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.fixture()
