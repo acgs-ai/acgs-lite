@@ -819,9 +819,12 @@ class GovernedToolDispatcher:
         if inspect.isawaitable(value):
             try:
                 self._recheck_kill_switch(principal, tool_name)
-            except BaseException:
+                self._verify_credential(principal, tool_name, credential)
+            except BaseException as exc:
                 if inspect.iscoroutine(value):
                     value.close()
+                if isinstance(exc, _Denied):
+                    raise self._pre_denial(principal, tool_name, str(exc)) from exc
                 raise
             value = await value
         return ToolResult(tool_name, value, decisions)
