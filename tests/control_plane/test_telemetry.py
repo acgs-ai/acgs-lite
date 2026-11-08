@@ -445,7 +445,7 @@ class TestDispatchGrouping:
                 return "ok"
 
             d.register("write", write, path_params={"paths"})
-            result = d.dispatch(AGENT, "write", {"paths": ["workspace/a", "workspace/b"]})
+            result = d.dispatch(AGENT, "write", {"paths": ["workspace/a.txt", "workspace/b.txt"]})
             d.authorize_without_consuming(AGENT, "write", {"paths": ["workspace/c"]})
         decisions = [e for e in store.read_all() if isinstance(e, DecisionObserved)]
         assert len(decisions) == 3  # tool.call + 2 paths; the dry run records nothing
@@ -637,7 +637,7 @@ def latency_setup(
 class TestApprovalLatencyThroughDispatcher:
     def test_successive_identical_action_cycles(self, latency_setup: Any) -> None:
         d, clock, store, bob, gate = latency_setup
-        args = {"path": "workspace/a", "content": "same"}
+        args = {"path": "workspace/a.txt", "content": "same"}
         hashes = []
         for start in (1000.0, 2000.0):
             clock.now = start
@@ -663,13 +663,13 @@ class TestApprovalLatencyThroughDispatcher:
         ],
     ) -> None:
         d, clock, store, bob, gate = latency_setup
-        args = {"path": "workspace/a", "content": "v1"}
+        args = {"path": "workspace/a.txt", "content": "v1"}
         action = d.action_hash_for(AGENT, "edit", args, requested_by=REQ)  # requested @1000
         with pytest.raises(ToolDenied):  # no approval yet: still one REQUESTED (deduped)
             d.dispatch(AGENT, "edit", args, requested_by=REQ)
         clock.now = 1090.0
         d.dispatch(AGENT, "edit", args, requested_by=REQ, approvals=[bob(action, now=clock.now)])
-        d.action_hash_for(AGENT, "edit", {"path": "workspace/b"}, requested_by=REQ)  # pending
+        d.action_hash_for(AGENT, "edit", {"path": "workspace/b.txt"}, requested_by=REQ)  # pending
         latency = OversightMetrics(store, clock=clock).approval_latency()
         assert (latency.count, latency.p50_s, latency.max_s, latency.pending) == (1, 90, 90, 1)
         granted = [e for e in store.read_all() if isinstance(e, ApprovalGranted)]
@@ -690,7 +690,7 @@ class TestApprovalLatencyThroughDispatcher:
         ],
     ) -> None:
         d, clock, store, bob, _ = latency_setup
-        args = {"path": "workspace/a", "content": "v1"}
+        args = {"path": "workspace/a.txt", "content": "v1"}
         action = d.action_hash_for(AGENT, "edit", args, requested_by=REQ)  # @1000
         clock.now = 1010.0
         approval = bob(action, now=clock.now)  # human signs after 10 s
@@ -770,11 +770,11 @@ class TestApprovalLatencyThroughDispatcher:
             )
             calls = Calls()
             d.register("edit", calls.tool, path_params={"path"}, opaque_params={"content"})
-            args = {"path": "workspace/a", "content": "v1"}
+            args = {"path": "workspace/a.txt", "content": "v1"}
             action = d.action_hash_for(AGENT, "edit", args, requested_by=REQ)
             bob = approver_factory("bob")
             d.dispatch(AGENT, "edit", args, requested_by=REQ, approvals=[bob(action, now=1000)])
-        assert calls.paths == ["workspace/a"]
+        assert calls.paths == ["workspace/a.txt"]
         assert gate.telemetry_failures == 2  # requested + granted
 
     def test_l3_eviction_keeps_pending_requests(
@@ -846,7 +846,7 @@ class TestErrorBudgetBridge:
         store, rec = _recorder(clock)
         TelemetryAutonomyBridge(autonomy).attach(store)
         d, calls = _autonomy_dispatcher(pdp, autonomy)
-        d.dispatch(AGENT, "write", {"path": "workspace/a"})
+        d.dispatch(AGENT, "write", {"path": "workspace/a.txt"})
         rec.record_verification_failed("loop-a", "s1", agent=AGENT)
         rec.record_verification_failed("loop-a", "s2")  # unattributed: ignored
         rec.record_verification_failed("loop-a", "s3", agent=AGENT)
@@ -854,9 +854,9 @@ class TestErrorBudgetBridge:
         rec.record_verification_failed("loop-a", "s4", agent=AGENT)
         assert autonomy.level(AGENT) is AutonomyLevel.P0_ONLY
         with pytest.raises(ToolDenied, match="P0_ONLY"):
-            d.dispatch(AGENT, "write", {"path": "workspace/b"})
-        d.dispatch(AGENT, "read", {"path": "workspace/b"})
-        assert calls == ["write:workspace/a", "read:workspace/b"]
+            d.dispatch(AGENT, "write", {"path": "workspace/b.txt"})
+        d.dispatch(AGENT, "read", {"path": "workspace/b.txt"})
+        assert calls == ["write:workspace/a.txt", "read:workspace/b.txt"]
 
     def test_rollbacks_demote(self) -> None:
         autonomy = AutonomyController(ErrorBudget(max_rollbacks=2))
