@@ -893,3 +893,62 @@ def test_receipt_side_binding_mismatch_denies(receipt_override: dict[str, Any], 
     live = bind_invocation(func, ("acct-1",), {}, include_receiver=True, strict_context=True)
     assert envelope["argument_digest"] == live.argument_digest
     _deny(wrapped, calls, match, "acct-1", signed_receipt=forged)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_halt_during_validation_settles_without_execution(
+    monkeypatch: pytest.MonkeyPatch, asynchronous: bool, tmp_path: Any
+) -> None:
+    import asyncio
+
+    from acgs_lite.circuit_breaker import GovernanceCircuitBreaker, GovernanceHaltError
+    from acgs_lite.legitimacy.ledger import AttemptStatus
+
+    breaker = GovernanceCircuitBreaker("callable-validation-review", signal_dir=tmp_path)
+    guard = _guard(circuit_breaker=breaker)
+    calls: list[str] = []
+
+    def sync_call(value: str) -> str:
+        calls.append(value)
+        return value
+
+    async def async_call(value: str) -> str:
+        return sync_call(value)
+
+    wrapped = guard(async_call if asynchronous else sync_call)
+    grant = wrapped.issue_grant("safe")
+    validate = guard.engine.validate
+
+    def halt_validate(*args: Any, **kwargs: Any) -> Any:
+        result = validate(*args, **kwargs)
+        breaker.trip("halt during validation")
+        return result
+
+    monkeypatch.setattr(guard.engine, "validate", halt_validate)
+    with pytest.raises(GovernanceHaltError):
+        if asynchronous:
+            asyncio.run(wrapped("safe", execution_grant=grant, execution_attempt_id="halt"))
+        else:
+            wrapped("safe", execution_grant=grant, execution_attempt_id="halt")
+    assert calls == []
+    assert guard._ledger.attempt_status_for_grant(grant.grant_id) is AttemptStatus.FAILED
+
+
+def test_signed_registration_does_not_visit_live_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    guard = _guard()
+    _, wrapped = _protected(guard, [])
+    grant = wrapped.issue_grant("safe")
+    entry = guard._signed_grants[grant.grant_id]
+    visits = 0
+    original = guard._prunable
+
+    def counted(*args: Any) -> bool:
+        nonlocal visits
+        visits += 1
+        return original(*args)
+
+    monkeypatch.setattr(guard, "_prunable", counted)
+    for index in range(1000):
+        guard._register_signed_grant(f"registered-{index}", entry)
+    assert len(guard._signed_grants) == 1001
+    assert visits == 0
