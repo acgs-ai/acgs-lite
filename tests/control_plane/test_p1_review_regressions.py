@@ -501,7 +501,7 @@ class TestFinalReviewBoundaries:
             dispatcher = GovernedToolDispatcher(
                 pdp, permissions=permissions, tool_tiers={"write": ActionTier.T1}
             )
-            dispatcher.register("write", write, path_params={"path"})
+            dispatcher.register("write", write, path_params={"path"}, merge_capable=False)
             with pytest.raises(ToolDenied):
                 dispatcher.dispatch(AGENT, "write", {"path": raw})
         assert not (tmp_path / "outside").exists()
