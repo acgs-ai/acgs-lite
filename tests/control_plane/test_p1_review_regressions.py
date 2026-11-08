@@ -21,6 +21,7 @@ from acgs_lite.control_plane import (
     DecisionRequest,
     GovernedToolDispatcher,
     IAMGrantRejected,
+    ImmutableCoreRegistry,
     PolicyDecisionPoint,
     PolicyEffect,
     PolicySet,
@@ -40,9 +41,9 @@ HUMAN = Principal("alice", PrincipalKind.HUMAN)
 SCOPED_HUMAN = Principal("bob", PrincipalKind.HUMAN)
 
 
-def _permissions() -> RepositoryPermissions:
+def _permissions(registry: ImmutableCoreRegistry = DEFAULT_IMMUTABLE_CORE) -> RepositoryPermissions:
     return RepositoryPermissions(
-        DEFAULT_IMMUTABLE_CORE,
+        registry,
         [
             WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**", "app/**")),
             WriteGrant("alice", PrincipalKind.HUMAN, ("**",)),
@@ -66,7 +67,7 @@ def _dispatcher(pdp: PolicyDecisionPoint) -> tuple[GovernedToolDispatcher, _Sink
     sink = _Sink()
     d = GovernedToolDispatcher(
         pdp,
-        permissions=_permissions(),
+        permissions=_permissions(pdp.registry),
         tool_tiers={
             "write_default": ActionTier.T1,
             "read_default": ActionTier.T1,
@@ -455,7 +456,7 @@ class TestOpaqueSubclassBoundary:
             calls.append(payload)
 
         dispatcher = GovernedToolDispatcher(
-            pdp, permissions=_permissions(), tool_tiers={"opaque": ActionTier.T1}
+            pdp, permissions=_permissions(pdp.registry), tool_tiers={"opaque": ActionTier.T1}
         )
         dispatcher.register("opaque", opaque, opaque_params={"payload"}, merge_capable=False)
         with pytest.raises(ToolDenied):
@@ -479,9 +480,91 @@ class TestOpaqueSubclassBoundary:
 
 
 class TestFinalReviewBoundaries:
+    @pytest.mark.parametrize("read_only", [False, True])
+    def test_explicit_root_preserves_leaf_access_from_unrelated_cwd(
+        self,
+        constitution: Constitution,
+        permit_all: PolicySet,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        read_only: bool,
+    ) -> None:
+        repository = tmp_path / "repository"
+        leaf = repository / "workspace" / "file.txt"
+        leaf.parent.mkdir(parents=True)
+        leaf.write_text("leaf")
+        other = tmp_path / "unrelated"
+        other.mkdir()
+        monkeypatch.chdir(other)
+        registry = DEFAULT_IMMUTABLE_CORE.with_repo_root(str(repository))
+
+        def access(path: str) -> str:
+            target = repository / path
+            if not read_only:
+                target.write_text("updated")
+            return target.read_text()
+
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, registry=registry
+        ) as pdp:
+            dispatcher = GovernedToolDispatcher(
+                pdp,
+                permissions=_permissions(registry),
+                tool_tiers={"access": ActionTier.T1},
+                read_only_tools=frozenset({"access"}) if read_only else frozenset(),
+            )
+            dispatcher.register("access", access, path_params={"path"})
+            result = dispatcher.dispatch(AGENT, "access", {"path": "workspace/file.txt"})
+            assert result.value == ("leaf" if read_only else "updated")
+
+    @pytest.mark.parametrize("read_only", [False, True])
+    def test_unbound_registry_cannot_probe_unrelated_cwd(
+        self,
+        constitution: Constitution,
+        permit_all: PolicySet,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        read_only: bool,
+    ) -> None:
+        import shutil
+
+        repository = tmp_path / "repository"
+        directory = repository / "workspace" / "v1.2"
+        directory.mkdir(parents=True)
+        secret = directory / ".env"
+        secret.write_text("secret")
+        other = tmp_path / "unrelated"
+        other.mkdir()
+        monkeypatch.chdir(other)
+        calls: list[str] = []
+
+        def recursive(path: str) -> None:
+            calls.append(path)
+            if read_only:
+                (repository / path / ".env").read_text()
+            else:
+                shutil.rmtree(repository / path)
+
+        with PolicyDecisionPoint.for_constitution(constitution, permit_all) as pdp:
+            dispatcher = GovernedToolDispatcher(
+                pdp,
+                permissions=_permissions(),
+                tool_tiers={"recursive": ActionTier.T1},
+                read_only_tools=frozenset({"recursive"}) if read_only else frozenset(),
+            )
+            dispatcher.register("recursive", recursive, path_params={"path"})
+            with pytest.raises(ToolDenied):
+                dispatcher.dispatch(AGENT, "recursive", {"path": "workspace/v1.2"})
+        assert calls == []
+        assert secret.read_text() == "secret"
+
     def test_workflow_and_make_gate_scripts_are_protected(self) -> None:
         root = Path(__file__).resolve().parents[2]
-        callers = [root / "Makefile", *(root / ".github/workflows").glob("*.yml")]
+        callers = [
+            root / "Makefile",
+            root / ".gitlab-ci.yml",
+            *(root / ".github/workflows").glob("*.yml"),
+        ]
         scripts = {
             path
             for caller in callers
@@ -603,6 +686,7 @@ class TestFinalReviewBoundaries:
             "scripts/qualify_wheel.py",
             "scripts/run_governance_regression.py",
             "scripts/check_links.py",
+            "scripts/check_release_coherence.py",
             "tests/red_team/governance_fail_closed_cases.py",
             "Makefile",
         ],
@@ -685,7 +769,7 @@ class TestFinalReviewBoundaries:
 
     async def test_sync_async_dispatch_uses_worker_thread(self, pdp: PolicyDecisionPoint) -> None:
         dispatcher = GovernedToolDispatcher(
-            pdp, permissions=_permissions(), tool_tiers={"thread_id": ActionTier.T1}
+            pdp, permissions=_permissions(pdp.registry), tool_tiers={"thread_id": ActionTier.T1}
         )
 
         def thread_id() -> int:

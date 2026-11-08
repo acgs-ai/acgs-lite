@@ -224,10 +224,14 @@ class TestDispatcherChecksBothSwitches:
                 pdp_state["on"] = True
 
         with PolicyDecisionPoint.for_constitution(
-            constitution, permit_all, kill_switch=pdp_switch, listeners=[engage_on_allow]
+            constitution,
+            permit_all,
+            kill_switch=pdp_switch,
+            listeners=[engage_on_allow],
+            registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)),
         ) as pdp:
             permissions = RepositoryPermissions(
-                DEFAULT_IMMUTABLE_CORE,
+                pdp.registry,
                 [WriteGrant("alice", PrincipalKind.HUMAN, ("**",))],
             )
             d = GovernedToolDispatcher(

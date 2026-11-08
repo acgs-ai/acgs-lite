@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -71,7 +72,7 @@ class Calls:
 def _dispatcher(pdp: PolicyDecisionPoint) -> tuple[GovernedToolDispatcher, Calls]:
     calls = Calls()
     permissions = RepositoryPermissions(
-        DEFAULT_IMMUTABLE_CORE,
+        pdp.registry,
         [
             WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",)),
             WriteGrant("alice", PrincipalKind.HUMAN, ("**",)),
@@ -605,12 +606,17 @@ class TestPdpIntegration:
         permit_all: PolicySet,
         approval_gate: ApprovalGate,
         approver_factory: Factory,
+        tmp_path: Path,
     ) -> None:
         ledger = ReceiptLedger(
             Ed25519ReceiptSigner.from_seed(b"\x02" * 32, key_id="h"), store=InMemoryReceiptStore()
         )
         with PolicyDecisionPoint.for_constitution(
-            constitution, permit_all, approval_gate=approval_gate, receipt_ledger=ledger
+            constitution,
+            permit_all,
+            approval_gate=approval_gate,
+            receipt_ledger=ledger,
+            registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)),
         ) as pdp:
             d, calls = _dispatcher(pdp)
             digest = _hash(d, ALICE, "deploy", "workspace/db")

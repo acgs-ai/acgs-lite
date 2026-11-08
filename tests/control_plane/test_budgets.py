@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from acgs_lite.control_plane import (
-    DEFAULT_IMMUTABLE_CORE,
     ActionTier,
     GovernedToolDispatcher,
     PolicyDecisionPoint,
@@ -52,7 +51,7 @@ def _dispatcher(
     d = GovernedToolDispatcher(
         pdp,
         permissions=RepositoryPermissions(
-            DEFAULT_IMMUTABLE_CORE, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
+            pdp.registry, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
         ),
         tool_tiers={"read": ActionTier.T0, "write": ActionTier.T1},
         read_only_tools=frozenset({"read"}),

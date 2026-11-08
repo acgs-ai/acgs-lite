@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from acgs_lite.constitution import Constitution
 from acgs_lite.control_plane import (
+    DEFAULT_IMMUTABLE_CORE,
     PolicyDecisionPoint,
     PolicySet,
     Principal,
@@ -48,9 +50,12 @@ def human() -> Principal:
 
 
 @pytest.fixture()
-def pdp(constitution: Constitution, permit_all: PolicySet) -> Iterator[PolicyDecisionPoint]:
+def pdp(
+    constitution: Constitution, permit_all: PolicySet, tmp_path: Path
+) -> Iterator[PolicyDecisionPoint]:
     """A deliberately permissive PDP: only the invariants stand in the way."""
-    with PolicyDecisionPoint.for_constitution(constitution, permit_all) as point:
+    registry = DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path))
+    with PolicyDecisionPoint.for_constitution(constitution, permit_all, registry=registry) as point:
         yield point
 
 
@@ -66,11 +71,14 @@ def approval_gate(approval_authority: ApprovalAuthority) -> ApprovalGate:
 
 @pytest.fixture()
 def gated_pdp(
-    constitution: Constitution, permit_all: PolicySet, approval_gate: ApprovalGate
+    constitution: Constitution, permit_all: PolicySet, approval_gate: ApprovalGate, tmp_path: Path
 ) -> Iterator[PolicyDecisionPoint]:
     """Permissive PDP whose approvers come only from signed approvals."""
     with PolicyDecisionPoint.for_constitution(
-        constitution, permit_all, approval_gate=approval_gate
+        constitution,
+        permit_all,
+        approval_gate=approval_gate,
+        registry=DEFAULT_IMMUTABLE_CORE.with_repo_root(str(tmp_path)),
     ) as point:
         yield point
 

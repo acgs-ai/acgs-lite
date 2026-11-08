@@ -159,7 +159,7 @@ def _dispatcher(
     d = GovernedToolDispatcher(
         pdp,
         permissions=RepositoryPermissions(
-            DEFAULT_IMMUTABLE_CORE, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
+            pdp.registry, [WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**",))]
         ),
         tool_tiers={"write": ActionTier.T1},
         credential_issuer=issuer,
@@ -198,7 +198,7 @@ class TestDispatcherRequiresCredential:
         assert calls == ["workspace/a"]
 
     def test_construction_rules(self, pdp: PolicyDecisionPoint) -> None:
-        permissions = RepositoryPermissions(DEFAULT_IMMUTABLE_CORE)
+        permissions = RepositoryPermissions(pdp.registry)
         with pytest.raises(ValueError):
             GovernedToolDispatcher(
                 pdp, permissions=permissions, tool_tiers={}, require_credential=True
