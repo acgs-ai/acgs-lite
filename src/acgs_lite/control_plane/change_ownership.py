@@ -17,10 +17,12 @@ grader, so its writes are confined to its own branch.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import posixpath
 import re
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -105,8 +107,9 @@ class ChangeOwnershipRegistry:
         self._admin = admin
         self._attestor = checked_attestor(admin_attestor)
         self._registry = registry
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._changes: dict[str, ChangeOwnership] = {}
+        self._executions: dict[str, int] = {}
 
     @property
     def registry(self) -> ImmutableCoreRegistry:
@@ -167,7 +170,30 @@ class ChangeOwnershipRegistry:
         self._attest(admin, admin_credential)
         self._require_admin(admin, "releases")
         with self._lock:
+            if self._executions.get(change_id, 0):
+                raise OwnershipDenied(f"change {change_id!r} has an active execution")
             return self._changes.pop(change_id, None) is not None
+
+    @contextlib.contextmanager
+    def execution(self, principal: Principal, change_id: str) -> Iterator[None]:
+        """Pin the current assignment until the execution body has finished.
+
+        Transitions fail immediately while a writer is active, including
+        lifecycle calls made by the tool itself. No mutex is held over tool
+        execution or an await; concurrent calls by the same owner are allowed.
+        """
+        with self._lock:
+            self.assert_writer(principal, change_id)
+            self._executions[change_id] = self._executions.get(change_id, 0) + 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                remaining = self._executions[change_id] - 1
+                if remaining:
+                    self._executions[change_id] = remaining
+                else:
+                    del self._executions[change_id]
 
     def get(self, change_id: str) -> ChangeOwnership | None:
         with self._lock:
