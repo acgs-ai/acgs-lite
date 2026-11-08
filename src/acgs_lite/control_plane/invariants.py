@@ -142,10 +142,23 @@ def _core_write_by_non_human(ctx: DecisionContext) -> bool:
     )
 
 
+def _all_core_categories(ctx: DecisionContext) -> frozenset[CoreCategory]:
+    """``ctx.core_category`` plus every other category the resource path
+    matches: precedence picks one category for display, but a restriction
+    from any matching category must still apply (``policies/.env`` is
+    POLICY *and* CREDENTIALS)."""
+    if ctx.core_category is None:
+        return frozenset()
+    request = ctx.request
+    namespace = request.action.split(".", 1)[0].lower() if "." in request.action else ""
+    if namespace in ACTION_NAMESPACE_CATEGORIES:
+        return frozenset({ctx.core_category})
+    return frozenset({ctx.core_category}) | ctx.registry.categories(request.resource)
+
+
 def _sensitive_access_by_non_human(ctx: DecisionContext) -> bool:
-    return (
-        ctx.request.principal.kind is not PrincipalKind.HUMAN
-        and ctx.core_category in SENSITIVE_READ_CATEGORIES
+    return ctx.request.principal.kind is not PrincipalKind.HUMAN and bool(
+        _all_core_categories(ctx) & SENSITIVE_READ_CATEGORIES
     )
 
 
@@ -153,7 +166,7 @@ def _human_only_change_below_floor(ctx: DecisionContext) -> bool:
     request = ctx.request
     return (
         is_write_action(request.action)
-        and ctx.core_category in HUMAN_ONLY_CHANGE_CATEGORIES
+        and bool(_all_core_categories(ctx) & HUMAN_ONLY_CHANGE_CATEGORIES)
         and request.tier < HUMAN_CORE_CHANGE_MIN_TIER
     )
 

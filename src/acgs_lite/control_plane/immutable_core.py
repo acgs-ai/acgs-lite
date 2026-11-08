@@ -45,6 +45,7 @@ __all__ = [
     "UNRESOLVABLE_PATH_CATEGORY",
     "compile_glob",
     "literal_prefix",
+    "module_shadow_patterns",
     "normalize_path",
 ]
 
@@ -207,6 +208,28 @@ def literal_prefix(pattern: str) -> str:
     return pattern[:cut].lower()
 
 
+def module_shadow_patterns(pattern: str) -> tuple[str, ...]:
+    """Globs for files that Python would import *instead of* the module *pattern*.
+
+    For a literal ``dir/name.py`` entry, CPython's path finder prefers a
+    package directory ``dir/name/`` and extension modules ``dir/name.*.so``,
+    and an unchecked-hash ``__pycache__`` entry can replace the source. All
+    of them run in place of the protected module, so they are core too.
+    Wildcard patterns already cover their own directory and return ``()``.
+    """
+    if literal_prefix(pattern) != pattern.lower() or not pattern.lower().endswith(".py"):
+        return ()
+    directory, base = posixpath.split(pattern)
+    stem = base[: -len(".py")]
+    if not stem:
+        return ()
+    prefix = directory + "/" if directory else ""
+    shadows = [f"{prefix}{stem}.*", f"{prefix}__pycache__/{stem}.*"]
+    if stem != "__init__":
+        shadows.append(f"{prefix}{stem}/**")
+    return tuple(shadows)
+
+
 def _validate_pattern(pattern: object) -> str:
     if not isinstance(pattern, str) or not pattern.strip():
         raise ImmutableCoreError("core patterns must be non-empty strings")
@@ -223,9 +246,10 @@ def _validate_pattern(pattern: object) -> str:
 class ImmutableCoreRegistry:
     """Immutable mapping of :class:`CoreCategory` to repo globs."""
 
-    __slots__ = ("_entries", "_compiled", "_anchored_prefixes", "_repo_root")
+    __slots__ = ("_entries", "_shadows", "_compiled", "_anchored_prefixes", "_repo_root")
 
     _entries: tuple[tuple[CoreCategory, tuple[str, ...]], ...]
+    _shadows: tuple[tuple[CoreCategory, tuple[str, ...]], ...]
     _compiled: tuple[tuple[CoreCategory, tuple[re.Pattern[str], ...]], ...]
     _anchored_prefixes: tuple[tuple[CoreCategory, tuple[str, ...]], ...]
     _repo_root: str | None
@@ -252,11 +276,22 @@ class ImmutableCoreRegistry:
         entries = tuple(
             (category, tuple(sorted(by_category[category]))) for category in CoreCategory
         )
+        shadows = tuple(
+            (
+                category,
+                tuple(sorted({s for p in pats for s in module_shadow_patterns(p)} - set(pats))),
+            )
+            for category, pats in entries
+        )
         object.__setattr__(self, "_entries", entries)
+        object.__setattr__(self, "_shadows", shadows)
         object.__setattr__(
             self,
             "_compiled",
-            tuple((cat, tuple(compile_glob(p) for p in pats)) for cat, pats in entries),
+            tuple(
+                (cat, tuple(compile_glob(p) for p in (*pats, *shadow_pats)))
+                for (cat, pats), (_, shadow_pats) in zip(entries, shadows, strict=True)
+            ),
         )
         object.__setattr__(
             self,
@@ -295,27 +330,60 @@ class ImmutableCoreRegistry:
         """Return a read-only ``{category: sorted patterns}`` view."""
         return MappingProxyType(dict(self._entries))
 
+    def shadow_patterns(self) -> Mapping[CoreCategory, tuple[str, ...]]:
+        """Return the derived ``{category: globs}`` for module shadows
+        (see :func:`module_shadow_patterns`); they are core like the
+        :meth:`patterns` they derive from, but are not part of the manifest."""
+        return MappingProxyType(dict(self._shadows))
+
     def normalize(self, path: object) -> str | None:
         return normalize_path(path, self._repo_root)
 
     def classify(self, path: object) -> CoreCategory | None:
-        """Return the core category of *path*, or ``None`` if it is not core."""
+        """Return the core category of *path*, or ``None`` if it is not core.
+
+        Only the highest-precedence category is returned; enforcement that
+        depends on *which* category applies must use :meth:`categories`.
+        """
         normalized = self.normalize(path)
         if normalized is None:
             return UNRESOLVABLE_PATH_CATEGORY
-        if normalized == ".":
-            for category, pats in self._entries:
-                if pats:
+        by_pattern, by_prefix = self._matches(normalized)
+        for found in (by_pattern, by_prefix):
+            for category in CoreCategory:
+                if category in found:
                     return category
-            return None
-        for category, regexes in self._compiled:
-            if any(regex.fullmatch(normalized) for regex in regexes):
-                return category
-        directory = normalized.lower() + "/"
-        for category, prefixes in self._anchored_prefixes:
-            if any(prefix.startswith(directory) for prefix in prefixes):
-                return category
         return None
+
+    def categories(self, path: object) -> frozenset[CoreCategory]:
+        """Return *every* core category *path* falls in (empty if not core).
+
+        ``policies/.env`` is both ``POLICY`` and ``CREDENTIALS``; a check
+        that looks only at the first category would lose the credential
+        restriction.
+        """
+        normalized = self.normalize(path)
+        if normalized is None:
+            return frozenset({UNRESOLVABLE_PATH_CATEGORY})
+        by_pattern, by_prefix = self._matches(normalized)
+        return by_pattern | by_prefix
+
+    def _matches(self, normalized: str) -> tuple[frozenset[CoreCategory], frozenset[CoreCategory]]:
+        """(categories whose globs match, categories with a pattern below it)."""
+        if normalized == ".":
+            return frozenset(category for category, pats in self._entries if pats), frozenset()
+        by_pattern = frozenset(
+            category
+            for category, regexes in self._compiled
+            if any(regex.fullmatch(normalized) for regex in regexes)
+        )
+        directory = normalized.lower() + "/"
+        by_prefix = frozenset(
+            category
+            for category, prefixes in self._anchored_prefixes
+            if any(prefix.startswith(directory) for prefix in prefixes)
+        )
+        return by_pattern, by_prefix
 
     def is_core(self, path: object) -> bool:
         return self.classify(path) is not None

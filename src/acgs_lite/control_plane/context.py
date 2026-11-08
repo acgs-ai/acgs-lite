@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Mapping
@@ -101,7 +102,13 @@ class DecisionRequest:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "approvers", tuple(self.approvers))
-        object.__setattr__(self, "attributes", MappingProxyType(dict(self.attributes)))
+        # An owned deep copy: nested lists/dicts must not stay shared with the
+        # caller, or a value could change between hashing and evaluation. The
+        # PDP re-snapshots (``dataclasses.replace``) before it hashes, so the
+        # digest and the evaluated inputs are always the same objects.
+        object.__setattr__(
+            self, "attributes", MappingProxyType(copy.deepcopy(dict(self.attributes)))
+        )
 
     def canonical(self) -> dict[str, Any]:
         """JSON-ready projection used for :meth:`inputs_digest`."""

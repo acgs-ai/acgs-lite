@@ -218,6 +218,10 @@ class PolicyDecisionPoint:
             raise ValueError("max_workers must be >= 1")
         if not isinstance(registry, ImmutableCoreRegistry):
             raise ValueError("registry must be an ImmutableCoreRegistry")
+        if durable_audit and audit_log is None:
+            # Otherwise every allow would go out unrecorded although
+            # durability was explicitly requested.
+            raise ValueError("durable_audit=True requires an audit_log")
         self._policy_set = policy_set
         self._constitution_hash = constitution_hash if isinstance(constitution_hash, str) else ""
         self._policy_digest = policy_digest if isinstance(policy_digest, str) else ""
@@ -345,6 +349,17 @@ class PolicyDecisionPoint:
         problem = _validate_request(request)
         if problem is not None:
             return self._deny(None, f"unparseable request: {problem}", error="invalid_request")
+        try:
+            # PDP-owned deep snapshot: the digest below and the evaluation in
+            # the worker thread see the same inputs, whatever the caller does
+            # with its own request object meanwhile.
+            request = replace(request)
+        except Exception as exc:
+            return self._deny(
+                None,
+                f"unparseable request: cannot snapshot ({type(exc).__name__})",
+                error="invalid_request",
+            )
         if not self._constitution_hash.strip() or not self._policy_digest.strip():
             return self._deny(
                 request, "missing constitution hash or policy digest", error="missing_binding"
@@ -466,7 +481,10 @@ class PolicyDecisionPoint:
             if self._durable_audit:
                 self._audit_log.record_durable(entry)
             else:
-                self._audit_log.record(entry)
+                # record() swallows backend write errors; record_atomic()
+                # raises them (and rolls the entry back), so a failed write
+                # withdraws the allow below.
+                self._audit_log.record_atomic(entry)
         except Exception as exc:
             logger.error("pdp audit record failed: %s", type(exc).__name__)
             if decision.allowed:

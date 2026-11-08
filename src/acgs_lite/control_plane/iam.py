@@ -85,7 +85,7 @@ def _overlapping_core_pattern(glob: str, registry: ImmutableCoreRegistry) -> str
     # TODO(control-plane-gap): glob-overlap is approximated by literal
     # prefixes; exact glob intersection is not implemented.
     grant_prefix = literal_prefix(glob)
-    for patterns in registry.patterns().values():
+    for patterns in (*registry.patterns().values(), *registry.shadow_patterns().values()):
         for pattern in patterns:
             core_prefix = literal_prefix(pattern)
             if not core_prefix:
@@ -125,6 +125,21 @@ class RepositoryPermissions:
     def registry(self) -> ImmutableCoreRegistry:
         return self._registry
 
+    def has_unrestricted_write(self, principal: Principal) -> bool:
+        """True only if *principal* (id + kind) holds a grant for ``**``.
+
+        Used where write targets cannot be enumerated (shell commands): a
+        path-scoped grant cannot be enforced there, so it is not enough.
+        """
+        if not isinstance(principal, Principal):
+            return False
+        return any(
+            canonical_principal_id(grant.principal_id) == principal.canonical_id
+            and grant.principal_kind is principal.kind
+            and "**" in grant.path_globs
+            for grant in self._grants
+        )
+
     def can_write(self, principal: Principal, path: str) -> bool:
         """True only if a grant matches and, for non-humans, *path* is not core."""
         if not isinstance(principal, Principal):
@@ -163,10 +178,15 @@ def render_codeowners(registry: ImmutableCoreRegistry, owners: Sequence[str]) ->
     owner_text = " ".join(owner_list)
     lines = [CODEOWNERS_HEADER]
     patterns = registry.patterns()
+    shadows = registry.shadow_patterns()
     for category in CoreCategory:
         if not patterns[category]:
             continue
         lines.append(f"\n# {category.value}\n")
         for pattern in patterns[category]:
             lines.append(f"{_codeowners_pattern(pattern)} {owner_text}\n")
+        if shadows[category]:
+            lines.append(f"# {category.value}: module shadows (package dirs, extensions, pyc)\n")
+            for pattern in shadows[category]:
+                lines.append(f"{_codeowners_pattern(pattern)} {owner_text}\n")
     return "".join(lines)

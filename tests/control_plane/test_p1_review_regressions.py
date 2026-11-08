@@ -1,0 +1,315 @@
+"""Regression tests for the PR #237 (phase 1) review threads.
+
+Each test names the thread it pins. Before the fix every "denied" case below
+was allowed (or the configuration was silently accepted).
+"""
+
+from __future__ import annotations
+
+import threading
+from typing import Any
+
+import pytest
+
+from acgs_lite.constitution import Constitution
+from acgs_lite.control_plane import (
+    DEFAULT_IMMUTABLE_CORE,
+    ActionTier,
+    CoreCategory,
+    DecisionRequest,
+    GovernedToolDispatcher,
+    IAMGrantRejected,
+    PolicyDecisionPoint,
+    PolicyEffect,
+    PolicySet,
+    PolicyStatement,
+    Principal,
+    PrincipalKind,
+    RepositoryPermissions,
+    ToolDenied,
+    WriteGrant,
+    render_codeowners,
+)
+
+pytestmark = [pytest.mark.unit, pytest.mark.red_team]
+
+AGENT = Principal("agent-1", PrincipalKind.AGENT)
+HUMAN = Principal("alice", PrincipalKind.HUMAN)
+SCOPED_HUMAN = Principal("bob", PrincipalKind.HUMAN)
+
+
+def _permissions() -> RepositoryPermissions:
+    return RepositoryPermissions(
+        DEFAULT_IMMUTABLE_CORE,
+        [
+            WriteGrant("agent-1", PrincipalKind.AGENT, ("workspace/**", "app/**")),
+            WriteGrant("alice", PrincipalKind.HUMAN, ("**",)),
+            WriteGrant("bob", PrincipalKind.HUMAN, ("workspace/**",)),
+        ],
+    )
+
+
+class _Sink:
+    def __init__(self) -> None:
+        self.calls: list[Any] = []
+
+
+def _dispatcher(pdp: PolicyDecisionPoint) -> tuple[GovernedToolDispatcher, _Sink]:
+    sink = _Sink()
+    d = GovernedToolDispatcher(
+        pdp,
+        permissions=_permissions(),
+        tool_tiers={
+            "write_default": ActionTier.T1,
+            "read_default": ActionTier.T1,
+            "write": ActionTier.T1,
+            "read": ActionTier.T1,
+            "shell": ActionTier.T2,
+        },
+        read_only_tools=frozenset({"read_default", "read"}),
+    )
+
+    def write_default(path: str = "evaluator/score.py", content: str = "x") -> None:
+        sink.calls.append(("write_default", path, content))
+
+    def read_default(path: str = "secrets/token.txt") -> None:
+        sink.calls.append(("read_default", path))
+
+    def write(path: str, content: str = "", output_file: str = "") -> None:
+        sink.calls.append(("write", path, content, output_file))
+
+    def read(path: str) -> None:
+        sink.calls.append(("read", path))
+
+    def shell(command: str, cwd: str | None = None) -> None:
+        sink.calls.append(("shell", command, cwd))
+
+    d.register("write_default", write_default, path_params={"path"}, opaque_params={"content"})
+    d.register("read_default", read_default, path_params={"path"})
+    d.register("write", write, path_params={"path"}, opaque_params={"content", "output_file"})
+    d.register("read", read, path_params={"path"})
+    d.register("shell", shell, path_params={"cwd"}, command_param="command")
+    return d, sink
+
+
+class TestSignatureDefaultsAreAuthorised:
+    """237.1 / 237.5: omitted arguments with core defaults skipped the PDP."""
+
+    def test_defaulted_core_write_path_is_denied(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied) as excinfo:
+            dispatcher.dispatch(AGENT, "write_default", {})
+        assert sink.calls == []
+        assert not excinfo.value.decision.allowed
+
+    def test_defaulted_sensitive_read_path_is_denied(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied):
+            dispatcher.dispatch(AGENT, "read_default", {})
+        assert sink.calls == []
+
+    def test_defaults_are_in_the_authorised_decisions(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        # The explicit override is fine; the decision set names the real path.
+        result = dispatcher.dispatch(AGENT, "write_default", {"path": "workspace/a.py"})
+        assert sink.calls == [("write_default", "workspace/a.py", "x")]
+        assert any(d.resource == "workspace/a.py" for d in result.decisions)
+
+
+class TestOverlappingCategories:
+    """237.2 / 237.7: credentials that also match an earlier category."""
+
+    @pytest.mark.parametrize("path", ["policies/.env", "policies/.env.production", "sandbox/.env"])
+    def test_agent_read_of_overlapping_credential_denied(
+        self, pdp: PolicyDecisionPoint, path: str
+    ) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied) as excinfo:
+            dispatcher.dispatch(AGENT, "read", {"path": path})
+        assert sink.calls == []
+        assert "INV-CORE-SENSITIVE-READ" in excinfo.value.decision.determining_policies
+
+    def test_categories_reports_every_match(self) -> None:
+        assert DEFAULT_IMMUTABLE_CORE.categories("policies/.env") == frozenset(
+            {CoreCategory.POLICY, CoreCategory.CREDENTIALS}
+        )
+        # Display precedence is unchanged.
+        assert DEFAULT_IMMUTABLE_CORE.classify("policies/.env") is CoreCategory.POLICY
+
+    def test_human_only_floor_applies_to_any_matching_category(
+        self, pdp: PolicyDecisionPoint
+    ) -> None:
+        # sandbox/constitution.yaml is SANDBOX_CONFIG first but also POLICY,
+        # which needs tier >= T2 even for humans.
+        decision = pdp.decide(
+            DecisionRequest(HUMAN, "file.write", "sandbox/constitution.yaml", ActionTier.T1)
+        )
+        assert not decision.allowed
+        assert "INV-CORE-HUMAN-ONLY-CHANGE" in decision.determining_policies
+
+
+class TestShellNeedsUnrestrictedGrant:
+    """237.3: a path-scoped human grant cannot be enforced on shell commands."""
+
+    def test_scoped_human_shell_denied(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied) as excinfo:
+            dispatcher.dispatch(
+                SCOPED_HUMAN, "shell", {"command": "touch app/x.txt", "cwd": "workspace"}
+            )
+        assert sink.calls == []
+        assert "unrestricted" in excinfo.value.decision.reason
+
+    def test_unrestricted_human_shell_allowed(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        dispatcher.dispatch(HUMAN, "shell", {"command": "ls -la", "cwd": "workspace"})
+        assert sink.calls == [("shell", "ls -la", "workspace")]
+
+    def test_has_unrestricted_write_matches_id_and_kind(self) -> None:
+        perms = _permissions()
+        assert perms.has_unrestricted_write(HUMAN)
+        assert not perms.has_unrestricted_write(SCOPED_HUMAN)
+        assert not perms.has_unrestricted_write(Principal("alice", PrincipalKind.AGENT))
+
+
+class TestRequestAttributesAreOwned:
+    """237.4: nested attribute values were shared with the caller."""
+
+    def test_caller_mutation_after_construction_does_not_change_request(self) -> None:
+        nested = {"paths": ["workspace/a.py"]}
+        request = DecisionRequest(AGENT, "tool.call", "write", ActionTier.T1, attributes=nested)
+        before = request.inputs_digest()
+        nested["paths"].append("evaluator/x.py")
+        assert request.attributes["paths"] == ["workspace/a.py"]
+        assert request.inputs_digest() == before
+
+    def test_pdp_evaluates_its_own_snapshot(
+        self, constitution: Constitution, permit_all: PolicySet
+    ) -> None:
+        seen: list[Any] = []
+        gate = threading.Event()
+        release = threading.Event()
+
+        def condition(ctx: Any) -> bool:
+            gate.set()
+            release.wait(5)
+            seen.append(list(ctx.request.attributes["paths"]))
+            return True
+
+        policy = PolicySet(
+            (
+                *permit_all.statements,
+                PolicyStatement(
+                    id="observe",
+                    effect=PolicyEffect.PERMIT,
+                    principal_kinds=None,
+                    actions=("*",),
+                    resources=("**",),
+                    condition=condition,
+                ),
+            ),
+            source_digest="test-observe",
+        )
+        request = DecisionRequest(
+            AGENT, "tool.call", "write", ActionTier.T1, attributes={"paths": ["workspace/a.py"]}
+        )
+        with PolicyDecisionPoint.for_constitution(constitution, policy) as pdp:
+            result: list[Any] = []
+            worker = threading.Thread(target=lambda: result.append(pdp.decide(request)))
+            worker.start()
+            assert gate.wait(5)
+            # Mutating the caller's request mid-evaluation must not reach the PDP.
+            request.attributes["paths"].append("evaluator/x.py")
+            release.set()
+            worker.join(5)
+        assert seen == [["workspace/a.py"]]
+        assert result and result[0].allowed
+
+
+class TestModuleShadowsAreCore:
+    """237.6 / 237.13: package dirs / extensions shadowing trusted modules."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "src/acgs_lite/fail_closed/__init__.py",
+            "src/acgs_lite/fail_closed",
+            "src/acgs_lite/fail_closed.so",
+            "src/acgs_lite/fail_closed.cpython-311-x86_64-linux-gnu.so",
+            "src/acgs_lite/__pycache__/fail_closed.cpython-311.pyc",
+            "src/acgs_lite/audit/__init__.py",
+            "src/acgs_lite/__init__.cpython-311-x86_64-linux-gnu.so",
+        ],
+    )
+    def test_shadow_paths_classify_core(self, path: str) -> None:
+        assert DEFAULT_IMMUTABLE_CORE.classify(path) is CoreCategory.CONTROL_PLANE
+
+    def test_unrelated_sibling_is_not_core(self) -> None:
+        assert DEFAULT_IMMUTABLE_CORE.classify("src/acgs_lite/unrelated.py") is None
+
+    @pytest.mark.parametrize(
+        "glob",
+        ["src/acgs_lite/fail_closed/**", "src/acgs_lite/fail_closed.so", "src/acgs_lite/audit*"],
+    )
+    def test_agent_grant_on_shadow_rejected(self, glob: str) -> None:
+        with pytest.raises(IAMGrantRejected):
+            RepositoryPermissions(
+                DEFAULT_IMMUTABLE_CORE, [WriteGrant("a", PrincipalKind.AGENT, (glob,))]
+            )
+
+    def test_agent_write_to_shadow_denied_at_dispatch(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied):
+            dispatcher.dispatch(AGENT, "write", {"path": "src/acgs_lite/fail_closed/__init__.py"})
+        assert sink.calls == []
+
+    def test_codeowners_lists_shadows(self) -> None:
+        text = render_codeowners(DEFAULT_IMMUTABLE_CORE, ["@o"])
+        assert "/src/acgs_lite/fail_closed/** @o" in text
+        assert "/src/acgs_lite/fail_closed.* @o" in text
+
+    def test_shadows_are_not_in_the_manifest(self) -> None:
+        mapping = DEFAULT_IMMUTABLE_CORE.to_mapping()
+        flat = {p for pats in mapping["categories"].values() for p in pats}
+        assert "src/acgs_lite/fail_closed/**" not in flat
+
+
+class TestLeafScanner:
+    """237.9 / 237.11: empty content and whitespace-padded core paths."""
+
+    def test_empty_content_is_not_a_core_path(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        dispatcher.dispatch(AGENT, "write", {"path": "workspace/x.py", "content": ""})
+        assert sink.calls == [("write", "workspace/x.py", "", "")]
+
+    def test_empty_declared_path_still_denied(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied):
+            dispatcher.dispatch(AGENT, "write", {"path": ""})
+        assert sink.calls == []
+
+    @pytest.mark.parametrize(
+        "padded", [" evaluator/x.py", "evaluator/x.py ", " policies/p.yaml", "\tsecrets/k\n"]
+    )
+    def test_padded_core_path_in_opaque_arg_denied(
+        self, pdp: PolicyDecisionPoint, padded: str
+    ) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        with pytest.raises(ToolDenied):
+            dispatcher.dispatch(AGENT, "write", {"path": "workspace/x.py", "output_file": padded})
+        assert sink.calls == []
+
+    def test_padded_non_core_text_allowed(self, pdp: PolicyDecisionPoint) -> None:
+        dispatcher, sink = _dispatcher(pdp)
+        dispatcher.dispatch(
+            AGENT, "write", {"path": "workspace/x.py", "content": " hello world \n"}
+        )
+        assert len(sink.calls) == 1
+
+
+class TestDurableAuditNeedsLog:
+    """237.10: durable_audit=True without an audit log returned allows."""
+
+    def test_construction_rejected(self, constitution: Constitution, permit_all: PolicySet) -> None:
+        with pytest.raises(ValueError, match="durable_audit"):
+            PolicyDecisionPoint.for_constitution(constitution, permit_all, durable_audit=True)

@@ -244,6 +244,16 @@ class GovernedToolDispatcher:
     def _leaf_is_core(self, value: str) -> bool:
         normalized = self._registry.normalize(value)
         if normalized is None:
+            stripped = value.strip()
+            if not stripped:
+                # Empty or whitespace-only opaque content names no path.
+                # (Declared path parameters are authorised as paths anyway,
+                # so an empty *path* argument is still denied.)
+                return False
+            if stripped != value:
+                # " evaluator/x.py" is one strip() away from a core path:
+                # judge the token a tool would actually use.
+                return self._leaf_is_core(stripped)
             # An unresolvable single token ("/etc/x", "evaluator%2fx") is a
             # suspicious path; multi-word text and file contents are not paths.
             return not any(ch.isspace() for ch in value)
@@ -309,9 +319,18 @@ class GovernedToolDispatcher:
         if unknown:
             raise _Denied(f"unknown arguments {unknown}")
         try:
-            spec.signature.bind(**args)
+            bound = spec.signature.bind(**args)
         except TypeError as exc:
             raise _Denied(f"arguments do not match the tool signature: {exc}") from exc
+        # Python fills omitted parameters from their defaults at call time, so
+        # the defaults are part of what the tool receives: authorise (and
+        # invoke with) the complete argument set, deep-copied so a mutable
+        # default is not shared between calls.
+        bound.apply_defaults()
+        try:
+            args = copy.deepcopy(dict(bound.arguments))
+        except Exception as exc:
+            raise _Denied(f"default arguments cannot be snapshotted: {type(exc).__name__}") from exc
 
         declared: list[str] = []
         for param in sorted(spec.path_params):
@@ -346,6 +365,11 @@ class GovernedToolDispatcher:
             hits = self._shell_core_tokens(command, cwd if isinstance(cwd, str) else None)
             if hits:
                 raise _Denied(f"shell command references immutable-core paths {hits}")
+            if not self._permissions.has_unrestricted_write(principal):
+                # A shell command can write any path, and its targets cannot
+                # be extracted reliably, so path-scoped grants cannot be
+                # enforced on it: only a principal granted "**" may use it.
+                raise _Denied("shell-like tools need an unrestricted ('**') repository write grant")
 
         if not spec.read_only and self._registry.has_unanchored_patterns():
             for path in declared:

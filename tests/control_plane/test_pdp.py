@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from acgs_lite.audit import AuditEntry, AuditLog
+from acgs_lite.audit import AuditLog, InMemoryAuditBackend
 from acgs_lite.constitution import Constitution
 from acgs_lite.control_plane import (
     CONSTITUTION_INVARIANTS,
@@ -371,9 +371,15 @@ class TestBinding:
         assert decision.error == "stale_policy"
 
 
-class _RaisingAudit(AuditLog):
-    def record(self, entry: AuditEntry, **kwargs: Any) -> str:
+class _FailingBackend(InMemoryAuditBackend):
+    def write(self, entry_dict: dict[str, Any], chain_hash: str) -> None:
         raise RuntimeError("disk full")
+
+
+def _RaisingAudit() -> AuditLog:  # noqa: N802 - keeps the call sites readable
+    # A real AuditLog whose backend write fails: AuditLog.record() would
+    # swallow this, so the PDP must use a write path that propagates it.
+    return AuditLog(backend=_FailingBackend())
 
 
 @pytest.mark.red_team
