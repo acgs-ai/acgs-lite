@@ -605,7 +605,7 @@ def test_cli_halt_refuses_world_writable_ancestor(
     err = capsys.readouterr().err
     assert f"ancestor {shared} is group/world-writable" in err
     assert "was NOT halted" in err
-    assert not (signal_dir / "acgs-halt-sys-anc").exists()
+    assert not signal_dir.exists()
 
 
 def test_cli_halt_refuses_symlinked_ancestor_into_world_writable_dir(
@@ -621,8 +621,8 @@ def test_cli_halt_refuses_symlinked_ancestor_into_world_writable_dir(
     rc = _run_cli(["halt", "--system-id", "sys-symanc", "--signal-dir", str(signal_dir)])
 
     assert rc == 2
-    assert f"ancestor {shared} is group/world-writable" in capsys.readouterr().err
-    assert not (shared / "mine" / "acgs-halt-sys-symanc").exists()
+    assert "cannot create halt signal dir" in capsys.readouterr().err
+    assert not (shared / "mine").exists()
 
 
 def test_cli_halt_accepts_symlinked_ancestor_into_trusted_dir(tmp_path: Path) -> None:
@@ -632,6 +632,7 @@ def test_cli_halt_accepts_symlinked_ancestor_into_trusted_dir(tmp_path: Path) ->
     link = tmp_path / "link"
     link.symlink_to(real)
     signal_dir = link / "mine"
+    (real / "mine").mkdir()
 
     assert _run_cli(["halt", "--system-id", "sys-okanc", "--signal-dir", str(signal_dir)]) == 0
     assert (real / "mine" / "acgs-halt-sys-okanc").is_file()
@@ -958,3 +959,31 @@ def test_agent_rechecks_halt_before_output_retry(tmp_path: Path, asynchronous: b
         else:
             agent.run("hello", governance_action="execute")
     assert calls == ["hello"]
+
+
+def test_halt_missing_child_below_trusted_symlink_has_no_side_effect(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    assert _run_cli(["halt", "--system-id", "no-create", "--signal-dir", str(link / "new")]) == 2
+    assert list(target.iterdir()) == []
+
+
+def test_halt_creation_race_does_not_follow_inserted_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    signal_dir = tmp_path / "new" / "signals"
+    real_mkdir = os.mkdir
+
+    def race(path: object, mode: int = 0o777, *, dir_fd: int | None = None) -> None:
+        if str(path) == "new" and dir_fd is not None:
+            (tmp_path / "new").symlink_to(target)
+            raise FileExistsError("raced symlink")
+        real_mkdir(path, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "mkdir", race)
+    assert _run_cli(["halt", "--system-id", "race", "--signal-dir", str(signal_dir)]) == 2
+    assert list(target.iterdir()) == []
