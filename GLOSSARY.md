@@ -25,8 +25,8 @@ One entry per term: definition, boundaries, one resolved ambiguity. Agents write
 - Resolved ambiguity: this enum has no MONITOR or AUDITOR member; those names come from the separate enhanced-agent-bus package. Lite's read-only role is OBSERVER, so do not add MONITOR or AUDITOR here.
 
 ## DecisionReceipt
-- Definition: `DecisionReceipt` (`src/acgs_lite/legitimacy/receipt.py`) is a frozen, replayable decision record emitted before execution and addressed by `receipt_hash`. `verify_hash()` recomputes the hash, and `receipt_identity()` refuses to build an `acgs:receipt:v1:sha256:` reference from a receipt whose hash does not verify.
-- Boundary: it is hash-addressed evidence of a decision. It is not a signature (**SignedReceipt**), not execution authority (**ExecutionGrant**), and not an outcome receipt, which is design-only.
+- Definition: `DecisionReceipt` (`src/acgs_lite/legitimacy/receipt.py`) is a frozen, replayable decision record emitted before execution and addressed by `receipt_hash`. `verify_hash()` recomputes the hash, and `receipt_identity()` refuses a receipt whose hash does not verify. References use `acgs:receipt:v1:sha256:` or `acgs:receipt:v2:sha256:` according to the schema; v2 binds the grant ID, full policy digest, method and argument digest.
+- Boundary: it is hash-addressed evidence of a decision. It is not a signature (**SignedReceipt**), not execution authority (**ExecutionGrant**), and not an **OutcomeReceipt**, which records a terminal external effect.
 - Avoid: governance receipt, outcome receipt, proof, approval.
 - Resolved ambiguity: a receipt records a decision and grants nothing. Execution authority comes from an ExecutionGrant that embeds the receipt.
 
@@ -59,6 +59,12 @@ One entry per term: definition, boundaries, one resolved ambiguity. Agents write
 - Boundary: it is durable evidence that runs from reservation to settlement, for fixed all-or-nothing side effects. It is not authorization: the host validates and consumes authority first, and the store is not wired into decorators.
 - Avoid: transaction, job, "authorized effect".
 - Resolved ambiguity: the in-process `AttemptStatus.PARTIAL` (`src/acgs_lite/legitimacy/ledger.py`) is a different state. PARTIAL is not UNKNOWN, so keep the two separate.
+
+## OutcomeReceipt
+- Definition: `OutcomeReceipt` (`src/acgs_lite/legitimacy/outcome.py`) records a terminal DONE or NOT_DONE external effect, its grant reference, originating decision identity and pinned provider-contract digest. `outcome_from_record()` requires durable terminal state plus contract and decision bindings created by `ContractedEffectStore.send(..., grant=...)` before dispatch.
+- Boundary: it is host-produced outcome evidence, not execution authority or an independent provider attestation. UNKNOWN cannot yield a receipt. `SignedOutcomeReceipt` signs the canonical receipt and its algorithm/key ID metadata; verification requires a pinned public key.
+- Avoid: approval, provider proof, authorization token.
+- Resolved ambiguity: multiple receipts may describe the same effect. Consumers deduplicate by `effect_key`; the factory cannot authenticate a grant on behalf of its process-local issuer.
 
 ## effect key
 - Definition: the key `EffectStore.reserve()` derives as `acgs:effect:v1:` + sha256 over `acgs-provider-effect-v1\0` and the canonical JSON of `[provider_id, grant_identity, action_digest]`, where `action_digest` is itself sha256 over `acgs-effect-action-v1\0` and the canonical action JSON. In the same transaction it reserves `amount` on an `EffectBudget` only if it fits within `capacity - settled - reserved`.
