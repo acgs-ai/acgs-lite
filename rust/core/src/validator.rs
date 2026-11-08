@@ -7,7 +7,7 @@
 ///
 /// Constitutional Hash: 608508a9bd224290
 use aho_corasick::{AhoCorasick, MatchKind};
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use std::collections::{HashMap, HashSet};
 
 use crate::context::{self, ContextRule};
@@ -89,6 +89,23 @@ pub struct ValidatorConfig {
     pub const_hash: String,
 }
 
+/// Compile a rule pattern case-insensitively.
+///
+/// Callers pass the bare pattern string (Python compiles it with
+/// `re.IGNORECASE` but hands over only `pattern.pattern`), and every scan runs
+/// on lowercased text. A case-sensitive compile would let an uppercase literal
+/// such as `AKIA[0-9A-Z]{16}` never fire, so the Rust path would allow what the
+/// Python path denies.
+fn compile_rule_pattern(pat_str: &str) -> Result<Regex, BuildError> {
+    RegexBuilder::new(pat_str)
+        .case_insensitive(true)
+        .build()
+        .map_err(|e| BuildError::BadRegex {
+            pattern: pat_str.to_string(),
+            message: e.to_string(),
+        })
+}
+
 /// The core hot-path validator — pure Rust, no FFI.
 pub struct GovernanceValidator {
     automaton: AhoCorasick,
@@ -111,11 +128,7 @@ impl GovernanceValidator {
         for (ai, (anchor, pats)) in config.anchor_dispatch.iter().enumerate() {
             let mut patterns: Vec<(usize, Regex)> = Vec::with_capacity(pats.len());
             for (rule_idx, pat_str) in pats {
-                let re = Regex::new(pat_str).map_err(|e| BuildError::BadRegex {
-                    pattern: pat_str.clone(),
-                    message: e.to_string(),
-                })?;
-                patterns.push((*rule_idx, re));
+                patterns.push((*rule_idx, compile_rule_pattern(pat_str)?));
             }
             anchor_to_idx.insert(anchor.clone(), ai);
             anchor_dispatch.push(AnchorEntry { patterns });
@@ -146,11 +159,7 @@ impl GovernanceValidator {
         // No-anchor patterns
         let mut no_anchor_pats: Vec<(usize, Regex)> = Vec::new();
         for (rule_idx, pat_str) in &config.no_anchor_pats {
-            let re = Regex::new(pat_str).map_err(|e| BuildError::BadRegex {
-                pattern: pat_str.clone(),
-                message: e.to_string(),
-            })?;
-            no_anchor_pats.push((*rule_idx, re));
+            no_anchor_pats.push((*rule_idx, compile_rule_pattern(pat_str)?));
         }
 
         // Rule data
@@ -554,5 +563,64 @@ impl GovernanceValidator {
                 has_blocking,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn validator(anchor: Option<&str>, pattern: &str) -> GovernanceValidator {
+        let (anchor_dispatch, no_anchor_pats) = match anchor {
+            Some(a) => (
+                vec![(a.to_string(), vec![(0, pattern.to_string())])],
+                vec![],
+            ),
+            None => (vec![], vec![(0, pattern.to_string())]),
+        };
+        GovernanceValidator::new(ValidatorConfig {
+            kw_to_idxs: HashMap::new(),
+            anchor_dispatch,
+            no_anchor_pats,
+            rule_data: vec![(
+                "SEC-001".into(),
+                "No AWS keys".into(),
+                "high".into(),
+                "security".into(),
+                false,
+            )],
+            positive_verbs: HashSet::new(),
+            strict: false,
+            context_rules: vec![],
+            const_hash: String::new(),
+        })
+        .unwrap()
+    }
+
+    // Python compiles rule patterns with re.IGNORECASE and passes only
+    // `pattern.pattern` here, while the scan runs on lowercased text, so an
+    // uppercase literal must still match (parity with the Python path).
+    #[test]
+    fn anchored_uppercase_pattern_matches_lowercased_text() {
+        let v = validator(Some("akia"), "AKIA[0-9A-Z]{16}");
+        let r = v.validate("deploy with AKIAABCDEFGHIJKLMNOP", None);
+        assert_eq!(r.decision, severity::DENY);
+        assert_eq!(
+            v.validate_hot("deploy with akiaabcdefghijklmnop").0,
+            severity::DENY
+        );
+    }
+
+    #[test]
+    fn no_anchor_uppercase_pattern_matches_lowercased_text() {
+        let v = validator(None, "[A-Z]{2}[0-9]{6}");
+        let r = v.validate("passport AB123456", None);
+        assert_eq!(r.decision, severity::DENY);
+    }
+
+    #[test]
+    fn non_matching_text_still_allows() {
+        let v = validator(Some("akia"), "AKIA[0-9A-Z]{16}");
+        assert_eq!(v.validate("akia is a word", None).decision, severity::ALLOW);
     }
 }

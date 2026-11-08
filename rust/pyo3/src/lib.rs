@@ -177,6 +177,12 @@ impl PyGovernanceValidator {
     fn validate_hot(&self, text: &str) -> PyResult<(i32, i64)> {
         // exp272: Use stack buffer for short strings (≤256 bytes, covers 99%+ of
         // governance actions). Avoids heap allocation for to_ascii_lowercase().
+        // Non-ASCII input needs full Unicode lowercasing (parity with Python
+        // str.lower()); ASCII-only folding would leave e.g. "Ñ" uppercase and a
+        // keyword such as "contraseña" would never match.
+        if !text.is_ascii() {
+            return Ok(self.inner.validate_hot(&text.to_lowercase()));
+        }
         let len = text.len();
         if len <= 256 {
             let mut buf = [0u8; 256];
@@ -199,7 +205,11 @@ impl PyGovernanceValidator {
         text: &str,
         context_pairs: Option<Vec<(String, String)>>,
     ) -> PyResult<(i32, Vec<ViolationTuple>, bool)> {
-        let lowered = text.to_ascii_lowercase();
+        let lowered = if text.is_ascii() {
+            text.to_ascii_lowercase()
+        } else {
+            text.to_lowercase()
+        };
         Ok(self.inner.validate_full(&lowered, context_pairs.as_deref()))
     }
 
