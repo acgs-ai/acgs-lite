@@ -71,7 +71,6 @@ compatible. Let the resolver check the selected extras together, then run
 | `litellm` | LiteLLM router | `litellm>=1.0` |
 | `google` | Google GenAI SDK | `google-genai>=1.0` |
 | `llamaindex` | LlamaIndex engines | `llama-index-core>=0.10` |
-| `gove` | Gove bridge; dependency only installed on Python 3.11+ | `gove-zone>=0.1.0a1; python_version >= '3.11'` |
 | `autogen` | AutoGen Core and AgentChat APIs | `autogen-core>=0.4`<br>`autogen-agentchat>=0.4` |
 | `mcp` | MCP server; bounded SDK major version | `mcp>=2.2,<3`<br>`jsonschema>=4.20`<br>`structlog>=21.0` |
 | `crewai` | CrewAI wrappers | `crewai>=0.30` |
@@ -94,14 +93,13 @@ compatible. Let the resolver check the selected extras together, then run
 ### What `all` includes
 
 `all` selects the integration names listed in its table row. It does **not** select
-`server`, `postgres`, `gove`, `docs`, or `dev`. It also does not install every
+`server`, `postgres`, `docs`, or `dev`. It also does not install every
 third-party framework for which an adapter module exists. For example,
 PydanticAI needs a separate `pydantic-ai` installation; there is no `pydantic-ai`
 extra in this manifest. See the [adapter catalog](integrations.md).
 
-`gove` has an explicit Python 3.11+ dependency marker: requesting that extra on
-Python 3.10 does not install `gove-zone`. Other SDKs may further restrict Python
-versions. An extras name is a dependency selection, not an activation or
+There is no `gove` extra. The Gove bridge needs `gove-zone`, which you install
+separately (Python 3.11+). Some SDKs restrict Python versions further. An extras name is a dependency selection, not an activation or
 production-readiness guarantee.
 
 ## Distribution surfaces
