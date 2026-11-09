@@ -27,7 +27,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 from acgs_lite._compat import StrEnum
 from acgs_lite.audit import AuditEntry, AuditLog
@@ -36,8 +36,10 @@ from acgs_lite.control_plane.principal import Principal, PrincipalKind
 from acgs_lite.control_plane.tiers import ActionTier
 
 if TYPE_CHECKING:
+    import acgs_lite.control_plane.pdp as pdp_types
     from acgs_lite.control_plane.killswitch import KillSwitch
-    from acgs_lite.control_plane.pdp import PolicyDecisionPoint
+
+    PolicyDecisionPoint: TypeAlias = "pdp_types.PolicyDecisionPoint"
 
 __all__ = [
     "AutonomyController",
