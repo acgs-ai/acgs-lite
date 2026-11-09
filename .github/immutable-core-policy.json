@@ -80,8 +80,18 @@
       "flags": 50
     },
     {
+      "pattern": ".cargo.*",
+      "regex": "\\.cargo\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": ".cargo/**",
       "regex": "\\.cargo(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": ".github.*",
+      "regex": "\\.github\\.[^/]*",
       "flags": 50
     },
     {
@@ -97,6 +107,11 @@
     {
       "pattern": ".gitlab-ci.yml",
       "regex": "\\.gitlab\\-ci\\.yml",
+      "flags": 50
+    },
+    {
+      "pattern": ".mypy.ini",
+      "regex": "\\.mypy\\.ini",
       "flags": 50
     },
     {
@@ -130,8 +145,123 @@
       "flags": 50
     },
     {
+      "pattern": "__pycache__/.cargo.*",
+      "regex": "__pycache__/\\.cargo\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/.github.*",
+      "regex": "__pycache__/\\.github\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/audit.*",
+      "regex": "__pycache__/audit\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/audit_logs.*",
+      "regex": "__pycache__/audit_logs\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/control-plane.*",
+      "regex": "__pycache__/control\\-plane\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/credentials.*",
+      "regex": "__pycache__/credentials\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/eval-suites.*",
+      "regex": "__pycache__/eval\\-suites\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/eval_suites.*",
+      "regex": "__pycache__/eval_suites\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/evals.*",
+      "regex": "__pycache__/evals\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/evaluator.*",
+      "regex": "__pycache__/evaluator\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/held_out.*",
+      "regex": "__pycache__/held_out\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/heldout.*",
+      "regex": "__pycache__/heldout\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/iam.*",
+      "regex": "__pycache__/iam\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/policies.*",
+      "regex": "__pycache__/policies\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/policy.*",
+      "regex": "__pycache__/policy\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/promotion.*",
+      "regex": "__pycache__/promotion\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/rust.*",
+      "regex": "__pycache__/rust\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/sandbox.*",
+      "regex": "__pycache__/sandbox\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/scripts.*",
+      "regex": "__pycache__/scripts\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/secrets.*",
+      "regex": "__pycache__/secrets\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/test_suites.*",
+      "regex": "__pycache__/test_suites\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "audit.*",
+      "regex": "audit\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "audit/**",
       "regex": "audit(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "audit_logs.*",
+      "regex": "audit_logs\\.[^/]*",
       "flags": 50
     },
     {
@@ -150,6 +280,11 @@
       "flags": 50
     },
     {
+      "pattern": "control-plane.*",
+      "regex": "control\\-plane\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "control-plane/**",
       "regex": "control\\-plane(?:/.*)?",
       "flags": 50
@@ -160,13 +295,38 @@
       "flags": 50
     },
     {
+      "pattern": "credentials.*",
+      "regex": "credentials\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "credentials/**",
       "regex": "credentials(?:/.*)?",
       "flags": 50
     },
     {
+      "pattern": "data/__pycache__/held_out.*",
+      "regex": "data/__pycache__/held_out\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "data/__pycache__/heldout.*",
+      "regex": "data/__pycache__/heldout\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "data/held_out.*",
+      "regex": "data/held_out\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "data/held_out/**",
       "regex": "data/held_out(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "data/heldout.*",
+      "regex": "data/heldout\\.[^/]*",
       "flags": 50
     },
     {
@@ -180,8 +340,18 @@
       "flags": 50
     },
     {
+      "pattern": "eval-suites.*",
+      "regex": "eval\\-suites\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "eval-suites/**",
       "regex": "eval\\-suites(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "eval_suites.*",
+      "regex": "eval_suites\\.[^/]*",
       "flags": 50
     },
     {
@@ -190,8 +360,18 @@
       "flags": 50
     },
     {
+      "pattern": "evals.*",
+      "regex": "evals\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "evals/**",
       "regex": "evals(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "evaluator.*",
+      "regex": "evaluator\\.[^/]*",
       "flags": 50
     },
     {
@@ -200,13 +380,28 @@
       "flags": 50
     },
     {
+      "pattern": "held_out.*",
+      "regex": "held_out\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "held_out/**",
       "regex": "held_out(?:/.*)?",
       "flags": 50
     },
     {
+      "pattern": "heldout.*",
+      "regex": "heldout\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "heldout/**",
       "regex": "heldout(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "iam.*",
+      "regex": "iam\\.[^/]*",
       "flags": 50
     },
     {
@@ -225,13 +420,33 @@
       "flags": 50
     },
     {
+      "pattern": "mypy.ini",
+      "regex": "mypy\\.ini",
+      "flags": 50
+    },
+    {
+      "pattern": "policies.*",
+      "regex": "policies\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "policies/**",
       "regex": "policies(?:/.*)?",
       "flags": 50
     },
     {
+      "pattern": "policy.*",
+      "regex": "policy\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "policy/**",
       "regex": "policy(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "promotion.*",
+      "regex": "promotion\\.[^/]*",
       "flags": 50
     },
     {
@@ -270,13 +485,28 @@
       "flags": 50
     },
     {
+      "pattern": "rust.*",
+      "regex": "rust\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "rust/**",
       "regex": "rust(?:/.*)?",
       "flags": 50
     },
     {
+      "pattern": "sandbox.*",
+      "regex": "sandbox\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "sandbox/**",
       "regex": "sandbox(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts.*",
+      "regex": "scripts\\.[^/]*",
       "flags": 50
     },
     {
@@ -445,6 +675,11 @@
       "flags": 50
     },
     {
+      "pattern": "secrets.*",
+      "regex": "secrets\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "secrets/**",
       "regex": "secrets(?:/.*)?",
       "flags": 50
@@ -480,8 +715,23 @@
       "flags": 50
     },
     {
+      "pattern": "src/acgs_lite/__pycache__/agents.*",
+      "regex": "src/acgs_lite/__pycache__/agents\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/arckit.*",
+      "regex": "src/acgs_lite/__pycache__/arckit\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/acgs_lite/__pycache__/audit.*",
       "regex": "src/acgs_lite/__pycache__/audit\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/cdp.*",
+      "regex": "src/acgs_lite/__pycache__/cdp\\.[^/]*",
       "flags": 50
     },
     {
@@ -495,13 +745,38 @@
       "flags": 50
     },
     {
+      "pattern": "src/acgs_lite/__pycache__/commands.*",
+      "regex": "src/acgs_lite/__pycache__/commands\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/constitution.*",
+      "regex": "src/acgs_lite/__pycache__/constitution\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/acgs_lite/__pycache__/constrained_output.*",
       "regex": "src/acgs_lite/__pycache__/constrained_output\\.[^/]*",
       "flags": 50
     },
     {
+      "pattern": "src/acgs_lite/__pycache__/control_plane.*",
+      "regex": "src/acgs_lite/__pycache__/control_plane\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/engine.*",
+      "regex": "src/acgs_lite/__pycache__/engine\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/acgs_lite/__pycache__/errors.*",
       "regex": "src/acgs_lite/__pycache__/errors\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/evals.*",
+      "regex": "src/acgs_lite/__pycache__/evals\\.[^/]*",
       "flags": 50
     },
     {
@@ -515,6 +790,11 @@
       "flags": 50
     },
     {
+      "pattern": "src/acgs_lite/__pycache__/formal.*",
+      "regex": "src/acgs_lite/__pycache__/formal\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/acgs_lite/__pycache__/governed.*",
       "regex": "src/acgs_lite/__pycache__/governed\\.[^/]*",
       "flags": 50
@@ -525,8 +805,23 @@
       "flags": 50
     },
     {
+      "pattern": "src/acgs_lite/__pycache__/legitimacy.*",
+      "regex": "src/acgs_lite/__pycache__/legitimacy\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/acgs_lite/__pycache__/licensing.*",
       "regex": "src/acgs_lite/__pycache__/licensing\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/maci.*",
+      "regex": "src/acgs_lite/__pycache__/maci\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/policygen.*",
+      "regex": "src/acgs_lite/__pycache__/policygen\\.[^/]*",
       "flags": 50
     },
     {
@@ -595,8 +890,18 @@
       "flags": 50
     },
     {
+      "pattern": "src/acgs_lite/agents.*",
+      "regex": "src/acgs_lite/agents\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/acgs_lite/agents/**",
       "regex": "src/acgs_lite/agents(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/arckit.*",
+      "regex": "src/acgs_lite/arckit\\.[^/]*",
       "flags": 50
     },
     {
@@ -617,6 +922,11 @@
     {
       "pattern": "src/acgs_lite/audit/**",
       "regex": "src/acgs_lite/audit(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/cdp.*",
+      "regex": "src/acgs_lite/cdp\\.[^/]*",
       "flags": 50
     },
     {
@@ -655,8 +965,18 @@
       "flags": 50
     },
     {
+      "pattern": "src/acgs_lite/commands.*",
+      "regex": "src/acgs_lite/commands\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/acgs_lite/commands/**",
       "regex": "src/acgs_lite/commands(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/constitution.*",
+      "regex": "src/acgs_lite/constitution\\.[^/]*",
       "flags": 50
     },
     {
@@ -680,8 +1000,18 @@
       "flags": 50
     },
     {
+      "pattern": "src/acgs_lite/control_plane.*",
+      "regex": "src/acgs_lite/control_plane\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/acgs_lite/control_plane/**",
       "regex": "src/acgs_lite/control_plane(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/engine.*",
+      "regex": "src/acgs_lite/engine\\.[^/]*",
       "flags": 50
     },
     {
@@ -702,6 +1032,11 @@
     {
       "pattern": "src/acgs_lite/errors/**",
       "regex": "src/acgs_lite/errors(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/evals.*",
+      "regex": "src/acgs_lite/evals\\.[^/]*",
       "flags": 50
     },
     {
@@ -737,6 +1072,11 @@
     {
       "pattern": "src/acgs_lite/fail_closed/**",
       "regex": "src/acgs_lite/fail_closed(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/formal.*",
+      "regex": "src/acgs_lite/formal\\.[^/]*",
       "flags": 50
     },
     {
@@ -810,6 +1150,11 @@
       "flags": 50
     },
     {
+      "pattern": "src/acgs_lite/legitimacy.*",
+      "regex": "src/acgs_lite/legitimacy\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/acgs_lite/legitimacy/**",
       "regex": "src/acgs_lite/legitimacy(?:/.*)?",
       "flags": 50
@@ -827,6 +1172,11 @@
     {
       "pattern": "src/acgs_lite/licensing/**",
       "regex": "src/acgs_lite/licensing(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/maci.*",
+      "regex": "src/acgs_lite/maci\\.[^/]*",
       "flags": 50
     },
     {
@@ -867,6 +1217,11 @@
     {
       "pattern": "src/acgs_lite/observability/session_observer/**",
       "regex": "src/acgs_lite/observability/session_observer(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/policygen.*",
+      "regex": "src/acgs_lite/policygen\\.[^/]*",
       "flags": 50
     },
     {
@@ -985,6 +1340,11 @@
       "flags": 50
     },
     {
+      "pattern": "test_suites.*",
+      "regex": "test_suites\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "test_suites/**",
       "regex": "test_suites(?:/.*)?",
       "flags": 50
@@ -1045,6 +1405,16 @@
       "flags": 50
     },
     {
+      "pattern": "tests/__pycache__/control_plane.*",
+      "regex": "tests/__pycache__/control_plane\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/__pycache__/red_team.*",
+      "regex": "tests/__pycache__/red_team\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "tests/conftest.*",
       "regex": "tests/conftest\\.[^/]*",
       "flags": 50
@@ -1060,8 +1430,18 @@
       "flags": 50
     },
     {
+      "pattern": "tests/control_plane.*",
+      "regex": "tests/control_plane\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "tests/control_plane/**",
       "regex": "tests/control_plane(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/red_team.*",
+      "regex": "tests/red_team\\.[^/]*",
       "flags": 50
     },
     {

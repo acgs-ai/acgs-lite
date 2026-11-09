@@ -134,6 +134,28 @@ class TestDiffGuard:
             "src/acgs_lite/observability/__init__.py",
             "src/acgs_lite/observability/session_observer.py",
             "pytest.toml",
+            "mypy.ini",
+            ".mypy.ini",
+            "src/acgs_lite/control_plane.py",
+            "src/acgs_lite/control_plane.pyc",
+            "src/acgs_lite/control_plane.cpython-310-x86_64-linux-gnu.so",
+            "src/acgs_lite/control_plane.pyd",
+            "src/acgs_lite/engine.py",
+            "src/acgs_lite/engine.pyc",
+            "src/acgs_lite/engine.cpython-310-x86_64-linux-gnu.so",
+            "src/acgs_lite/engine.pyd",
+            "src/acgs_lite/constitution.py",
+            "src/acgs_lite/constitution.pyc",
+            "src/acgs_lite/constitution.cpython-310-x86_64-linux-gnu.so",
+            "src/acgs_lite/constitution.pyd",
+            "src/acgs_lite/agents.py",
+            "src/acgs_lite/agents.pyc",
+            "src/acgs_lite/agents.cpython-310-x86_64-linux-gnu.so",
+            "src/acgs_lite/agents.pyd",
+            "src/acgs_lite/__pycache__/control_plane.cpython-310.pyc",
+            "src/acgs_lite/__pycache__/engine.cpython-310.pyc",
+            "src/acgs_lite/__pycache__/constitution.cpython-310.pyc",
+            "src/acgs_lite/__pycache__/agents.cpython-310.pyc",
             ".pytest.toml",
             "pytest.ini",
             ".pytest.ini",
@@ -255,6 +277,16 @@ class TestDiffGuard:
 
 
 class TestCiWiring:
+    def test_local_typecheck_pins_protected_configuration(self) -> None:
+        result = subprocess.run(
+            ["make", "--dry-run", "typecheck"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert "--config-file pyproject.toml" in result.stdout
+
     def test_control_plane_is_critical_coverage(self) -> None:
         control_plane = {
             path.relative_to(ROOT / "src" / "acgs_lite").as_posix()

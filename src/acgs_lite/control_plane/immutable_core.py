@@ -236,8 +236,17 @@ def module_shadow_patterns(pattern: str) -> tuple[str, ...]:
     package directory ``dir/name/`` and extension modules ``dir/name.*.so``,
     and an unchecked-hash ``__pycache__`` entry can replace the source. All
     of them run in place of the protected module, so they are core too.
-    Wildcard patterns already cover their own directory and return ``()``.
+    A literal package glob ``dir/name/**`` also protects sibling module and
+    extension aliases, which can be imported when the package is absent.
+    Other wildcard patterns return ``()``.
     """
+    if pattern.endswith("/**"):
+        package = pattern[:-3]
+        if not package or literal_prefix(package) != package.lower():
+            return ()
+        directory, stem = posixpath.split(package)
+        prefix = directory + "/" if directory else ""
+        return (f"{prefix}{stem}.*", f"{prefix}__pycache__/{stem}.*")
     if literal_prefix(pattern) != pattern.lower() or not pattern.lower().endswith(".py"):
         return ()
     directory, base = posixpath.split(pattern)
@@ -576,6 +585,8 @@ DEFAULT_IMMUTABLE_CORE = ImmutableCoreRegistry(
             ".gitlab-ci.yml",
             ".pre-commit-config.yaml",
             "Makefile",
+            "mypy.ini",
+            ".mypy.ini",
             # CI installs this input; requirement entries can execute build code.
             "requirements-test-optional.txt",
             # Directly executed trusted scripts put this directory first on
