@@ -28,6 +28,7 @@ ACTOR = {"login": "dislovelhl", "id": 253742157, "type": "User"}
 NOW = datetime(2026, 11, 9, tzinfo=timezone.utc)
 PREFIX = "/repos/acgs-ai/acgs-lite"
 WORKFLOW = "immutable-core-authorize.yml"
+COMPARE = PREFIX + f"/compare/{BASE}...{HEAD}?per_page=1&page=1"
 
 
 class FakeAPI:
@@ -87,9 +88,11 @@ def case(tmp_path: Path) -> tuple[Any, FakeAPI, dict[str, Any]]:
         "base": {"ref": "main", "sha": BASE, "repo": REPO},
         "head": {"sha": HEAD, "repo": {**REPO, "fork": False}},
     }
-    api.routes[PREFIX + "/pulls/237/files?per_page=100&page=1"] = [
-        {"filename": "core/guard.py", "status": "modified"}
-    ]
+    api.routes[COMPARE] = {
+        "base_commit": {"sha": BASE},
+        "merge_base_commit": {"sha": BASE},
+        "files": [{"filename": "core/guard.py", "status": "modified"}],
+    }
     api.routes[PREFIX + "/collaborators/dislovelhl/permission"] = {
         "permission": "admin",
         "user": ACTOR,
@@ -232,14 +235,14 @@ def test_pr_identity_and_revisions(case: Any, mutation: str) -> None:
 )
 def test_malformed_paths_fail_closed(case: Any, path: Any) -> None:
     verifier, api, _ = case
-    api.routes[PREFIX + "/pulls/237/files?per_page=100&page=1"][0]["filename"] = path
+    api.routes[COMPARE]["files"][0]["filename"] = path
     with pytest.raises(guard.Denied):
         verifier.verify()
 
 
 def test_rename_old_path_and_case_flags_protected(case: Any) -> None:
     verifier, api, _ = case
-    api.routes[PREFIX + "/pulls/237/files?per_page=100&page=1"] = [
+    api.routes[COMPARE]["files"] = [
         {"filename": "docs/a", "previous_filename": "CORE/a", "status": "renamed"}
     ]
     assert verifier.verify()["protected"]
@@ -247,27 +250,23 @@ def test_rename_old_path_and_case_flags_protected(case: Any) -> None:
 
 def test_unprotected_change_requires_no_artifact(case: Any) -> None:
     verifier, api, _ = case
-    api.routes[PREFIX + "/pulls/237/files?per_page=100&page=1"] = [
-        {"filename": "docs/core/a", "status": "modified"}
-    ]
+    api.routes[COMPARE]["files"] = [{"filename": "docs/core/a", "status": "modified"}]
     assert verifier.verify()["protected"] is False
     assert not any("/actions/" in path for path in api.calls)
 
 
-@pytest.mark.parametrize("count", [101, 3000])
-def test_complete_changed_file_pagination(case: Any, count: int) -> None:
+@pytest.mark.parametrize("count", [101, 299])
+def test_complete_immutable_comparison(case: Any, count: int) -> None:
     verifier, api, _ = case
-    pr = api.routes[PREFIX + "/pulls/237"]
-    pr["changed_files"] = count
-    for page in range(1, count // 100 + 2):
-        api.routes[PREFIX + f"/pulls/237/files?per_page=100&page={page}"] = [
-            {"filename": f"docs/{i}", "status": "modified"}
-            for i in range((page - 1) * 100, min(page * 100, count))
-        ]
+    api.routes[PREFIX + "/pulls/237"]["changed_files"] = count
+    api.routes[COMPARE]["files"] = [
+        {"filename": f"docs/{i}", "status": "modified"} for i in range(count)
+    ]
     assert verifier.verify()["protected"] is False
+    assert api.calls.count(COMPARE) == 1
 
 
-@pytest.mark.parametrize("count", [0, 2, 3001, True])
+@pytest.mark.parametrize("count", [0, 2, 300, 3001, True])
 def test_changed_file_count_mismatch(case: Any, count: Any) -> None:
     verifier, api, _ = case
     api.routes[PREFIX + "/pulls/237"]["changed_files"] = count
@@ -529,14 +528,14 @@ def test_head_change_during_verification_invalidates_result(
 def test_duplicate_changed_paths_are_not_complete(case: Any) -> None:
     verifier, api, _ = case
     api.routes[PREFIX + "/pulls/237"]["changed_files"] = 2
-    api.routes[PREFIX + "/pulls/237/files?per_page=100&page=1"] *= 2
+    api.routes[COMPARE]["files"] *= 2
     with pytest.raises(guard.Denied):
         verifier.verify()
 
 
 def test_rename_missing_previous_path_is_denied(case: Any) -> None:
     verifier, api, _ = case
-    api.routes[PREFIX + "/pulls/237/files?per_page=100&page=1"][0]["status"] = "renamed"
+    api.routes[COMPARE]["files"][0]["status"] = "renamed"
     with pytest.raises(guard.Denied):
         verifier.verify()
 
@@ -576,6 +575,48 @@ def test_missing_permission_access_fails_closed(case: Any) -> None:
 )
 def test_registry_path_aliases_fail_closed(case: Any, path: str) -> None:
     verifier, api, _ = case
-    api.routes[PREFIX + "/pulls/237/files?per_page=100&page=1"][0]["filename"] = path
+    api.routes[COMPARE]["files"][0]["filename"] = path
     with pytest.raises(guard.Denied, match="noncanonical"):
+        verifier.verify()
+
+
+def test_transient_pr_head_swap_cannot_hide_protected_diff(case: Any) -> None:
+    verifier, api, _ = case
+    # Before and after metadata both name HEAD. While the mutable files API is
+    # served, an attacker switches to a benign same-size diff and restores HEAD.
+    api.routes[PREFIX + "/pulls/237/files?per_page=100&page=1"] = [
+        {"filename": "docs/benign.txt", "status": "modified"}
+    ]
+    api.routes[PREFIX + f"/compare/{BASE}...{HEAD}?per_page=1&page=1"] = {
+        "base_commit": {"sha": BASE},
+        "merge_base_commit": {"sha": BASE},
+        "files": [{"filename": "core/guard.py", "status": "modified"}],
+    }
+    api.routes[
+        PREFIX
+        + "/actions/workflows/10/runs?event=workflow_dispatch&branch=main&status=success&per_page=100&page=1"
+    ]["workflow_runs"] = []
+    with pytest.raises(guard.Denied, match="no fresh trusted authorization"):
+        verifier.verify()
+    assert not any("/pulls/237/files" in path for path in api.calls)
+
+
+@pytest.mark.parametrize(
+    "mutation", ["missing_files", "saturated", "base", "duplicate", "rename_source"]
+)
+def test_immutable_comparison_requires_complete_bound_paths(case: Any, mutation: str) -> None:
+    verifier, api, _ = case
+    comparison = api.routes[COMPARE]
+    if mutation == "missing_files":
+        del comparison["files"]
+    elif mutation == "saturated":
+        comparison["files"] = [{"filename": f"docs/{i}", "status": "modified"} for i in range(300)]
+    elif mutation == "base":
+        comparison["base_commit"]["sha"] = HEAD
+    elif mutation == "duplicate":
+        api.routes[PREFIX + "/pulls/237"]["changed_files"] = 2
+        comparison["files"] *= 2
+    else:
+        comparison["files"][0] = {"filename": "docs/a", "status": "renamed"}
+    with pytest.raises(guard.Denied):
         verifier.verify()
