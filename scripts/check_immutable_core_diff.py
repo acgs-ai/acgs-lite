@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""CI guard: fail when an agent-authored change touches the immutable core.
+"""Legacy local authorship lint for changes to the immutable core.
+
+CI authorization is enforced by ``scripts/trusted_core_guard.py`` using trusted
+policy and commit-bound human authorization; this heuristic is not CI authority.
 
     check_immutable_core_diff.py --base SHA --head SHA --author LOGIN \
         [--head-ref BRANCH] [--commit-messages-file FILE] [--repo DIR]
@@ -10,8 +13,8 @@ commit-message trailer matches an agent pattern. Exit codes: 0 = allowed,
 1 = blocked *or* unable to decide (git error, unreadable input: fail closed),
 2 = usage error.
 
-Run this from a checkout of the *base* ref so a PR cannot edit the guard
-that judges it (the script and its registry are themselves immutable core).
+For local comparisons, run this from a checkout of the *base* ref so a candidate
+cannot edit the lint rules that judge it.
 """
 
 from __future__ import annotations
