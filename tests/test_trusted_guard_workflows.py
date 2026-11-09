@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -48,6 +49,17 @@ def test_guard_inputs_and_policy_are_themselves_protected() -> None:
         "scripts/render_trusted_core_policy.py",
         "mypy.ini",
         ".mypy.ini",
+        "acgs_lite.py",
+        "acgs_lite.pyc",
+        "acgs_lite.cpython-310-x86_64-linux-gnu.so",
+        "acgs_lite.pyd",
+        "acgs_lite/__init__.py",
+        "acgs_lite/__init__.pyc",
+        "acgs_lite/__init__.cpython-310-x86_64-linux-gnu.so",
+        "acgs_lite/__init__.pyd",
+        "yaml.py",
+        "json.py",
+        "pydantic/__init__.py",
         "src/acgs_lite/control_plane.py",
         "src/acgs_lite/control_plane.pyc",
         "src/acgs_lite/control_plane.cpython-310-x86_64-linux-gnu.so",
@@ -84,3 +96,37 @@ def test_snapshot_covers_registry_when_control_plane_is_installed() -> None:
         capture_output=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["acgs_lite.py", "acgs_lite/__init__.py", "yaml.py", "json.py", "pydantic/__init__.py"],
+)
+def test_cwd_shadow_of_capability_gate_requires_core_authorization(
+    tmp_path: Path, path: str
+) -> None:
+    shadow = tmp_path / path
+    shadow.parent.mkdir(parents=True, exist_ok=True)
+    shadow.write_text("print('shadowed capability gate'); raise SystemExit(0)\n")
+    result = subprocess.run(
+        [sys.executable, "-m", "acgs_lite.cli", "capabilities", "validate"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "shadowed capability gate"
+    policy = json.loads((ROOT / ".github" / "immutable-core-policy.json").read_text())
+    assert any(
+        re.fullmatch(row["regex"], path, row["flags"]) for row in policy["protected_paths"]
+    ), path
+
+
+@pytest.mark.parametrize("path", ["workspace/feature.py", "workspace/package/__init__.py"])
+def test_root_import_shadow_protection_does_not_freeze_workspace(path: str) -> None:
+    policy = json.loads((ROOT / ".github" / "immutable-core-policy.json").read_text())
+    assert not any(
+        re.fullmatch(row["regex"], path, row["flags"]) for row in policy["protected_paths"]
+    ), path
