@@ -486,7 +486,9 @@ def _benign() -> dict[str, Any]:
 
 
 def test_benign_allowlisted_payload_projects_every_field() -> None:
-    [payload] = governance_payloads_for_enforcement(_benign())
+    # The JSON blob comes first; every text leaf and key follows it raw.
+    payload, *leaves = governance_payloads_for_enforcement(_benign())
+    assert {"hi", "label", "utf8"} <= set(leaves)
     assert payload == (
         '{"amount": "1.5", "buf": "ba", '
         '"id": "00000000-0000-0000-0000-000000000001", '
