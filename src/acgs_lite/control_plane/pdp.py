@@ -77,10 +77,15 @@ from acgs_lite.fail_closed import fail_closed
 from acgs_lite.legitimacy.invocation import bind_policy
 
 if TYPE_CHECKING:
+    import acgs_lite.control_plane.approvals as approval_types
     import acgs_lite.control_plane.receipt_ledger as receipt_ledger_types
-    from acgs_lite.control_plane.approvals import ApprovalGate, QuorumResult
+
+    ApprovalGate: TypeAlias = "approval_types.ApprovalGate"
+    QuorumResult: TypeAlias = "approval_types.QuorumResult"
+    import acgs_lite.control_plane.telemetry as telemetry_types
     from acgs_lite.control_plane.killswitch import KillSwitch
-    from acgs_lite.control_plane.telemetry import TelemetryRecorder
+
+    TelemetryRecorder: TypeAlias = "telemetry_types.TelemetryRecorder"
 
     # A forward alias avoids a module-member lookup in import-order analysis.
     ReceiptLedger: TypeAlias = "receipt_ledger_types.ReceiptLedger"
@@ -291,9 +296,9 @@ class PolicyDecisionPoint:
             if type(kill_switch) is not KillSwitch:
                 raise ValueError("kill_switch must be a KillSwitch")
         if telemetry is not None:
-            from acgs_lite.control_plane.telemetry import TelemetryRecorder
+            import acgs_lite.control_plane.telemetry as telemetry_module
 
-            if type(telemetry) is not TelemetryRecorder:
+            if type(telemetry) is not telemetry_module.TelemetryRecorder:
                 raise ValueError("telemetry must be a TelemetryRecorder")
         self._approval_gate = approval_gate
         self._kill_switch = kill_switch
