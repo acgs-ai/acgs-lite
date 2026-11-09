@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 from collections.abc import Callable
@@ -26,6 +27,7 @@ from acgs_lite.control_plane.runbook import (
     runbook_hash,
     runbook_json_schema,
 )
+from acgs_lite.control_plane.tier_policy import ActionProfile
 
 pytestmark = [pytest.mark.unit]
 
@@ -502,6 +504,75 @@ from acgs_lite.control_plane import ActionTier, ToolDenied  # noqa: E402
 
 
 class TestDispatchT1:
+    @pytest.mark.parametrize("async_tool", [False, True])
+    @pytest.mark.parametrize("result", [0, 1, "raise"])
+    @pytest.mark.parametrize("replace_predicate", [False, True])
+    def test_outcome_stays_with_authorizing_approval(
+        self,
+        p5: Any,
+        runbook_data: RunbookData,
+        async_tool: bool,
+        result: int | str,
+        replace_predicate: bool,
+    ) -> None:
+        digest = self._approve(p5, runbook_data)
+        original = p5.runbooks._approved["rb-restart-cache"]
+
+        def replace_and_finish(path: str) -> int:
+            self._approve(
+                p5,
+                runbook_data,
+                success_predicate={"kind": "exit_code", "equals": int(replace_predicate)},
+            )
+            if result == "raise":
+                raise RuntimeError("tool failed after reapproval")
+            assert isinstance(result, int)
+            return result
+
+        async def async_write(path: str) -> int:
+            await asyncio.sleep(0)
+            return replace_and_finish(path)
+
+        def profile(arguments: Any) -> ActionProfile:
+            return ActionProfile(True, False, 1, False)
+
+        p5.dispatcher.register(
+            "write_result",
+            async_write if async_tool else replace_and_finish,
+            path_params={"path"},
+            profile=profile,
+            merge_capable=False,
+        )
+        kwargs = {
+            "change_id": "c1",
+            "runbook_id": "rb-restart-cache",
+            "runbook_hash": digest,
+        }
+
+        def invoke() -> None:
+            if async_tool:
+                asyncio.run(
+                    p5.dispatcher.adispatch(
+                        AGENT, "write_result", {"path": f"{p5.worktree}/a.md"}, **kwargs
+                    )
+                )
+            else:
+                p5.dispatcher.dispatch(
+                    AGENT, "write_result", {"path": f"{p5.worktree}/a.md"}, **kwargs
+                )
+
+        if result == "raise":
+            with pytest.raises(RuntimeError, match="after reapproval"):
+                invoke()
+        else:
+            invoke()
+        replacement = p5.runbooks._approved["rb-restart-cache"]
+        assert replacement is not original
+        assert (replacement.successes, replacement.failures) == (0, 0)
+        assert (original.successes, original.failures) == ((1, 0) if result == 0 else (0, 1))
+        (review,) = p5.review.items()
+        assert review.runbook_hash == digest
+
     def _approve(self, p5: Any, runbook_data: RunbookData, **kw: Any) -> str:
         data = runbook_data(**kw)
         data["scope_selector"] = {**data["scope_selector"], "tools": ["write_*", "legacy_*"]}

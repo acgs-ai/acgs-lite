@@ -139,7 +139,7 @@ from acgs_lite.control_plane.invariants import requested_by_problem
 from acgs_lite.control_plane.killswitch import KillSwitch
 from acgs_lite.control_plane.pdp import Decision, PolicyDecisionPoint
 from acgs_lite.control_plane.principal import Principal, PrincipalKind, canonical_principal_id
-from acgs_lite.control_plane.runbook import RunbookDenied, RunbookRegistry, StopSignals
+from acgs_lite.control_plane.runbook import RunbookDenied, RunbookRegistry, StopSignals, _Approved
 from acgs_lite.control_plane.tier_policy import (
     DEFAULT_NARROW_MAX_BLAST_RADIUS,
     ActionProfile,
@@ -243,6 +243,7 @@ class _Authorized:
     admission: _BreakerAdmission | None = None
     change_id: str | None = None
     paths: tuple[str, ...] = ()
+    runbook_entry: _Approved | None = None
 
 
 class _Denied(Exception):
@@ -1179,10 +1180,16 @@ class GovernedToolDispatcher:
             return None
         raise _Denied(f"trigger {trigger_id} autonomous mode suspended (circuit breaker open)")
 
-    def _autonomy_check(self, principal: Principal, read_t0: bool) -> None:
+    def _autonomy_check(
+        self, principal: Principal, read_t0: bool, *, admitted: bool = False
+    ) -> None:
         if principal.kind is PrincipalKind.HUMAN or self._autonomy is None:
             return
-        level = self._autonomy.level(principal)
+        level = (
+            self._autonomy.admitted_level(principal)
+            if admitted
+            else self._autonomy.level(principal)
+        )
         if level is AutonomyLevel.SUSPENDED:
             raise _Denied("autonomy suspended")
         if level is AutonomyLevel.P0_ONLY and not read_t0:
@@ -1203,16 +1210,7 @@ class GovernedToolDispatcher:
         tripped the breaker, suspended the cohort or demoted the agent. Only
         here is the half-open probe spent (atomically, if still available)."""
         try:
-            autonomy = self._autonomy
-            if (
-                autonomy is not None
-                and principal.kind is not PrincipalKind.HUMAN
-                and autonomy.is_demoted(principal)
-                and not read_t0
-            ):
-                # is_demoted(), not level(): level() would also demote on the
-                # budget this very call was just charged against.
-                raise _Denied("autonomy demoted to P0_ONLY: read-only T0 tools only")
+            self._autonomy_check(principal, read_t0, admitted=True)
             return self._breaker_check(
                 principal, trigger_id, session, consume=True, admission=admission
             )
@@ -1511,11 +1509,12 @@ class GovernedToolDispatcher:
                         telemetry=consume,
                         credential_id=cid,
                     )
+        runbook_entry = None
         if consume and plan.runbook_id is not None and self._runbooks is not None:
             # Atomic re-validation that spends one rate-limit slot, only once
             # the PDP has permitted the call.
             try:
-                self._runbooks.check_execution(
+                runbook_entry = self._runbooks._check_execution(
                     plan.runbook_id,
                     plan.runbook_hash,
                     tool_name=tool_name,
@@ -1547,7 +1546,9 @@ class GovernedToolDispatcher:
                 decisions[0].decision_id if decisions else None,
                 credential_id=cid,
             )
-        return _Authorized(spec, args, decisions, plan, admission, change_id, tuple(paths))
+        return _Authorized(
+            spec, args, decisions, plan, admission, change_id, tuple(paths), runbook_entry
+        )
 
     def _after_run(
         self,
@@ -1565,12 +1566,13 @@ class GovernedToolDispatcher:
         plan = auth.plan
         if plan.runbook_id is None or plan.runbook_hash is None:
             return
-        if self._runbooks is not None:
-            if success:
-                success = self._runbooks.outcome_succeeded(
-                    plan.runbook_id, value, self._run_verifier
-                )
-            self._runbooks.record_outcome(plan.runbook_id, success=success)
+        if self._runbooks is not None and auth.runbook_entry is not None:
+            self._runbooks._record_execution_outcome(
+                auth.runbook_entry,
+                success=success,
+                value=value,
+                run_verifier=self._run_verifier,
+            )
         if self._review_queue is not None:
             self._review_queue.record(
                 decision_id=auth.decisions[0].decision_id if auth.decisions else "",

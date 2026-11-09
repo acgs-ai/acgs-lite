@@ -35,7 +35,7 @@ __all__ = [
 
 ACTION_HASH_DOMAIN = b"acgs-control-plane-action-v1\x00"
 _ATTRIBUTES_DOMAIN = b"acgs-control-plane-action-attributes-v1\x00"
-_ARGUMENTS_DOMAIN = b"acgs-control-plane-tool-arguments-v2\x00"
+_ARGUMENTS_DOMAIN = b"acgs-control-plane-tool-arguments-v3\x00"
 MAX_CANONICAL_DEPTH = 32
 _SUB_REQUEST_ACTIONS = frozenset({"file.read", "file.write"})
 
@@ -72,7 +72,7 @@ def _canonical_value(value: object, depth: int = 0) -> object:
             [_canonical_value(k, depth + 1), _canonical_value(v, depth + 1)]
             for k, v in value.items()
         ]
-        return {"$map": sorted(items, key=canonical_json)}
+        return {"$map": items}
     if isinstance(value, list):
         return [_canonical_value(item, depth + 1) for item in value]
     if isinstance(value, tuple):
@@ -87,9 +87,10 @@ def arguments_digest(arguments: Mapping[str, Any]) -> str:
     """Digest of tool arguments, preserving list/tuple and set/frozenset identity.
 
     Tuples and frozensets have distinct tags because invocation preserves
-    these types. Mappings are tagged separately, so user keys cannot imitate
-    a container tag. The v2 domain invalidates approvals made with the older,
-    ambiguous container encoding; those approvals must be issued again.
+    these types. Mapping entries preserve insertion order because tools can
+    observe it, including through **kwargs. Mappings are tagged separately,
+    so user keys cannot imitate a container tag. The v3 domain invalidates
+    earlier approvals that ignored mapping order; they must be issued again.
     """
     return _sha256(_ARGUMENTS_DOMAIN, canonical_json(_canonical_value(dict(arguments))))
 

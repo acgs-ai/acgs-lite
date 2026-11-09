@@ -512,8 +512,6 @@ ALLOWLIST: dict[str, str] = {
     "configured admin (the facade passes the directory admin)",
     "dispatcher.py:GovernedToolDispatcher._autonomy_check": "harness admission over the "
     "attested dispatcher principal (as in _authorize)",
-    "dispatcher.py:GovernedToolDispatcher._final_admission": "post-PDP re-admission of the "
-    "attested dispatcher principal; can only deny",
     "iam.py:RepositoryPermissions.has_unrestricted_write": "IAM grant lookup (grant kind == "
     "principal kind); narrows shell access",
     "incident.py:IncidentMutationLock.heartbeat": "liveness only: matches the recorded "
