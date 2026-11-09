@@ -210,6 +210,16 @@
       "flags": 50
     },
     {
+      "pattern": "__pycache__/memory-policy.*",
+      "regex": "__pycache__/memory\\-policy\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/memory_policy.*",
+      "regex": "__pycache__/memory_policy\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "__pycache__/policies.*",
       "regex": "__pycache__/policies\\.[^/]*",
       "flags": 50
@@ -287,6 +297,16 @@
     {
       "pattern": "control-plane/**",
       "regex": "control\\-plane(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "control-plane/__pycache__/runbooks.*",
+      "regex": "control\\-plane/__pycache__/runbooks\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "control-plane/runbooks.*",
+      "regex": "control\\-plane/runbooks\\.[^/]*",
       "flags": 50
     },
     {
@@ -410,8 +430,18 @@
       "flags": 50
     },
     {
+      "pattern": "memory-policy.*",
+      "regex": "memory\\-policy\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "memory-policy/**",
       "regex": "memory\\-policy(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "memory_policy.*",
+      "regex": "memory_policy\\.[^/]*",
       "flags": 50
     },
     {
