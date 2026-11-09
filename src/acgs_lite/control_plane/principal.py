@@ -23,7 +23,9 @@ from dataclasses import dataclass, field
 
 from acgs_lite._compat import StrEnum
 
-__all__ = ["Principal", "PrincipalKind", "canonical_principal_id"]
+__all__ = ["ADMIN_SCOPE", "Principal", "PrincipalKind", "canonical_principal_id"]
+
+ADMIN_SCOPE = "admin:control-plane"
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 # ASCII only: Unicode confusables (Cyrillic "а" vs Latin "a") would otherwise

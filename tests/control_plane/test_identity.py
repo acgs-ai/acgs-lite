@@ -455,3 +455,13 @@ class TestAdminAttestor:
         # scope_touches_core refuses "admin" scopes for non-humans at issuance.
         with pytest.raises(CredentialIssuanceRefused, match="core"):
             issuer.issue(BOT, scopes={ADMIN_SCOPE})
+
+
+def test_admin_scope_reexports_share_neutral_definition() -> None:
+    from acgs_lite.control_plane.credentials import ADMIN_SCOPE as credential_scope
+    from acgs_lite.control_plane.identity import ADMIN_SCOPE as identity_scope
+    from acgs_lite.control_plane.principal import ADMIN_SCOPE as principal_scope
+
+    assert principal_scope == "admin:control-plane"
+    assert credential_scope is principal_scope
+    assert identity_scope is principal_scope

@@ -31,9 +31,14 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias
 
+import acgs_lite.control_plane.invariants as invariants_module
 from acgs_lite.control_plane.immutable_core import DEFAULT_IMMUTABLE_CORE, ImmutableCoreRegistry
-from acgs_lite.control_plane.invariants import ACTION_NAMESPACE_CATEGORIES
-from acgs_lite.control_plane.principal import Principal, PrincipalKind, canonical_principal_id
+from acgs_lite.control_plane.principal import (
+    ADMIN_SCOPE,
+    Principal,
+    PrincipalKind,
+    canonical_principal_id,
+)
 
 if TYPE_CHECKING:
     import acgs_lite.control_plane.identity as identity_types
@@ -59,7 +64,6 @@ __all__ = [
 DEFAULT_CREDENTIAL_TTL_S = 300.0
 MAX_CREDENTIAL_TTL_S = 900.0
 # Phase 6a: the scope an admin (or attested human operator) call carries.
-ADMIN_SCOPE = "admin:control-plane"
 # TODO(control-plane-gap): 60 s for any "admin:*" credential is design
 # inference (one interactive admin step); configurable via admin_max_ttl_s.
 MAX_ADMIN_CREDENTIAL_TTL_S = 60.0
@@ -110,7 +114,7 @@ def scope_touches_core(
     """
     head, _, rest = scope.partition(":")
     head = head.lower()
-    if head in ACTION_NAMESPACE_CATEGORIES or head in {"core", "admin", "*"}:
+    if head in invariants_module.ACTION_NAMESPACE_CATEGORIES or head in {"core", "admin", "*"}:
         return True
     if "*" in scope and head != "tool":
         return True

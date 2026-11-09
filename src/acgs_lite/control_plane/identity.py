@@ -35,16 +35,22 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
 
 import yaml
 
-from acgs_lite.control_plane.credentials import ADMIN_SCOPE
 from acgs_lite.control_plane.immutable_core import CoreCategory, ImmutableCoreRegistry
-from acgs_lite.control_plane.principal import Principal, PrincipalKind, canonical_principal_id
+from acgs_lite.control_plane.principal import (
+    ADMIN_SCOPE,
+    Principal,
+    PrincipalKind,
+    canonical_principal_id,
+)
 
 if TYPE_CHECKING:
-    from acgs_lite.control_plane.credentials import CredentialIssuer
+    import acgs_lite.control_plane.credentials as credential_types
+
+    CredentialIssuer: TypeAlias = "credential_types.CredentialIssuer"
 
 __all__ = [
     "ADMIN_SCOPE",
