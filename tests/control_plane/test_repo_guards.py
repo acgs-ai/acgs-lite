@@ -120,6 +120,45 @@ class TestDiffGuard:
     def test_native_governance_build_inputs_block_agent_changes(self, path: str) -> None:
         assert GUARD.main(["--files", path, "--author", "test[bot]"]) == 1
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "tests/__init__.py",
+            "tests/red_team/__init__.py",
+            "tests/red_team/test_bypass_attempts.py",
+            "src/acgs_lite/cli.py",
+            "src/acgs_lite/commands/__init__.py",
+            "src/acgs_lite/commands/capabilities.py",
+            "src/acgs_lite/arckit/parser.py",
+            "src/acgs_lite/cdp/assembler.py",
+            "src/acgs_lite/observability/__init__.py",
+            "src/acgs_lite/observability/session_observer.py",
+            "pytest.toml",
+            ".pytest.toml",
+            "pytest.ini",
+            ".pytest.ini",
+            "pyproject.toml",
+            "tox.ini",
+            "setup.cfg",
+            "tests/pytest.toml",
+            "tests/.pytest.toml",
+            "tests/pytest.ini",
+            "tests/.pytest.ini",
+            "tests/pyproject.toml",
+            "tests/tox.ini",
+            "tests/setup.cfg",
+            "tests/red_team/pytest.toml",
+            "tests/red_team/.pytest.toml",
+            "tests/red_team/pytest.ini",
+            "tests/red_team/.pytest.ini",
+            "tests/red_team/pyproject.toml",
+            "tests/red_team/tox.ini",
+            "tests/red_team/setup.cfg",
+        ],
+    )
+    def test_ci_imports_and_pytest_config_block_agent_changes(self, path: str) -> None:
+        assert GUARD.main(["--files", path, "--author", "test[bot]"]) == 1
+
     def test_human_core_change_allowed_by_guard(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert GUARD.main(["--files", "policies/p.yaml", "--author", "alice"]) == 0
         assert "review required" in capsys.readouterr().out

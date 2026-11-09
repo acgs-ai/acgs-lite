@@ -427,12 +427,16 @@ def test_projector_denies(make: Callable[[], Any], wrap: bool) -> None:
     assert excinfo.value.rule_id in {UNEVALUABLE, "GOVERNANCE-PAYLOAD-OVERSIZE"}
 
 
-@pytest.mark.parametrize("codepoint", [i for i in range(32) if i not in (9, 10, 13)])
+@pytest.mark.parametrize("codepoint", range(32))
 def test_json_escaping_cannot_hide_control_splices(codepoint: int) -> None:
+    """Hidden C0 controls deny; tab/newline/CR stay valid but are also returned raw."""
     text = "forbidden" + chr(codepoint) + "word"
     for value in (text, {"memo": text}, {text: "ok"}, [text], (text,), text.encode()):
-        with pytest.raises(GovernancePayloadError):
-            governance_payloads_for_enforcement(value)
+        if codepoint in (9, 10, 13):
+            assert text in governance_payloads_for_enforcement(value)
+        else:
+            with pytest.raises(GovernancePayloadError):
+                governance_payloads_for_enforcement(value)
 
 
 def _one_arg(value: object) -> None:
@@ -620,7 +624,10 @@ def _benign() -> dict[str, Any]:
 
 
 def test_benign_payload_projects_tuple_and_bytes_as_json() -> None:
-    [payload] = governance_payloads_for_enforcement(_benign())
+    # The JSON blob comes first; every text leaf and key follows it raw.
+    payload, *leaves = governance_payloads_for_enforcement(_benign())
+    assert "ordinary\ttext\nwith\rline endings" in leaves
+    assert {"note", "hello", "plain bytes", "more"} <= set(leaves)
     assert '"pair": ["a", 1]' in payload
     assert '"raw": "plain bytes"' in payload
     assert '"buf": "more"' in payload

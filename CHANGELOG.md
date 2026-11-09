@@ -333,6 +333,40 @@ This is a semver-major change (4.0.0): the production profile of the stable
   `allow` record when the output passes and a `deny` record when the output is finally
   denied, and a `GovernanceHaltError` from the configured intervention engine reaches
   the caller. Regression tests: `tests/test_governed_agent_arun_parity.py`.
+- Tab, newline and carriage-return splices in nested governed values no longer evade
+  `\s+`/`\b` rules. The JSON projection escaped them to the two characters `\t`/`\n`,
+  so `run(..., q="x\nrm -rf /")` (and any nested list/dict/tuple value, bytes value or
+  dict key) never matched `\brm\s+-rf\b`, and a `^rm\s+-rf` rule never matched a
+  nested leaf at all, since inside the blob every leaf follows a quote.
+  `governance_payloads_for_enforcement` now returns, after each value's JSON payload,
+  every distinct non-empty nested text and dict key as raw text, so every entry point
+  (`GovernedAgent.run`/`arun`, `GovernedCallable` issue and sync/async execute, input
+  and output) validates it as written. Multi-line text is still allowed.
+- The engine's pattern prefilter no longer skips regexes that would match. It ran a
+  pattern only when a literal "anchor" guessed from the pattern text was present, and
+  the guess was often not part of every match: `\bdrop\s+table\b` was gated on
+  `"drop table"` (missing `drop\ttable`), `\bdrops?\b` on `"drops"` (missing
+  `please drop it`), `(?:please\s+)?delete\s+all` on `"please"`, `(?<!not )allowed` on
+  `"not"`, and alternations on a word from one branch. Anchors are now derived from the
+  parsed regex: only the longest run (at least 3 characters) of top-level required
+  ASCII literals, where any group, branch, lookaround, repeat, class or assertion ends
+  the run, and the letters i/k/s (which `re.IGNORECASE` also matches to `ı`, `İ`, `K`
+  and `ſ`) end it too. A pattern with no such run, or one that cannot be parsed, is
+  always evaluated. Regression tests: `tests/test_governance_whitespace_payloads.py`.
+- `GovernanceCircuitBreaker.trip()` no longer hides a failed cross-process halt. It
+  still halts this process first, but when the signal file cannot be written (for
+  example `EPERM` because another local user pre-created `acgs-halt-<id>` in a sticky
+  shared dir such as `/tmp`), the signal dir fails the trust check, or an existing entry
+  is not a regular file owned by this user, root or a uid in `ACGS_HALT_TRUSTED_UIDS`
+  (the same set the signal dir check trusts), it logs at CRITICAL, never overwrites or
+  trusts that entry, and returns
+  `False` (it returns `True` once the signal is confirmed on disk). It does not raise,
+  so callers relying on the in-process halt are unaffected. `reset()` likewise returns
+  `False` and logs at CRITICAL when the signal entry cannot be removed, instead of
+  logging at debug; the breaker stays halted. `trip_reason` no longer reports the text
+  of a signal file owned by another uid. Ownership checks are skipped where
+  `os.getuid` is unavailable (Windows). `acgs halt` uses the `trip()` result.
+  Regression tests: `tests/test_circuit_breaker_signal_failures.py`.
 
 ### Added
 
