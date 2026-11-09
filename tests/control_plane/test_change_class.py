@@ -113,7 +113,7 @@ def _dispatcher(pdp: PolicyDecisionPoint, calls: list[str]) -> GovernedToolDispa
         return "ok"
 
     for name in ("edit", "quick_edit", "drop"):
-        d.register(name, tool, path_params={"path"})
+        d.register(name, tool, path_params={"path"}, merge_capable=False)
     return d
 
 
@@ -204,7 +204,14 @@ class TestThroughDispatcher:
         pytest.importorskip("cryptography")
         bob, carol = approver_factory("bob"), approver_factory("carol")
         for target in TARGETS:
-            digest = dispatcher.action_hash_for(principal, tool, {"path": target})
+            if tool == "drop":
+                # Phase 5: a non-human T3 call without a verified backup is
+                # refused before an approval can even be bound to it.
+                with pytest.raises(ValueError, match="T3 by a non-human"):
+                    dispatcher.action_hash_for(principal, tool, {"path": target})
+                digest = "sha256:" + "0" * 64
+            else:
+                digest = dispatcher.action_hash_for(principal, tool, {"path": target})
             with pytest.raises(ToolDenied):
                 dispatcher.dispatch(
                     principal, tool, {"path": target}, approvals=[bob(digest), carol(digest)]

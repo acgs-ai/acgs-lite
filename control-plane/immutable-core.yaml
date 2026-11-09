@@ -28,6 +28,7 @@ categories:
   - '**/constitution*.toml'
   - '**/constitution*.yaml'
   - '**/constitution*.yml'
+  - control-plane/runbooks/**
   - policies/**
   - policy/**
   tool_allowlist:

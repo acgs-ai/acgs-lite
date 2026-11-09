@@ -95,6 +95,7 @@ async def test_alias_substitution_denied_without_consuming_approval(
         aedit if mode == "async_coroutine" else edit,
         path_params={"path"},
         opaque_params={"left", "right"},
+        merge_capable=False,
     )
     args = {"path": "workspace/data.txt", "left": (kind(),), "right": {"inner": kind()}}
     approval = approver_factory("bob")(dispatcher.action_hash_for(HUMAN, "edit", args))

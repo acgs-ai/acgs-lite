@@ -93,11 +93,23 @@ def _dispatcher(pdp: PolicyDecisionPoint) -> tuple[GovernedToolDispatcher, _Sink
     def shell(command: str, cwd: str | None = None) -> None:
         sink.calls.append(("shell", command, cwd))
 
-    d.register("write_default", write_default, path_params={"path"}, opaque_params={"content"})
-    d.register("read_default", read_default, path_params={"path"})
-    d.register("write", write, path_params={"path"}, opaque_params={"content", "output_file"})
-    d.register("read", read, path_params={"path"})
-    d.register("shell", shell, path_params={"cwd"}, command_param="command")
+    d.register(
+        "write_default",
+        write_default,
+        path_params={"path"},
+        opaque_params={"content"},
+        merge_capable=False,
+    )
+    d.register("read_default", read_default, path_params={"path"}, merge_capable=False)
+    d.register(
+        "write",
+        write,
+        path_params={"path"},
+        opaque_params={"content", "output_file"},
+        merge_capable=False,
+    )
+    d.register("read", read, path_params={"path"}, merge_capable=False)
+    d.register("shell", shell, path_params={"cwd"}, command_param="command", merge_capable=False)
     return d, sink
 
 
@@ -446,7 +458,7 @@ class TestOpaqueSubclassBoundary:
         dispatcher = GovernedToolDispatcher(
             pdp, permissions=_permissions(pdp.registry), tool_tiers={"opaque": ActionTier.T1}
         )
-        dispatcher.register("opaque", opaque, opaque_params={"payload"})
+        dispatcher.register("opaque", opaque, opaque_params={"payload"}, merge_capable=False)
         with pytest.raises(ToolDenied):
             dispatcher.dispatch(AGENT, "opaque", {} if use_default else {"payload": value})
         assert invoked == []
@@ -501,7 +513,7 @@ class TestFinalReviewBoundaries:
                 tool_tiers={"access": ActionTier.T1},
                 read_only_tools=frozenset({"access"}) if read_only else frozenset(),
             )
-            dispatcher.register("access", access, path_params={"path"})
+            dispatcher.register("access", access, path_params={"path"}, merge_capable=False)
             result = dispatcher.dispatch(AGENT, "access", {"path": "workspace/file.txt"})
             assert result.value == ("leaf" if read_only else "updated")
 
@@ -540,7 +552,7 @@ class TestFinalReviewBoundaries:
                 tool_tiers={"recursive": ActionTier.T1},
                 read_only_tools=frozenset({"recursive"}) if read_only else frozenset(),
             )
-            dispatcher.register("recursive", recursive, path_params={"path"})
+            dispatcher.register("recursive", recursive, path_params={"path"}, merge_capable=False)
             with pytest.raises(ToolDenied):
                 dispatcher.dispatch(AGENT, "recursive", {"path": "workspace/v1.2"})
         assert calls == []
@@ -619,7 +631,7 @@ class TestFinalReviewBoundaries:
                 tool_tiers={"read_tree": ActionTier.T0},
                 read_only_tools=frozenset({"read_tree"}),
             )
-            dispatcher.register("read_tree", read_tree, path_params={"path"})
+            dispatcher.register("read_tree", read_tree, path_params={"path"}, merge_capable=False)
             with pytest.raises(ToolDenied):
                 dispatcher.dispatch(AGENT, "read_tree", {"path": directory})
         assert calls == []
@@ -647,7 +659,7 @@ class TestFinalReviewBoundaries:
             dispatcher = GovernedToolDispatcher(
                 pdp, permissions=permissions, tool_tiers={"write": ActionTier.T1}
             )
-            dispatcher.register("write", write, path_params={"path"})
+            dispatcher.register("write", write, path_params={"path"}, merge_capable=False)
             with pytest.raises(ToolDenied):
                 dispatcher.dispatch(AGENT, "write", {"path": raw})
         assert not (tmp_path / "outside").exists()
@@ -858,7 +870,7 @@ class TestFinalReviewBoundaries:
             def remove(path: str) -> None:
                 calls.append(path)
 
-            dispatcher.register("remove", remove, path_params={"path"})
+            dispatcher.register("remove", remove, path_params={"path"}, merge_capable=False)
             with pytest.raises(ToolDenied):
                 dispatcher.dispatch(AGENT, "remove", {"path": f"workspace/{directory}"})
             (tmp_path / "workspace" / "ordinary.txt").write_text("ordinary")
@@ -875,7 +887,7 @@ class TestFinalReviewBoundaries:
         def thread_id() -> int:
             return threading.get_ident()
 
-        dispatcher.register("thread_id", thread_id)
+        dispatcher.register("thread_id", thread_id, merge_capable=False)
         result = await dispatcher.adispatch(AGENT, "thread_id", {})
         assert result.value != threading.get_ident()
 
