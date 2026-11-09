@@ -1,0 +1,125 @@
+# Immutable core manifest (machine-readable mirror of
+# acgs_lite.control_plane.immutable_core.DEFAULT_IMMUTABLE_CORE).
+# tests/control_plane/test_immutable_core.py asserts the two are identical.
+# Patterns are root-anchored repo globs: '*' stays within a segment,
+# '**/' spans directories, a trailing '/**' covers the directory itself.
+# Changing this file is a human-only, tier >= T2 change (CONTROL_PLANE).
+version: 1
+categories:
+  evaluator:
+  - evals/**
+  - evaluator/**
+  - src/acgs_lite/evals/**
+  test_suite:
+  - eval-suites/**
+  - eval_suites/**
+  - test_suites/**
+  heldout_data:
+  - data/held_out/**
+  - data/heldout/**
+  - held_out/**
+  - heldout/**
+  sandbox_config:
+  - config/sandbox*
+  - config/sandbox*/**
+  - sandbox/**
+  policy:
+  - '**/constitution*.yaml'
+  - '**/constitution*.yml'
+  - policies/**
+  - policy/**
+  tool_allowlist:
+  - '**/tool-allowlist*'
+  - '**/tool_allowlist*'
+  credentials:
+  - '**/.env*'
+  - credentials/**
+  - secrets/**
+  promotion_gate:
+  - promotion/**
+  audit_log:
+  - audit/**
+  - audit_logs/**
+  iam:
+  - .github/CODEOWNERS
+  - CODEOWNERS
+  - docs/CODEOWNERS
+  - iam/**
+  ci_rules:
+  - .github/**
+  - .gitlab-ci.yml
+  - .pre-commit-config.yaml
+  - .mypy.ini
+  - .pytest.ini
+  - .pytest.toml
+  - Makefile
+  - mypy.ini
+  - pytest.ini
+  - pytest.toml
+  - requirements-test-optional.txt
+  - scripts/**
+  - scripts/check_critical_coverage.py
+  - scripts/check_links.py
+  - scripts/check_release_coherence.py
+  - scripts/qualify_wheel.py
+  - scripts/release_candidate.py
+  - scripts/run_governance_regression.py
+  - setup.cfg
+  - tests/**/.pytest.ini
+  - tests/**/.pytest.toml
+  - tests/**/pyproject.toml
+  - tests/**/pytest.ini
+  - tests/**/pytest.toml
+  - tests/**/setup.cfg
+  - tests/**/tox.ini
+  - tests/__init__.py
+  - tests/red_team/**
+  - tox.ini
+  control_plane:
+  - .cargo/**
+  - control-plane/**
+  - pyproject.toml
+  - rust-toolchain
+  - rust-toolchain.toml
+  - rust/**
+  - scripts/check_immutable_core_diff.py
+  - scripts/render_codeowners.py
+  - src/acgs_lite/__init__.py
+  - src/acgs_lite/_compat.py
+  - src/acgs_lite/_meta.py
+  - src/acgs_lite/agents/**
+  - src/acgs_lite/arckit/**
+  - src/acgs_lite/audit.py
+  - src/acgs_lite/cdp/**
+  - src/acgs_lite/circuit_breaker.py
+  - src/acgs_lite/cli.py
+  - src/acgs_lite/commands/**
+  - src/acgs_lite/constitution/**
+  - src/acgs_lite/constrained_output.py
+  - src/acgs_lite/control_plane/**
+  - src/acgs_lite/engine/**
+  - src/acgs_lite/errors.py
+  - src/acgs_lite/events.py
+  - src/acgs_lite/fail_closed.py
+  - src/acgs_lite/formal/**
+  - src/acgs_lite/governed.py
+  - src/acgs_lite/integrations/__init__.py
+  - src/acgs_lite/integrations/control_plane_mcp.py
+  - src/acgs_lite/lean_verify.py
+  - src/acgs_lite/legitimacy/**
+  - src/acgs_lite/licensing.py
+  - src/acgs_lite/maci/**
+  - src/acgs_lite/observability/__init__.py
+  - src/acgs_lite/observability/session_observer.py
+  - src/acgs_lite/policygen/**
+  - src/acgs_lite/production.py
+  - src/acgs_lite/provenance.py
+  - src/acgs_lite/provider_capabilities.py
+  - src/acgs_lite/provider_capabilities_manifest.json
+  - src/acgs_lite/scoring.py
+  - src/acgs_lite/serialization.py
+  - src/acgs_lite/trajectory.py
+  - src/acgs_lite/z3_verify.py
+  - tests/conftest.py
+  - tests/control_plane/**
+  - uv.lock
