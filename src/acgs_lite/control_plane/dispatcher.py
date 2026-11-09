@@ -39,8 +39,9 @@ deny everything, T0 included); an optional short-TTL scoped credential
 scopes include ``tool:<name>``; Phase 6a: with a directory-backed issuer the
 credential is verified first, its signed kind and system_id must equal the
 passed principal's, and they are the ones every later check sees. Without
-that attestation a host-asserted ``PrincipalKind.HUMAN`` is denied every T2+
-or immutable-core call unless the host opts in with
+that attestation a host-asserted ``PrincipalKind.HUMAN`` may run only
+read-only, non-core calls below T2 (no writes, merge-capable, branch-writing
+or shell tools) unless the host opts in with
 ``trust_host_identity=True``, i.e. it authenticates principals itself;
 combining that opt-in with attested identity is refused at construction); resource budgets (one iteration charged per
 dispatch; exhausted -> deny, or with an autonomy controller -> demotion); and
@@ -469,6 +470,10 @@ class GovernedToolDispatcher:
             and credential_issuer is not None
             and credential_issuer.identity is not None
         )
+        if not isinstance(trust_host_identity, bool):
+            # A truthy non-bool ("false", 0.0, a config object) must not
+            # silently grant host trust.
+            raise TypeError("trust_host_identity must be a bool")
         if trust_host_identity and self._attests_identity:
             # Contradictory: the identity directory, not the host, is the
             # authority on principal kind. Refused rather than ignored so a
@@ -477,7 +482,7 @@ class GovernedToolDispatcher:
                 "trust_host_identity=True conflicts with require_credential and an "
                 "identity-backed credential_issuer (the directory attests identity)"
             )
-        self._trust_host_identity = bool(trust_host_identity)
+        self._trust_host_identity = trust_host_identity
         self._budgets = budgets
         self._autonomy = autonomy
         self._breaker = breaker
@@ -1117,22 +1122,38 @@ class GovernedToolDispatcher:
         return spec is not None and inspect.iscoroutinefunction(spec.fn)
 
     def _unattested_human_check(
-        self, principal: Principal, tier: ActionTier, core_leaves: list[str]
+        self,
+        principal: Principal,
+        spec: _ToolSpec,
+        plan: _CallPlan,
+        core_leaves: list[str],
     ) -> None:
-        """HUMAN is exempt from the AGENT-only requester, breaker, autonomy and
-        budget checks, so a host-asserted HUMAN kind is trusted only when the
-        identity directory attests it or the host opted in to authenticating
-        principals itself. Otherwise T2+ and immutable-core calls are denied."""
+        """HUMAN is exempt from the AGENT-only requester, ownership, merge,
+        breaker, autonomy and budget checks, so a host-asserted HUMAN kind is
+        trusted only when the identity directory attests it or the host opted
+        in to authenticating principals itself (``trust_host_identity``).
+        Otherwise the invariant is: an unattested HUMAN may run only
+        read-only, non-core calls below T2 -- no writes, merge-capable,
+        branch-writing or shell tools."""
         if (
             principal.kind is not PrincipalKind.HUMAN
             or self._attests_identity
             or self._trust_host_identity
         ):
             return
-        if tier >= APPROVAL_GATE_MIN_TIER or core_leaves:
+        if (
+            not spec.read_only
+            or spec.merge_capable
+            or plan.merge_capable
+            or spec.branch_param is not None
+            or spec.command_param is not None
+            or plan.tier >= APPROVAL_GATE_MIN_TIER
+            or core_leaves
+        ):
             raise _Denied(
-                "unattested HUMAN principal (enable require_credential with an identity "
-                "issuer, or set trust_host_identity=True if the host authenticates principals)"
+                "unattested HUMAN principal may only run read-only, non-core calls below T2 "
+                "(enable require_credential with an identity issuer, or set "
+                "trust_host_identity=True if the host authenticates principals)"
             )
 
     @staticmethod
@@ -1452,7 +1473,7 @@ class GovernedToolDispatcher:
                 credential_id=cid,
             ) from exc
         try:
-            self._unattested_human_check(principal, plan.tier, core_leaves)
+            self._unattested_human_check(principal, spec, plan, core_leaves)
             requested_by = self._resolve_requested_by(principal, plan.tier, requested_by, session)
             self._harness_checks(principal, spec, plan.tier, trigger_id, session, consume)
         except _Denied as exc:
@@ -1807,8 +1828,8 @@ class GovernedToolDispatcher:
         socket service's intent record) runs after authorisation and before
         the tool; if it raises, the call is denied and the tool never runs.
         Without identity attestation (``require_credential`` with an
-        identity-backed issuer), a HUMAN principal is denied T2+ and
-        immutable-core calls unless the dispatcher was built with
+        identity-backed issuer), a HUMAN principal may run only read-only,
+        non-core calls below T2 unless the dispatcher was built with
         ``trust_host_identity=True``; that opt-in means the trusted host
         authenticates ``principal`` and ``requested_by`` itself and never
         forwards agent-supplied identity labels. With credentials, AGENT T2+

@@ -224,13 +224,16 @@ This is a semver-major change (4.0.0): the production profile of the stable
 
 - **Breaking for direct `GovernedToolDispatcher` users.** A dispatcher without
   identity attestation (`require_credential=True` with an identity-backed
-  `CredentialIssuer`) no longer trusts a host-asserted `PrincipalKind.HUMAN`: a HUMAN
-  call at T2+ or touching immutable-core paths is denied ("unattested HUMAN
-  principal"), because HUMAN skips the AGENT-only requester and approval-requester
-  checks. Hosts that authenticate principals themselves opt in with the new
-  `trust_host_identity=True`; combining it with attested identity raises `ValueError`.
-  `build_control_plane` already attests identity and is unaffected; T0/T1 non-core
-  HUMAN calls are unchanged.
+  `CredentialIssuer`) no longer trusts a host-asserted `PrincipalKind.HUMAN`, because
+  HUMAN skips the AGENT-only requester, change-ownership, merge, breaker, autonomy and
+  budget checks. Invariant: an unattested HUMAN may run only read-only, non-core calls
+  below T2. Writes, merge-capable, branch-writing and shell tools, T2+ calls and
+  immutable-core paths are denied ("unattested HUMAN principal …") on `dispatch`,
+  `adispatch`, `authorize_without_consuming` and the MCP adapter. Hosts that
+  authenticate principals themselves opt in with the new `trust_host_identity=True`
+  (a `bool`; anything else raises `TypeError`); combining it with attested identity
+  raises `ValueError`. `build_control_plane` already attests identity and is
+  unaffected.
 - `ImmutableCoreRegistry` now classifies `sitecustomize`/`usercustomize`, `*.pth` and
   `conftest.py` paths as `CONTROL_PLANE` core even for custom registries without
   trusted `src/` packages (previously every import-shadow check was skipped there);

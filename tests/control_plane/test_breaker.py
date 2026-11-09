@@ -397,6 +397,8 @@ def _dispatcher(
         tool_tiers={"read": ActionTier.T0, "write": ActionTier.T1},
         read_only_tools=frozenset({"read"}),
         breaker=breaker,
+        # Trusted host: the HUMAN breaker exemption is what these tests check.
+        trust_host_identity=True,
         **kwargs,
     )
 
