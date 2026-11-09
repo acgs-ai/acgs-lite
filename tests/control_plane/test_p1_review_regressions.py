@@ -769,6 +769,34 @@ class TestFinalReviewBoundaries:
                 DEFAULT_IMMUTABLE_CORE, [WriteGrant(AGENT.id, PrincipalKind.AGENT, (path,))]
             )
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "acgs_lite.py",
+            "acgs_lite.pyc",
+            "acgs_lite.cpython-310-x86_64-linux-gnu.so",
+            "acgs_lite.pyd",
+            "acgs_lite/__init__.py",
+            "acgs_lite/__init__.pyc",
+            "acgs_lite/__init__.cpython-310-x86_64-linux-gnu.so",
+            "acgs_lite/__init__.pyd",
+            "yaml.py",
+            "json.py",
+            "pydantic/__init__.py",
+        ],
+    )
+    def test_root_import_shadow_is_denied_even_with_exact_grant(
+        self, pdp: PolicyDecisionPoint, path: str
+    ) -> None:
+        assert DEFAULT_IMMUTABLE_CORE.is_core(path)
+        assert not pdp.decide(DecisionRequest(AGENT, "file.write", path, ActionTier.T1)).allowed
+        # Unanchored import-shadow patterns are enforced per path, as are
+        # suffix patterns; admitting a grant must not admit a protected write.
+        permissions = RepositoryPermissions(
+            DEFAULT_IMMUTABLE_CORE, [WriteGrant(AGENT.id, PrincipalKind.AGENT, (path,))]
+        )
+        assert not permissions.can_write(AGENT, path)
+
     def test_caret_glob_class_is_literal(self) -> None:
         permissions = RepositoryPermissions(
             DEFAULT_IMMUTABLE_CORE,
