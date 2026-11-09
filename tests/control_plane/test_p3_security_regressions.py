@@ -212,7 +212,15 @@ class TestM4PromotionApprovals:
             ALICE, "c1", candidate_digest=digest, evidence=[run], approvals=[approval]
         )
         refs = signed.receipt.approvers
-        assert [(a.principal_id, a.approval_id) for a in refs] == [("bob", approval.approval_id)]
+        # Promotion retains identities; only the PDP receipt has an explicit
+        # trusted-gate attestation for cryptographic approval metadata.
+        assert [(a.principal_id, a.approval_id, a.action_hash) for a in refs] == [
+            ("bob", None, None)
+        ]
+        policy_refs = ledger.receipts()[-2].receipt.approvers
+        assert [(a.principal_id, a.approval_id, a.action_hash) for a in policy_refs] == [
+            ("bob", approval.approval_id, approval.action_hash)
+        ]
         with pytest.raises(PromotionRejected):  # single use
             gate.promote(ALICE, "c1", candidate_digest=digest, evidence=[run], approvals=[approval])
 
