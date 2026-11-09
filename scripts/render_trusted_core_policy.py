@@ -25,6 +25,7 @@ def registry_paths() -> list[dict[str, object]]:
     patterns.update(
         {shadow for value in tuple(patterns) for shadow in module_shadow_patterns(value)}
     )
+    patterns.update(DEFAULT_IMMUTABLE_CORE.import_shadow_patterns())
     patterns.update({"**/sitecustomize*", "**/usercustomize*", "**/*.pth", "**/conftest.py"})
     rows: list[dict[str, object]] = []
     for pattern in sorted(patterns):
