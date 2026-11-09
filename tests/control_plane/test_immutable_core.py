@@ -239,3 +239,12 @@ class TestManifest:
     def test_invalid_yaml(self) -> None:
         with pytest.raises(ImmutableCoreError):
             ImmutableCoreRegistry.from_yaml_str("version: [unclosed")
+
+
+@pytest.mark.parametrize("leaf", ["leaf.py", "__init__.py", "nested/leaf.py"])
+@pytest.mark.parametrize("suffix", [".py", ".pyc", ".cpython-310-x86_64-linux-gnu.so", ".pyd"])
+def test_protected_leaf_closes_ancestor_module_shadows(leaf: str, suffix: str) -> None:
+    registry = ImmutableCoreRegistry({CoreCategory.CONTROL_PLANE: [f"src/pkg/namespace/{leaf}"]})
+    assert registry.is_core("src/pkg/namespace" + suffix)
+    assert registry.is_core("src/pkg" + suffix)
+    assert not registry.is_core("src/pkg/unrelated" + suffix)

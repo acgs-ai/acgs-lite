@@ -225,6 +225,11 @@
       "flags": 50
     },
     {
+      "pattern": "__pycache__/data.*",
+      "regex": "__pycache__/data\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "__pycache__/eval-suites.*",
       "regex": "__pycache__/eval\\-suites\\.[^/]*",
       "flags": 50
@@ -305,8 +310,18 @@
       "flags": 50
     },
     {
+      "pattern": "__pycache__/src.*",
+      "regex": "__pycache__/src\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "__pycache__/test_suites.*",
       "regex": "__pycache__/test_suites\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/tests.*",
+      "regex": "__pycache__/tests\\.[^/]*",
       "flags": 50
     },
     {
@@ -372,6 +387,11 @@
     {
       "pattern": "credentials/**",
       "regex": "credentials(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "data.*",
+      "regex": "data\\.[^/]*",
       "flags": 50
     },
     {
@@ -770,8 +790,23 @@
       "flags": 50
     },
     {
+      "pattern": "src.*",
+      "regex": "src\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/*.py",
       "regex": "src/[^/]*\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/__pycache__/acgs_lite.*",
+      "regex": "src/__pycache__/acgs_lite\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite.*",
+      "regex": "src/acgs_lite\\.[^/]*",
       "flags": 50
     },
     {
@@ -885,6 +920,11 @@
       "flags": 50
     },
     {
+      "pattern": "src/acgs_lite/__pycache__/integrations.*",
+      "regex": "src/acgs_lite/__pycache__/integrations\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/acgs_lite/__pycache__/lean_verify.*",
       "regex": "src/acgs_lite/__pycache__/lean_verify\\.[^/]*",
       "flags": 50
@@ -902,6 +942,11 @@
     {
       "pattern": "src/acgs_lite/__pycache__/maci.*",
       "regex": "src/acgs_lite/__pycache__/maci\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/observability.*",
+      "regex": "src/acgs_lite/__pycache__/observability\\.[^/]*",
       "flags": 50
     },
     {
@@ -1185,6 +1230,11 @@
       "flags": 50
     },
     {
+      "pattern": "src/acgs_lite/integrations.*",
+      "regex": "src/acgs_lite/integrations\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "src/acgs_lite/integrations/__init__.*",
       "regex": "src/acgs_lite/integrations/__init__\\.[^/]*",
       "flags": 50
@@ -1267,6 +1317,11 @@
     {
       "pattern": "src/acgs_lite/maci/**",
       "regex": "src/acgs_lite/maci(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/observability.*",
+      "regex": "src/acgs_lite/observability\\.[^/]*",
       "flags": 50
     },
     {
@@ -1432,6 +1487,11 @@
     {
       "pattern": "test_suites/**",
       "regex": "test_suites(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "tests.*",
+      "regex": "tests\\.[^/]*",
       "flags": 50
     },
     {
