@@ -668,7 +668,7 @@ class TestActionHash:
     def test_arguments_digest_is_canonical(self) -> None:
         a = arguments_digest({"x": {"b": 1, "a": [1, 2]}, "s": {3, 1}, "raw": b"\x00"})
         b = arguments_digest({"raw": b"\x00", "s": {1, 3}, "x": {"a": [1, 2], "b": 1}})
-        assert a == b
+        assert a != b  # Both kwargs and nested mapping order are observable.
         assert a != arguments_digest({"raw": b"\x01", "s": {1, 3}, "x": {"a": [1, 2], "b": 1}})
         assert arguments_digest({"f": 1.5}) != arguments_digest({"f": 2.5})
         for bad in ({"f": float("nan")}, {"o": object()}):

@@ -98,8 +98,12 @@
 /tests/red_team/governance_fail_closed_cases/** @acgs-ai/governance-humans
 
 # control_plane
+/.cargo/** @acgs-ai/governance-humans
 /control-plane/** @acgs-ai/governance-humans
 /pyproject.toml @acgs-ai/governance-humans
+/rust-toolchain @acgs-ai/governance-humans
+/rust-toolchain.toml @acgs-ai/governance-humans
+/rust/** @acgs-ai/governance-humans
 /scripts/check_immutable_core_diff.py @acgs-ai/governance-humans
 /scripts/render_codeowners.py @acgs-ai/governance-humans
 /src/acgs_lite/__init__.py @acgs-ai/governance-humans

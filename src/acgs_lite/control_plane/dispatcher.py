@@ -1149,10 +1149,16 @@ class GovernedToolDispatcher:
             return None
         raise _Denied(f"trigger {trigger_id} autonomous mode suspended (circuit breaker open)")
 
-    def _autonomy_check(self, principal: Principal, read_t0: bool) -> None:
+    def _autonomy_check(
+        self, principal: Principal, read_t0: bool, *, admitted: bool = False
+    ) -> None:
         if principal.kind is PrincipalKind.HUMAN or self._autonomy is None:
             return
-        level = self._autonomy.level(principal)
+        level = (
+            self._autonomy.admitted_level(principal)
+            if admitted
+            else self._autonomy.level(principal)
+        )
         if level is AutonomyLevel.SUSPENDED:
             raise _Denied("autonomy suspended")
         if level is AutonomyLevel.P0_ONLY and not read_t0:
@@ -1172,16 +1178,7 @@ class GovernedToolDispatcher:
         tripped the breaker, suspended the cohort or demoted the agent. Only
         here is the half-open probe spent (atomically, if still available)."""
         try:
-            autonomy = self._autonomy
-            if (
-                autonomy is not None
-                and principal.kind is not PrincipalKind.HUMAN
-                and autonomy.is_demoted(principal)
-                and not read_t0
-            ):
-                # is_demoted(), not level(): level() would also demote on the
-                # budget this very call was just charged against.
-                raise _Denied("autonomy demoted to P0_ONLY: read-only T0 tools only")
+            self._autonomy_check(principal, read_t0, admitted=True)
             return self._breaker_check(
                 principal, trigger_id, session, consume=True, admission=admission
             )
@@ -1547,6 +1544,14 @@ class GovernedToolDispatcher:
                 if denial is not None:
                     raise self._pre_denial(principal, tool_name, denial, group_id=group_id)
 
+    def _recheck_autonomy(
+        self, principal: Principal, tool_name: str, read_t0: bool, *, group_id: str | None
+    ) -> None:
+        try:
+            self._autonomy_check(principal, read_t0, admitted=True)
+        except _Denied as exc:
+            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
+
     def _recheck_credential(
         self, principal: Principal, tool_name: str, credential: object, *, group_id: str | None
     ) -> None:
@@ -1662,6 +1667,12 @@ class GovernedToolDispatcher:
                 group_id=auth.decisions[0].decision_id if auth.decisions else None,
             )
             self._recheck_kill_switch(principal, tool_name, auth)
+            self._recheck_autonomy(
+                principal,
+                tool_name,
+                auth.spec.read_only and auth.plan.tier == ActionTier.T0,
+                group_id=auth.decisions[0].decision_id if auth.decisions else None,
+            )
             try:
                 value = auth.spec.fn(**auth.args)
             except BaseException:
@@ -1718,6 +1729,12 @@ class GovernedToolDispatcher:
                     group_id=auth.decisions[0].decision_id if auth.decisions else None,
                 )
                 self._recheck_kill_switch(principal, tool_name, auth)
+                self._recheck_autonomy(
+                    principal,
+                    tool_name,
+                    auth.spec.read_only and auth.plan.tier == ActionTier.T0,
+                    group_id=auth.decisions[0].decision_id if auth.decisions else None,
+                )
                 try:
                     value = auth.spec.fn(**auth.args)
                 except BaseException:

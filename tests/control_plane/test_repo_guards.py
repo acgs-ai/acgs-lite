@@ -96,9 +96,29 @@ class TestDiffGuard:
         assert GUARD.main(["--files", "workspace/x.py", "--author", "bot[bot]"]) == 0
 
     def test_optional_ci_dependency_input_blocks_agent_changes(self) -> None:
-        assert GUARD.main(
-            ["--files", "requirements-test-optional.txt", "--author", "bot[bot]"]
-        ) == 1
+        assert (
+            GUARD.main(["--files", "requirements-test-optional.txt", "--author", "bot[bot]"]) == 1
+        )
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "rust/pyo3/src/lib.rs",
+            "rust/core/src/validator.rs",
+            "rust/core/Cargo.toml",
+            "rust/pyo3/Cargo.toml",
+            "rust/pyo3/pyproject.toml",
+            "rust/Cargo.toml",
+            "rust/Cargo.lock",
+            "rust/core/build.rs",
+            "rust/.cargo/config.toml",
+            ".cargo/config.toml",
+            "rust-toolchain",
+            "rust-toolchain.toml",
+        ],
+    )
+    def test_native_governance_build_inputs_block_agent_changes(self, path: str) -> None:
+        assert GUARD.main(["--files", path, "--author", "test[bot]"]) == 1
 
     def test_human_core_change_allowed_by_guard(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert GUARD.main(["--files", "policies/p.yaml", "--author", "alice"]) == 0
