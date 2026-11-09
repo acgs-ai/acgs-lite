@@ -766,11 +766,10 @@ class ControlPlaneService:
                 "requested_by": request.get("requested_by"),
                 "on_authorized": intent,
             }
-            if self._cp.dispatcher.is_async(tool):
-                # Decided before authorization, so nothing is consumed twice.
-                result = asyncio.run(self._cp.dispatcher.adispatch(*call, **options))
-            else:
-                result = self._cp.dispatcher.dispatch(*call, **options)
+            # adispatch handles sync returns and awaitables, including async
+            # callable objects and sync wrappers returning a coroutine. It
+            # authorizes and invokes once, then awaits only when necessary.
+            result = asyncio.run(self._cp.dispatcher.adispatch(*call, **options))
         except ToolDenied as exc:
             if not self._denial_allowed(uid):
                 # Over the per-uid denial budget: the PDP receipt exists, but

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import os
@@ -110,18 +111,68 @@ class TestSocketDirectory:
 class TestServiceCalls:
     """242.3 / 242.7 / 242.4 / 242.11 / 242.8 / 242.12."""
 
+    @pytest.mark.parametrize("kind", ["sync", "async", "async_callable", "returns_coroutine"])
+    def test_all_callable_forms_execute_once(
+        self,
+        env: DemoEnvironment,
+        serve: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        kind: str,
+    ) -> None:
+        calls: list[str] = []
+        authorizations: list[str] = []
+
+        def read_sync(path: str) -> str:
+            calls.append(path)
+            return "read-ok"
+
+        async def read_async(path: str) -> str:
+            await asyncio.sleep(0)
+            return read_sync(path)
+
+        class AsyncReader:
+            async def __call__(self, path: str) -> str:
+                return await read_async(path)
+
+        def read_wrapper(path: str) -> Any:
+            return read_async(path)
+
+        fn = {
+            "sync": read_sync,
+            "async": read_async,
+            "async_callable": AsyncReader(),
+            "returns_coroutine": read_wrapper,
+        }[kind]
+        tools = env.cp.dispatcher._tools
+        monkeypatch.setitem(tools, "read_file", dataclasses.replace(tools["read_file"], fn=fn))
+        original = env.cp.dispatcher._authorize
+
+        def counting(*args: Any, **kwargs: Any) -> Any:
+            authorizations.append(args[1])
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(env.cp.dispatcher, "_authorize", counting)
+        service = serve()
+        with ControlPlaneClient(str(service.socket_path), _token(env)) as client:
+            assert client.call("read_file", {"path": PROMPT}) == "read-ok"
+        assert calls == [PROMPT]
+        assert authorizations == ["read_file"]
+        lines = (env.root / SERVICE_AUDIT_PATH).read_text(encoding="utf-8").splitlines()
+        phases = [json.loads(line)["metadata"].get("phase") for line in lines if line]
+        assert phases == ["intent", "completed"]
+
     def test_exhausted_uid_is_refused_before_dispatch(
         self, env: DemoEnvironment, serve: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         service = serve(max_denials_per_uid=1)
         dispatched: list[str] = []
-        original = env.cp.dispatcher.dispatch
+        original = env.cp.dispatcher._authorize
 
         def counting(*args: Any, **kwargs: Any) -> Any:
             dispatched.append(args[1])
             return original(*args, **kwargs)
 
-        monkeypatch.setattr(env.cp.dispatcher, "dispatch", counting)
+        monkeypatch.setattr(env.cp.dispatcher, "_authorize", counting)
         with (
             ControlPlaneClient(str(service.socket_path), _token(env)) as client,
             pytest.raises(ControlPlaneError),
