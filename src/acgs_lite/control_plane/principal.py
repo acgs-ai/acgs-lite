@@ -30,8 +30,10 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 # let one person appear as two distinct approvers.
 _ID_CHARS = re.compile(r"[A-Za-z0-9._@:-]+")
 
-# TODO(control-plane-gap): approvers are unattested Principal objects; the
-# host vouches for them. Phase 3 adds signed approvals bound to inputs_digest.
+# TODO(control-plane-gap): Principal.kind is still host-asserted (no session
+# attestation). Phase 3 attests *approvers* only: a PDP with an ApprovalGate
+# replaces host-asserted approvers by the registered humans behind signed,
+# action-hash-bound approvals (see :mod:`.approvals`).
 
 
 def canonical_principal_id(principal_id: str) -> str:
@@ -72,10 +74,12 @@ class Principal:
     def __post_init__(self) -> None:
         _validate_id(self.id, "principal id")
         object.__setattr__(self, "kind", PrincipalKind(self.kind))
-        if self.system_id is not None and (
-            not isinstance(self.system_id, str) or not self.system_id.strip()
-        ):
-            raise ValueError("principal system_id must be None or a non-empty string")
+        if self.system_id is not None:
+            # Same canonical ASCII charset as ids, compared casefolded, so
+            # "SYS-A" and "sys-a" are one cohort for sibling exclusion and
+            # demotion.
+            _validate_id(self.system_id, "principal system_id")
+            object.__setattr__(self, "system_id", self.system_id.casefold())
         roles = frozenset(self.roles)
         if not all(isinstance(role, str) and role for role in roles):
             raise ValueError("principal roles must be non-empty strings")

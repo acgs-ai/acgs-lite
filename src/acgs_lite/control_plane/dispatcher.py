@@ -31,6 +31,30 @@ then requires, in order:
 6. repository permissions: ``RepositoryPermissions.can_write`` for every path
    a write tool receives (an independent second layer; it is required).
 
+Phase 3 adds harness-side pre-checks, all before step 1 and none operable by
+the agent: the :class:`~.killswitch.KillSwitch` (engaged or unreadable ->
+deny everything, T0 included); an optional short-TTL scoped credential
+(``require_credential=True``: a token from the harness's
+:class:`~.credentials.CredentialIssuer` whose principal matches and whose
+scopes include ``tool:<name>``); resource budgets (one iteration charged per
+dispatch; exhausted -> deny, or with an autonomy controller -> demotion); and
+the :class:`~.autonomy.AutonomyController` level (P0_ONLY -> read-only T0
+tools only, SUSPENDED -> nothing). T2/T3 tools need an
+:class:`~.approvals.ApprovalGate` on the PDP (refused at construction and
+registration otherwise); approvals are bound to the ``tool.call`` action hash,
+which covers the arguments digest, and are consumed right before the tool
+runs. Host-asserted ``approvers=`` are ignored by a gated PDP.
+
+Phase 4: with ``breaker=`` (a :class:`~.breaker.TriggerCircuitBreaker` with
+a :class:`~.breaker.TriggerRegistry`) every non-HUMAN dispatch must name a
+``trigger_id`` bound to that principal or its system cohort (taken from the
+credential session when it carries one) and is denied while that trigger --
+or, with cohort suspension, any trigger of its cohort -- is not CLOSED.
+Dry runs (:meth:`GovernedToolDispatcher.authorize_without_consuming`) check
+the breaker without spending a half-open probe and record no telemetry.
+:meth:`GovernedToolDispatcher.action_hash_for` on a T2+ tool tells the
+approval gate a quorum was requested (approval-latency telemetry).
+
 Any failure raises :class:`ToolDenied` and the tool function is never called.
 Tools absent from ``tool_tiers`` are tier T2 and writers even if listed as
 read-only. A directory argument that contains a root-anchored core pattern
@@ -49,10 +73,26 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from acgs_lite.control_plane.action_hash import arguments_digest
+from acgs_lite.control_plane.approvals import ApprovalGate, SignedApproval
+from acgs_lite.control_plane.autonomy import AutonomyController, AutonomyLevel, FailureKind
+from acgs_lite.control_plane.breaker import (
+    TriggerCircuitBreaker,
+    _BreakerAdmission,
+    valid_trigger_id,
+)
+from acgs_lite.control_plane.budgets import BudgetLedger
 from acgs_lite.control_plane.context import DecisionRequest
+from acgs_lite.control_plane.credentials import (
+    CredentialInvalid,
+    CredentialIssuer,
+    ScopedCredential,
+)
 from acgs_lite.control_plane.iam import RepositoryPermissions
+from acgs_lite.control_plane.invariants import requested_by_problem
+from acgs_lite.control_plane.killswitch import KillSwitch
 from acgs_lite.control_plane.pdp import Decision, PolicyDecisionPoint
-from acgs_lite.control_plane.principal import Principal, PrincipalKind
+from acgs_lite.control_plane.principal import Principal, PrincipalKind, canonical_principal_id
 from acgs_lite.control_plane.tiers import ActionTier
 
 __all__ = [
@@ -64,6 +104,8 @@ __all__ = [
 
 UNKNOWN_TOOL_TIER = ActionTier.T2
 SHELL_MIN_TIER = ActionTier.T2
+# Tools at or above this tier are approval-gated (signed quorum).
+APPROVAL_GATE_MIN_TIER = ActionTier.T2
 # TODO(control-plane-gap): scratch prefixes (where directory-shaped writes are
 # allowed despite unanchored core patterns) are a design inference; configure
 # them per deployment.
@@ -143,6 +185,26 @@ def _string_leaves(value: Any, out: list[str], depth: int = 0) -> None:
         raise _Denied(f"unsupported argument type {type(value).__name__}")
 
 
+def _tool_call_attributes(
+    paths: list[str],
+    read_only: bool,
+    digest: str,
+    authored_by: str | None,
+    requested_by: str | None = None,
+) -> dict[str, Any]:
+    """Attributes of the ``tool.call`` request (the approval subject)."""
+    attributes: dict[str, Any] = {
+        "paths": list(paths),
+        "tool_read_only": read_only,
+        "arguments_digest": digest,
+    }
+    if authored_by is not None:
+        attributes["authored_by"] = authored_by
+    if requested_by is not None:
+        attributes["requested_by"] = requested_by
+    return attributes
+
+
 class GovernedToolDispatcher:
     """Gate tool functions behind PDP decisions and repository permissions.
 
@@ -161,6 +223,12 @@ class GovernedToolDispatcher:
         tool_tiers: Mapping[str, ActionTier],
         read_only_tools: frozenset[str] = frozenset(),
         scratch_prefixes: Iterable[str] = DEFAULT_SCRATCH_PREFIXES,
+        kill_switch: KillSwitch | None = None,
+        credential_issuer: CredentialIssuer | None = None,
+        require_credential: bool = False,
+        budgets: BudgetLedger | None = None,
+        autonomy: AutonomyController | None = None,
+        breaker: TriggerCircuitBreaker | None = None,
     ) -> None:
         if not isinstance(pdp, PolicyDecisionPoint):
             raise TypeError("pdp must be a PolicyDecisionPoint")
@@ -168,7 +236,44 @@ class GovernedToolDispatcher:
             raise TypeError("permissions must be a RepositoryPermissions")
         if permissions.registry != pdp.registry:
             raise ValueError("permissions and pdp must use the same immutable-core registry")
+        if kill_switch is not None and type(kill_switch) is not KillSwitch:
+            raise TypeError("kill_switch must be a KillSwitch")
+        if credential_issuer is not None and type(credential_issuer) is not CredentialIssuer:
+            raise TypeError("credential_issuer must be a CredentialIssuer")
+        if require_credential and credential_issuer is None:
+            raise ValueError("require_credential=True needs a credential_issuer")
+        if budgets is not None and not isinstance(budgets, BudgetLedger):
+            raise TypeError("budgets must be a BudgetLedger")
+        if autonomy is not None and not isinstance(autonomy, AutonomyController):
+            raise TypeError("autonomy must be an AutonomyController")
+        if breaker is not None and type(breaker) is not TriggerCircuitBreaker:
+            raise TypeError("breaker must be a TriggerCircuitBreaker")
+        if breaker is not None and breaker.registry is None:
+            raise ValueError("a breaker needs a TriggerRegistry (trigger bindings)")
+        if breaker is not None and breaker.autonomy is not None:
+            if autonomy is not None and autonomy is not breaker.autonomy:
+                # The breaker would demote one controller while dispatch
+                # enforces another, so a breaker reset would silently restore
+                # autonomy the breaker's controller still withholds.
+                raise ValueError("autonomy must be the breaker's AutonomyController")
+            # The demotions a breaker makes must be enforced here too.
+            autonomy = breaker.autonomy
+        if autonomy is not None and autonomy.budgets is not budgets:
+            # A controller watching a ledger the dispatcher never charges
+            # would never see exhaustion.
+            raise ValueError("autonomy must use the same BudgetLedger as the dispatcher")
+        if pdp.approval_gate is None and any(
+            ActionTier(tier) >= APPROVAL_GATE_MIN_TIER for tier in tool_tiers.values()
+        ):
+            raise ValueError("T2/T3 tools require a PDP configured with an ApprovalGate")
         self._pdp = pdp
+        self._gate: ApprovalGate | None = pdp.approval_gate
+        self._kill_switch = kill_switch if kill_switch is not None else pdp.kill_switch
+        self._credentials = credential_issuer
+        self._require_credential = bool(require_credential)
+        self._budgets = budgets
+        self._autonomy = autonomy
+        self._breaker = breaker
         self._permissions = permissions
         self._registry = pdp.registry
         self._tool_tiers = {name: ActionTier(tier) for name, tier in tool_tiers.items()}
@@ -191,6 +296,47 @@ class GovernedToolDispatcher:
 
     def is_read_only(self, tool_name: str) -> bool:
         return tool_name in self._tool_tiers and tool_name in self._read_only_tools
+
+    def action_hash_for(
+        self,
+        principal: Principal,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        *,
+        authored_by: str | None = None,
+        requested_by: str | None = None,
+    ) -> str:
+        """The action hash an approver must sign to approve this exact call.
+
+        Pure: no decision is recorded and no budget is charged. Raises
+        ``ValueError`` for a call that fails the pre-PDP argument checks.
+        For a T2+ tool it notes the approval request for telemetry.
+        """
+        from acgs_lite.control_plane.action_hash import action_hash
+
+        try:
+            spec, args, declared, core_leaves = self._check(principal, tool_name, arguments)
+        except _Denied as exc:
+            raise ValueError(str(exc)) from exc
+        tool_call = _tool_call_attributes(
+            list(dict.fromkeys([*declared, *core_leaves])),
+            spec.read_only,
+            arguments_digest(args),
+            authored_by,
+            requested_by,
+        )
+        digest = action_hash(
+            DecisionRequest(
+                principal=principal,
+                action="tool.call",
+                resource=tool_name,
+                tier=spec.tier,
+                attributes=tool_call,
+            )
+        )
+        if self._gate is not None and spec.tier >= APPROVAL_GATE_MIN_TIER:
+            self._gate.note_approval_requested(digest, principal_kind=principal.kind)
+        return digest
 
     def register(
         self,
@@ -238,21 +384,32 @@ class GovernedToolDispatcher:
         read_only = self.is_read_only(name)
         if command_param is not None and (tier < SHELL_MIN_TIER or read_only):
             raise ValueError(f"shell-like tool {name!r} must be tier >= T2 and not read-only")
+        if tier >= APPROVAL_GATE_MIN_TIER and self._gate is None:
+            raise ValueError(
+                f"tool {name!r} is tier {tier.name}: T2/T3 tools require a PDP with an ApprovalGate"
+            )
         self._tools[name] = _ToolSpec(fn, signature, paths, command_param, tier, read_only)
 
     # -- authorisation -------------------------------------------------
 
-    def _pre_denial(self, principal: object, tool_name: object, reason: str) -> ToolDenied:
-        decision = self._pdp.publish(
-            Decision.denied(
-                reason,
-                constitution_hash=self._pdp.constitution_hash,
-                policy_digest=self._pdp.policy_digest,
-                principal_id=str(getattr(principal, "id", "") or ""),
-                action="tool.call",
-                resource=tool_name if isinstance(tool_name, str) else "",
-                error="dispatch_denied",
-            )
+    def _pre_denial(
+        self,
+        principal: object,
+        tool_name: object,
+        reason: str,
+        *,
+        telemetry: bool = True,
+        group_id: str | None = None,
+    ) -> ToolDenied:
+        decision = self._pdp._record_denial(
+            reason,
+            principal_id=str(getattr(principal, "id", "") or ""),
+            action="tool.call",
+            resource=tool_name if isinstance(tool_name, str) else "",
+            error="dispatch_denied",
+            telemetry=telemetry,
+            principal_kind=principal.kind if isinstance(principal, Principal) else None,
+            group_id=group_id,
         )
         return ToolDenied(decision)
 
@@ -430,22 +587,249 @@ class GovernedToolDispatcher:
                     raise _Denied(f"directory-like write target {path!r} may contain core files")
         return spec, args, declared, core_leaves
 
+    def _verify_credential(
+        self, principal: Principal, tool_name: str, credential: object
+    ) -> ScopedCredential | None:
+        if not self._require_credential:
+            return None
+        issuer = self._credentials
+        if issuer is None:  # pragma: no cover - refused at construction
+            raise _Denied("no credential issuer")
+        try:
+            return issuer.verify(
+                credential, required_scope=f"tool:{tool_name}", principal=principal
+            )
+        except CredentialInvalid as exc:
+            raise _Denied(f"credential rejected: {exc}") from exc
+
+    @staticmethod
+    def _resolve_requested_by(
+        principal: Principal,
+        spec: _ToolSpec,
+        requested_by: str | None,
+        session: ScopedCredential | None,
+    ) -> str | None:
+        """The original requester: from the credential session when it names
+        one (a different caller-supplied value is refused), else the caller's
+        value. Required for AGENT requests at T2+."""
+        if session is not None and session.on_behalf_of is not None:
+            if requested_by is not None and canonical_principal_id(requested_by) != (
+                session.on_behalf_of
+            ):
+                raise _Denied("requested_by does not match the credential session")
+            requested_by = session.on_behalf_of
+        if (
+            session is not None
+            and session.on_behalf_of is None
+            and principal.kind is PrincipalKind.AGENT
+            and spec.tier >= APPROVAL_GATE_MIN_TIER
+        ):
+            raise _Denied("credential is not bound to an original requester (on_behalf_of)")
+        if principal.kind is PrincipalKind.AGENT and spec.tier >= APPROVAL_GATE_MIN_TIER:
+            # Without credentials this is a trusted-host API: the host must
+            # authenticate principal and requested_by, never forward agent
+            # input as an assertion of the original human requester's identity.
+            problem = requested_by_problem(principal, requested_by)
+            if problem is not None:
+                raise _Denied(problem)
+        return requested_by
+
+    def _breaker_check(
+        self,
+        principal: Principal,
+        trigger_id: str | None,
+        session: ScopedCredential | None,
+        consume: bool,
+        admission: _BreakerAdmission | None = None,
+    ) -> _BreakerAdmission | None:
+        breaker = self._breaker
+        if breaker is None or principal.kind is PrincipalKind.HUMAN:
+            return None
+        registry = breaker.registry
+        if registry is None:  # pragma: no cover - refused at construction
+            raise _Denied("no trigger registry")
+        if session is not None and session.trigger_id is not None:
+            if trigger_id is not None and trigger_id != session.trigger_id:
+                raise _Denied("trigger_id does not match the credential session")
+            trigger_id = session.trigger_id
+        # TODO(control-plane-gap): without require_credential the trigger_id is
+        # caller-asserted; the registry binding bounds which triggers it may name.
+        if trigger_id is None:
+            raise _Denied("non-human dispatch under a circuit breaker must name its trigger_id")
+        if not valid_trigger_id(trigger_id):
+            raise _Denied("invalid trigger_id")
+        if not registry.is_bound(trigger_id, principal):
+            raise _Denied(f"trigger {trigger_id} not bound to principal")
+        cohorts = registry.cohorts_of(principal)
+        for cohort in cohorts:
+            if breaker.cohort_suspended(cohort, probing=trigger_id):
+                raise _Denied(f"system cohort {cohort} suspended (a bound trigger is not closed)")
+        if not cohorts and breaker.principal_suspended(principal, probing=trigger_id):
+            raise _Denied("principal suspended (a bound trigger is not closed)")
+        if admission is not None:
+            if admission.trigger_id != trigger_id or not breaker._admission_valid(admission):
+                raise _Denied(f"trigger {trigger_id} admission invalidated")
+            return admission
+        if consume:
+            reserved = breaker._reserve_admission(trigger_id)
+            if reserved is not None:
+                return reserved
+        elif breaker.allow_autonomous(trigger_id, consume=False):
+            return None
+        raise _Denied(f"trigger {trigger_id} autonomous mode suspended (circuit breaker open)")
+
+    def _autonomy_check(
+        self, principal: Principal, spec: _ToolSpec, *, admitted: bool = False
+    ) -> None:
+        if principal.kind is PrincipalKind.HUMAN or self._autonomy is None:
+            return
+        level = (
+            self._autonomy.admitted_level(principal)
+            if admitted
+            else self._autonomy.level(principal)
+        )
+        if level is AutonomyLevel.SUSPENDED:
+            raise _Denied("autonomy suspended")
+        if level is AutonomyLevel.P0_ONLY and not (spec.read_only and spec.tier == ActionTier.T0):
+            raise _Denied("autonomy demoted to P0_ONLY: read-only T0 tools only")
+
+    def _final_admission(
+        self,
+        principal: Principal,
+        tool_name: str,
+        spec: _ToolSpec,
+        trigger_id: str | None,
+        session: ScopedCredential | None,
+        group_id: str | None,
+        admission: _BreakerAdmission | None = None,
+    ) -> _BreakerAdmission | None:
+        """Re-admit after the PDP: a failure observed meanwhile may have
+        tripped the breaker, suspended the cohort or demoted the agent. Only
+        here is the half-open probe spent (atomically, if still available)."""
+        try:
+            self._autonomy_check(principal, spec, admitted=True)
+            return self._breaker_check(
+                principal, trigger_id, session, consume=True, admission=admission
+            )
+        except _Denied as exc:
+            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
+        except Exception as exc:
+            raise self._pre_denial(
+                principal,
+                tool_name,
+                f"harness check failed: {type(exc).__name__}",
+                group_id=group_id,
+            ) from exc
+
+    def _harness_checks(
+        self,
+        principal: Principal,
+        spec: _ToolSpec,
+        trigger_id: str | None = None,
+        session: ScopedCredential | None = None,
+        consume: bool = True,
+    ) -> None:
+        """Kill-switch-independent harness gates; raise :class:`_Denied`."""
+        governed = principal.kind is not PrincipalKind.HUMAN
+        budgets = self._budgets
+        if governed and budgets is not None:
+            # TODO(control-plane-gap): no run means no enforceable budget, so
+            # the call is denied; hosts must start_run() before dispatching.
+            if not budgets.has_run(principal):
+                raise _Denied("no budget run started for this principal")
+            state = budgets.state(principal)
+            if state.is_exhausted:
+                if self._autonomy is not None:
+                    self._autonomy.demote(
+                        principal, "resource budget exhausted: " + ", ".join(state.exhausted)
+                    )
+                if self._autonomy is None or not (spec.read_only and spec.tier == ActionTier.T0):
+                    raise _Denied("budget exhausted: " + ", ".join(state.exhausted))
+        self._autonomy_check(principal, spec)
+        # Availability only: the half-open probe is spent in _final_admission,
+        # once the call has passed every other check (a denied call must not
+        # burn the trigger's only probe).
+        self._breaker_check(principal, trigger_id, session, consume=False)
+        if governed and budgets is not None:
+            # Atomic check-and-charge, after every other harness gate passed,
+            # so concurrent calls cannot overshoot and a call never trips the
+            # budget it is being admitted under.
+            if budgets.try_charge(principal, iterations=1) is None and not (
+                self._autonomy is not None and spec.read_only and spec.tier == ActionTier.T0
+            ):
+                raise _Denied("budget exhausted")
+
+    def _kill_switch_engaged(self) -> bool:
+        # The dispatcher may hold a different switch than its PDP; either one
+        # engaged (or unreadable) halts execution.
+        for switch in (self._kill_switch, self._pdp.kill_switch):
+            if switch is None:
+                continue
+            try:
+                if switch.is_engaged():
+                    return True
+            except Exception:
+                return True
+        return False
+
+    def _record_denial_failure(self, principal: object) -> None:
+        autonomy = self._autonomy
+        if autonomy is None or not isinstance(principal, Principal):
+            return
+        try:
+            autonomy.record_failure(principal, FailureKind.POLICY_DENIAL)
+        except Exception:  # pragma: no cover - record_failure is defensive
+            return
+
     def _authorize(
         self,
         principal: Principal,
         tool_name: str,
         arguments: object,
         approvers: Iterable[Principal],
+        approvals: Iterable[SignedApproval] = (),
+        authored_by: str | None = None,
+        credential: object = None,
+        consume: bool = False,
+        requested_by: str | None = None,
+        trigger_id: str | None = None,
+        *,
+        admission_sink: list[_BreakerAdmission] | None = None,
     ) -> tuple[_ToolSpec, dict[str, Any], tuple[Decision, ...]]:
+        if self._kill_switch_engaged():
+            raise self._pre_denial(principal, tool_name, "kill switch engaged", telemetry=consume)
         try:
             spec, args, declared, core_leaves = self._check(principal, tool_name, arguments)
             approver_tuple = tuple(approvers)
+            approval_tuple = tuple(approvals)
+            for label, value in (("authored_by", authored_by), ("requested_by", requested_by)):
+                if value is not None and (not isinstance(value, str) or not value):
+                    raise _Denied(f"{label} must be a principal id string")
+            digest = arguments_digest(args)
         except _Denied as exc:
-            raise self._pre_denial(principal, tool_name, str(exc)) from exc
-        except TypeError as exc:
-            raise self._pre_denial(principal, tool_name, f"invalid approvers: {exc}") from exc
+            self._record_denial_failure(principal)
+            raise self._pre_denial(principal, tool_name, str(exc), telemetry=consume) from exc
+        except (TypeError, ValueError) as exc:
+            self._record_denial_failure(principal)
+            raise self._pre_denial(
+                principal, tool_name, f"invalid call: {exc}", telemetry=consume
+            ) from exc
+        try:
+            session = self._verify_credential(principal, tool_name, credential)
+            requested_by = self._resolve_requested_by(principal, spec, requested_by, session)
+            self._harness_checks(principal, spec, trigger_id, session, consume)
+        except _Denied as exc:
+            raise self._pre_denial(principal, tool_name, str(exc), telemetry=consume) from exc
+        except Exception as exc:
+            raise self._pre_denial(
+                principal,
+                tool_name,
+                f"harness check failed: {type(exc).__name__}",
+                telemetry=consume,
+            ) from exc
 
         paths = list(dict.fromkeys([*declared, *core_leaves]))
+        tool_call = _tool_call_attributes(paths, spec.read_only, digest, authored_by, requested_by)
         requests = [
             DecisionRequest(
                 principal=principal,
@@ -453,7 +837,8 @@ class GovernedToolDispatcher:
                 resource=tool_name,
                 tier=spec.tier,
                 approvers=approver_tuple,
-                attributes={"paths": list(paths), "tool_read_only": spec.read_only},
+                attributes=dict(tool_call),
+                approvals=approval_tuple,
             )
         ]
         path_action = "file.read" if spec.read_only else "file.write"
@@ -464,32 +849,110 @@ class GovernedToolDispatcher:
                 resource=path,
                 tier=spec.tier,
                 approvers=approver_tuple,
-                attributes={"via_tool": tool_name},
+                attributes={"via_tool": tool_name, "tool_call": dict(tool_call)},
+                approvals=approval_tuple,
             )
             for path in paths
         )
-        decisions = tuple(self._pdp.decide(request) for request in requests)
+        if not spec.read_only:
+            # IAM first for non-core paths, so an IAM deny never burns
+            # approvals (core paths are always denied by the PDP for write
+            # tools, which consumes nothing). The full IAM pass below stays.
+            for path in paths:
+                if not self._registry.is_core(path) and not self._permissions.can_write(
+                    principal, path
+                ):
+                    self._record_denial_failure(principal)
+                    raise self._pre_denial(
+                        principal,
+                        tool_name,
+                        f"repository permissions deny write to {path!r}",
+                        telemetry=consume,
+                    )
+        # The PDP is the single consumption point for approvals.
+        decisions = self._pdp._decide_tool_call(requests, consume=consume)
         denied = [decision for decision in decisions if not decision.allowed]
         if denied:
+            self._record_denial_failure(principal)
             raise ToolDenied(denied[0], decisions)
         if not spec.read_only:
             for path in paths:
                 if not self._permissions.can_write(principal, path):
+                    self._record_denial_failure(principal)
                     raise self._pre_denial(
-                        principal, tool_name, f"repository permissions deny write to {path!r}"
+                        principal,
+                        tool_name,
+                        f"repository permissions deny write to {path!r}",
+                        telemetry=consume,
                     )
+        if consume:
+            admission = self._final_admission(
+                principal,
+                tool_name,
+                spec,
+                trigger_id,
+                session,
+                decisions[0].decision_id if decisions else None,
+            )
+            if admission is not None and admission_sink is not None:
+                admission_sink.append(admission)
         return spec, args, decisions
 
-    def authorize(
+    def _recheck_kill_switch(
+        self, principal: Principal, tool_name: str, *, group_id: str | None
+    ) -> None:
+        """Closes the authorise-then-invoke window (TOCTOU), sync and async."""
+        if self._kill_switch_engaged():
+            raise self._pre_denial(principal, tool_name, "kill switch engaged", group_id=group_id)
+
+    def _recheck_autonomy(
+        self, principal: Principal, tool_name: str, spec: _ToolSpec, *, group_id: str | None
+    ) -> None:
+        try:
+            self._autonomy_check(principal, spec, admitted=True)
+        except _Denied as exc:
+            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
+
+    def _recheck_credential(
+        self, principal: Principal, tool_name: str, credential: object, *, group_id: str | None
+    ) -> None:
+        """Revalidate after PDP/listener work, immediately before invocation."""
+        try:
+            self._verify_credential(principal, tool_name, credential)
+        except _Denied as exc:
+            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
+
+    def authorize_without_consuming(
         self,
         principal: Principal,
         tool_name: str,
         arguments: Mapping[str, Any],
         *,
         approvers: Iterable[Principal] = (),
+        approvals: Iterable[SignedApproval] = (),
+        authored_by: str | None = None,
+        requested_by: str | None = None,
+        credential: str | None = None,
+        trigger_id: str | None = None,
     ) -> tuple[Decision, ...]:
-        """Return all-permit decisions for the call or raise :class:`ToolDenied`."""
-        return self._authorize(principal, tool_name, arguments, approvers)[2]
+        """Dry run: all-permit decisions for the call or :class:`ToolDenied`.
+
+        WARNING: approvals are *not* consumed, so these decisions are not
+        authority to act -- run the tool only through :meth:`dispatch` /
+        :meth:`adispatch`. It does charge an iteration.
+        """
+        return self._authorize(
+            principal,
+            tool_name,
+            arguments,
+            approvers,
+            approvals,
+            authored_by,
+            credential,
+            False,
+            requested_by,
+            trigger_id,
+        )[2]
 
     def dispatch(
         self,
@@ -498,11 +961,53 @@ class GovernedToolDispatcher:
         arguments: Mapping[str, Any],
         *,
         approvers: Iterable[Principal] = (),
+        approvals: Iterable[SignedApproval] = (),
+        authored_by: str | None = None,
+        requested_by: str | None = None,
+        credential: str | None = None,
+        trigger_id: str | None = None,
     ) -> ToolResult:
-        """Authorise then invoke a synchronous tool with the authorised snapshot."""
-        spec, args, decisions = self._authorize(principal, tool_name, arguments, approvers)
+        """Authorise then invoke a synchronous tool with the authorised snapshot.
+
+        ``approvals`` are signed approvals of this exact call (see
+        :meth:`action_hash_for`); ``authored_by`` names the principal that
+        authored the change and ``requested_by`` the original requester on
+        whose behalf the principal acts; neither may approve it. ``approvers`` is kept for
+        API compatibility and is ignored by a PDP with an ApprovalGate.
+        ``trigger_id`` names the autonomous trigger an agent acts under
+        (required for agents when the dispatcher has a breaker).
+        Without ``require_credential``, the trusted host must authenticate
+        ``principal`` and ``requested_by``; never forward agent-supplied identity
+        labels. With credentials, AGENT T2+ calls require a requester-bound token.
+        """
+        spec, args, decisions = self._authorize(
+            principal,
+            tool_name,
+            arguments,
+            approvers,
+            approvals,
+            authored_by,
+            credential,
+            consume=True,
+            requested_by=requested_by,
+            trigger_id=trigger_id,
+        )
         if inspect.iscoroutinefunction(spec.fn):
             raise TypeError(f"tool {tool_name!r} is async; use adispatch()")
+        self._recheck_credential(
+            principal,
+            tool_name,
+            credential,
+            group_id=decisions[0].decision_id if decisions else None,
+        )
+        self._recheck_kill_switch(
+            principal,
+            tool_name,
+            group_id=decisions[0].decision_id if decisions else None,
+        )
+        self._recheck_autonomy(
+            principal, tool_name, spec, group_id=decisions[0].decision_id if decisions else None
+        )
         return ToolResult(tool_name, spec.fn(**args), decisions)
 
     async def adispatch(
@@ -512,17 +1017,76 @@ class GovernedToolDispatcher:
         arguments: Mapping[str, Any],
         *,
         approvers: Iterable[Principal] = (),
+        approvals: Iterable[SignedApproval] = (),
+        authored_by: str | None = None,
+        requested_by: str | None = None,
+        credential: str | None = None,
+        trigger_id: str | None = None,
     ) -> ToolResult:
         """Authorise (off the event loop) then invoke a sync or async tool."""
         approver_tuple = tuple(approvers)
+        approval_tuple = tuple(approvals)
+        admissions: list[_BreakerAdmission] = []
 
-        def invoke() -> tuple[Any, tuple[Decision, ...]]:
-            # Keep authorization adjacent to invocation in the worker, rather
-            # than queueing a separately scheduled synchronous call afterward.
-            spec, args, decisions = self._authorize(principal, tool_name, arguments, approver_tuple)
-            return spec.fn(**args), decisions
+        def invoke() -> tuple[_ToolSpec, Any, tuple[Decision, ...]]:
+            spec, args, decisions = self._authorize(
+                principal,
+                tool_name,
+                arguments,
+                approver_tuple,
+                approval_tuple,
+                authored_by,
+                credential,
+                True,
+                requested_by,
+                trigger_id,
+                admission_sink=admissions,
+            )
+            self._recheck_credential(
+                principal,
+                tool_name,
+                credential,
+                group_id=decisions[0].decision_id if decisions else None,
+            )
+            self._recheck_kill_switch(
+                principal,
+                tool_name,
+                group_id=decisions[0].decision_id if decisions else None,
+            )
+            self._recheck_autonomy(
+                principal, tool_name, spec, group_id=decisions[0].decision_id if decisions else None
+            )
+            return spec, spec.fn(**args), decisions
 
-        value, decisions = await asyncio.to_thread(invoke)
+        spec, value, decisions = await asyncio.to_thread(invoke)
         if inspect.isawaitable(value):
+            try:
+                self._recheck_kill_switch(
+                    principal,
+                    tool_name,
+                    group_id=decisions[0].decision_id if decisions else None,
+                )
+                session = self._verify_credential(principal, tool_name, credential)
+                admission = admissions[0] if admissions else None
+                self._final_admission(
+                    principal,
+                    tool_name,
+                    spec,
+                    admission.trigger_id if admission is not None else trigger_id,
+                    session,
+                    decisions[0].decision_id if decisions else None,
+                    admission=admission,
+                )
+            except BaseException as exc:
+                if inspect.iscoroutine(value):
+                    value.close()
+                if isinstance(exc, _Denied):
+                    raise self._pre_denial(
+                        principal,
+                        tool_name,
+                        str(exc),
+                        group_id=decisions[0].decision_id if decisions else None,
+                    ) from exc
+                raise
             value = await value
         return ToolResult(tool_name, value, decisions)
