@@ -176,11 +176,11 @@ class TestCoreWriteTargets:
         target = repo / "evaluator" / "run.sh"
         target.parent.mkdir()
         target.write_bytes(b"old")
-        os.chmod(target, 0o755)
+        os.chmod(target, 0o700)
         approval = _approve(writer, approver_factory, "evaluator/run.sh", b"new")
         writer.write_core(ALICE, "evaluator/run.sh", b"new", approvals=[approval])
         assert target.read_bytes() == b"new"
-        assert stat.S_IMODE(target.stat().st_mode) == 0o755
+        assert stat.S_IMODE(target.stat().st_mode) == 0o700
 
     def test_new_file_modes(
         self, writer: CoreChangeWriter, repo: Path, approver_factory: Factory

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import collections
 import hashlib
+import importlib
 import logging
 import math
 import re
@@ -45,16 +46,20 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
-from acgs_lite.control_plane.action_hash import action_hash, approval_subject, canonical_json
-from acgs_lite.control_plane.context import DecisionRequest
+import acgs_lite.control_plane.context as context_types
 from acgs_lite.control_plane.principal import Principal, PrincipalKind, canonical_principal_id
 from acgs_lite.control_plane.tiers import ActionTier
 from acgs_lite.legitimacy.signing import SIGNATURE_ALGORITHM, ReceiptSigner, verify_signature
 
 if TYPE_CHECKING:
+    import acgs_lite.control_plane.action_hash as action_hash_module
     from acgs_lite.control_plane.telemetry import OversightEvent, TelemetryRecorder
+
+    DecisionRequest: TypeAlias = "context_types.DecisionRequest"
+else:
+    action_hash_module = importlib.import_module("acgs_lite.control_plane.action_hash")
 
 __all__ = [
     "APPROVAL_SIGNATURE_DOMAIN",
@@ -153,7 +158,9 @@ class SignedApproval:
         }
 
     def signing_message(self) -> bytes:
-        return APPROVAL_SIGNATURE_DOMAIN + canonical_json(self.signing_payload()).encode("utf-8")
+        return APPROVAL_SIGNATURE_DOMAIN + action_hash_module.canonical_json(
+            self.signing_payload()
+        ).encode("utf-8")
 
     @classmethod
     def create(
@@ -580,7 +587,7 @@ class ApprovalGate:
                 rejected=(("*", f"no quorum policy configured for tier {request.tier!r}"),),
             )
         try:
-            expected = action_hash(request)
+            expected = action_hash_module.action_hash(request)
         except Exception as exc:
             return QuorumResult(
                 satisfied=False,
@@ -597,7 +604,7 @@ class ApprovalGate:
         # Exclusions come from the same subject the action hash binds: a path
         # sub-request is approved as its parent tool call, so its author and
         # original requester are the parent's.
-        subject_attributes = approval_subject(request).attributes
+        subject_attributes = action_hash_module.approval_subject(request).attributes
         author = subject_attributes.get("authored_by")
         author_id = canonical_principal_id(author) if isinstance(author, str) and author else None
         original = subject_attributes.get("requested_by")
