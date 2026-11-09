@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -49,6 +50,11 @@ def test_guard_inputs_and_policy_are_themselves_protected() -> None:
         "scripts/render_trusted_core_policy.py",
         "mypy.ini",
         ".mypy.ini",
+        "src/acgs_lite/observability.py",
+        "src/acgs_lite/observability.pyc",
+        "src/acgs_lite/observability.cpython-310-x86_64-linux-gnu.so",
+        "src/acgs_lite/observability.pyd",
+        "src/acgs_lite/__pycache__/observability.cpython-310.pyc",
         "acgs_lite.py",
         "acgs_lite.pyc",
         "acgs_lite.cpython-310-x86_64-linux-gnu.so",
@@ -128,5 +134,31 @@ def test_cwd_shadow_of_capability_gate_requires_core_authorization(
 def test_root_import_shadow_protection_does_not_freeze_workspace(path: str) -> None:
     policy = json.loads((ROOT / ".github" / "immutable-core-policy.json").read_text())
     assert not any(
+        re.fullmatch(row["regex"], path, row["flags"]) for row in policy["protected_paths"]
+    ), path
+
+
+def test_namespace_ancestor_shadow_of_cli_requires_core_authorization(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    shutil.copytree(
+        ROOT / "src/acgs_lite",
+        source / "acgs_lite",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        symlinks=True,
+    )
+    path = "src/acgs_lite/observability.py"
+    (tmp_path / path).write_text("print('namespace shadow executed'); raise SystemExit(0)\n")
+    result = subprocess.run(
+        [sys.executable, "-m", "acgs_lite.cli", "capabilities", "validate"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(source)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "namespace shadow executed"
+    policy = json.loads((ROOT / ".github" / "immutable-core-policy.json").read_text())
+    assert any(
         re.fullmatch(row["regex"], path, row["flags"]) for row in policy["protected_paths"]
     ), path
