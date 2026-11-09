@@ -57,9 +57,11 @@ categories:
   - .github/**
   - .gitlab-ci.yml
   - .pre-commit-config.yaml
+  - .mypy.ini
   - .pytest.ini
   - .pytest.toml
   - Makefile
+  - mypy.ini
   - pytest.ini
   - pytest.toml
   - requirements-test-optional.txt
