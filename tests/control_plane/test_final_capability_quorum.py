@@ -42,6 +42,12 @@ def test_final_quorum_must_retain_required_capability(
     qualified_sign = approver_factory("qualified")
     ordinary_sign = approver_factory("ordinary")
     now = [1000.0]
+    registry = None
+    promotion = None
+    ref = None
+    lock = None
+    data = None
+    digest = None
     if operation == "runbook":
         roles.grant_capability(ADMIN, "sre", QUALIFIED)
         registry = RunbookRegistry(pdp=ledger_pdp, roles=roles, registry=ledger_pdp.registry)
@@ -103,15 +109,19 @@ def test_final_quorum_must_retain_required_capability(
     monkeypatch.setattr(PolicyDecisionPoint, "_decide_attested", decide)
     with pytest.raises(error, match="final.*approval|final.*approver"):
         if operation == "runbook":
+            assert registry is not None and data is not None
             registry.approve(REQUESTER, data, approvals=approvals)
         elif operation == "promotion":
+            assert promotion is not None and ref is not None and digest is not None
             promotion.promote(
                 REQUESTER, "candidate", candidate_digest=digest, evidence=[ref], approvals=approvals
             )
         else:
+            assert lock is not None
             lock.take_over(REQUESTER, "stale commander", approvals=approvals)
     assert final_approvers == ["ordinary"]
     if operation == "runbook":
+        assert registry is not None and data is not None
         assert registry.approved(data["runbook_id"]) is None
     elif operation == "promotion":
         assert all(
@@ -119,5 +129,6 @@ def test_final_quorum_must_retain_required_capability(
             for r in ledger_pdp.receipt_ledger.receipts()
         )
     else:
+        assert lock is not None
         assert lock.state().commander_id == "commander"
         assert all(event["event"] != "takeover" for event in lock.history())
