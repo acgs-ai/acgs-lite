@@ -187,7 +187,8 @@ class ExternalRunVerifier(Protocol):
     verifier_id: str
     attests_artifact_digest: bool
 
-    def validate(self, ref: ExternalRunRef) -> RunValidation: ...
+    def validate(self, ref: ExternalRunRef) -> RunValidation:
+        """Validate a run independently, returning an invalid result on failure."""
 
 
 # TODO(control-plane-gap): the accepted sources, the minimum count of

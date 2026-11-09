@@ -59,7 +59,7 @@ from acgs_lite.fail_closed import fail_closed
 from acgs_lite.legitimacy.invocation import bind_policy
 
 if TYPE_CHECKING:
-    from acgs_lite.control_plane.receipt_ledger import ReceiptLedger
+    import acgs_lite.control_plane.receipt_ledger as receipt_ledger_types
 
 __all__ = [
     "DEFAULT_TIMEOUT_S",
@@ -227,7 +227,7 @@ class PolicyDecisionPoint:
         durable_audit: bool = False,
         listeners: Sequence[Callable[[Decision], None]] = (),
         max_workers: int = DEFAULT_MAX_WORKERS,
-        receipt_ledger: ReceiptLedger | None = None,
+        receipt_ledger: receipt_ledger_types.ReceiptLedger | None = None,
         pre_denial_receipt_limit: int | None = DEFAULT_PRE_DENIAL_RECEIPT_LIMIT,
         pre_denial_window_s: float = DEFAULT_PRE_DENIAL_WINDOW_S,
     ) -> None:
@@ -251,7 +251,7 @@ class PolicyDecisionPoint:
             raise ValueError("pre_denial_receipt_limit must be None or an int >= 1")
         if not math.isfinite(pre_denial_window_s) or pre_denial_window_s <= 0:
             raise ValueError("pre_denial_window_s must be a positive finite number")
-        self._receipt_ledger: ReceiptLedger | None = None
+        self._receipt_ledger: receipt_ledger_types.ReceiptLedger | None = None
         # The ledger token is held only by this closure, never as an attribute.
         self._append_receipt: Callable[[Decision, DecisionRequest | None, str], object] | None
         self._append_receipt = None
@@ -319,7 +319,7 @@ class PolicyDecisionPoint:
         return self._timeout_s
 
     @property
-    def receipt_ledger(self) -> ReceiptLedger | None:
+    def receipt_ledger(self) -> receipt_ledger_types.ReceiptLedger | None:
         return self._receipt_ledger
 
     @property
