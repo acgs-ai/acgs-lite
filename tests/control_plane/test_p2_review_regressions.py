@@ -86,7 +86,9 @@ import acgs_lite.control_plane.action_hash
 from acgs_lite.control_plane import action_hash
 assert callable(action_hash)
 """
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
+    )
     assert result.returncode == 0, result.stderr
 
 
