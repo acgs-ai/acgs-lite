@@ -19,9 +19,12 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
-from acgs_lite.control_plane.context import DecisionRequest
+import acgs_lite.control_plane.context as context_types
+
+if TYPE_CHECKING:
+    DecisionRequest: TypeAlias = "context_types.DecisionRequest"
 
 __all__ = [
     "ACTION_HASH_DOMAIN",
@@ -144,7 +147,7 @@ def approval_subject(request: DecisionRequest) -> DecisionRequest:
             and request.resource in paths
             and request.action.lower() == expected_child
         ):
-            return DecisionRequest(
+            return context_types.DecisionRequest(
                 principal=request.principal,
                 action="tool.call",
                 resource=via_tool,
