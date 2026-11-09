@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -21,6 +22,7 @@ from acgs_lite.control_plane import (
     ToolDenied,
     WriteGrant,
 )
+from acgs_lite.control_plane.approvals import ApprovalGate, SignedApproval
 
 pytestmark = [pytest.mark.unit, pytest.mark.red_team]
 
@@ -46,6 +48,12 @@ TIERS = {
     "async_tool": ActionTier.T1,
     "async_writer": ActionTier.T1,
 }
+
+
+@pytest.fixture()
+def pdp(gated_pdp: PolicyDecisionPoint) -> PolicyDecisionPoint:
+    """T2/T3 tools need an ApprovalGate (Phase 3), so dispatcher tests use one."""
+    return gated_pdp
 
 
 def grants(registry: ImmutableCoreRegistry = DEFAULT_IMMUTABLE_CORE) -> RepositoryPermissions:
@@ -161,7 +169,13 @@ class TestCoreBoundaryViaDispatcher:
             dispatcher.dispatch(agent, "unlisted_reader", {"path": "evaluator/x.py"})
         assert called == []
 
-    def test_t3_tool_needs_two_humans(self, pdp: PolicyDecisionPoint, human: Principal) -> None:
+    def test_t3_tool_needs_two_humans(
+        self,
+        pdp: PolicyDecisionPoint,
+        human: Principal,
+        approver_factory: Callable[..., Callable[..., SignedApproval]],
+    ) -> None:
+        pytest.importorskip("cryptography")
         dispatcher, _ = _dispatcher(pdp)
         ran: list[bool] = []
 
@@ -172,8 +186,14 @@ class TestCoreBoundaryViaDispatcher:
         with pytest.raises(ToolDenied) as excinfo:
             dispatcher.dispatch(human, "rm", {"path": "workspace/db"})
         assert "INV-T3-TWO-PERSON" in excinfo.value.decision.determining_policies
+        # Host-asserted approvers are ignored by a gated PDP (Phase 3).
         approvers = (Principal("bob", PrincipalKind.HUMAN), Principal("carol", PrincipalKind.HUMAN))
-        dispatcher.dispatch(human, "rm", {"path": "workspace/db"}, approvers=approvers)
+        with pytest.raises(ToolDenied):
+            dispatcher.dispatch(human, "rm", {"path": "workspace/db"}, approvers=approvers)
+        assert ran == []
+        digest = dispatcher.action_hash_for(human, "rm", {"path": "workspace/db"})
+        approvals = [approver_factory("bob")(digest), approver_factory("carol")(digest)]
+        dispatcher.dispatch(human, "rm", {"path": "workspace/db"}, approvals=approvals)
         assert ran == [True]
 
     @pytest.mark.parametrize(
@@ -218,10 +238,12 @@ class TestCoreBoundaryViaDispatcher:
         assert recorder.calls == []
 
     def test_default_deny_policy_blocks_everything(
-        self, constitution: Constitution, agent: Principal
+        self, constitution: Constitution, agent: Principal, approval_gate: ApprovalGate
     ) -> None:
         empty = PolicySet.from_mapping({"version": 1, "statements": []})
-        with PolicyDecisionPoint.for_constitution(constitution, empty) as pdp:
+        with PolicyDecisionPoint.for_constitution(
+            constitution, empty, approval_gate=approval_gate
+        ) as pdp:
             dispatcher, recorder = _dispatcher(pdp)
             with pytest.raises(ToolDenied):
                 dispatcher.dispatch(agent, "write_file", {"path": "workspace/x.py"})
@@ -264,6 +286,22 @@ class TestCoreBoundaryViaDispatcher:
             dispatcher.register("bad", one, path_params="path")
         with pytest.raises(ValueError):
             dispatcher.register("bad", one, path_params={""})
+
+    def test_t2_t3_tools_require_an_approval_gate(
+        self, constitution: Constitution, permit_all: PolicySet
+    ) -> None:
+        with PolicyDecisionPoint.for_constitution(constitution, permit_all) as ungated:
+            with pytest.raises(ValueError, match="ApprovalGate"):
+                GovernedToolDispatcher(ungated, permissions=grants(), tool_tiers=TIERS)
+            low = GovernedToolDispatcher(
+                ungated, permissions=grants(), tool_tiers={"write_file": ActionTier.T1}
+            )
+
+            def unlisted(path: str) -> None:
+                return None
+
+            with pytest.raises(ValueError, match="ApprovalGate"):
+                low.register("unlisted", unlisted, path_params={"path"})  # default tier T2
 
     def test_constructor_requires_matching_permissions(self, pdp: PolicyDecisionPoint) -> None:
         with pytest.raises(TypeError):
