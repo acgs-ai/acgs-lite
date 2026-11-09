@@ -9,7 +9,10 @@ namespace, INV-CORE-WRITE already denies any non-human proposer.
 
 Binding: every evidence ref must carry ``artifact_digest == candidate_digest``
 (one green run cannot certify a different candidate), and the PROMOTION
-receipt records the hashed ``candidate_digest``. The gate binds its ledger
+receipt records the hashed ``candidate_digest``. With ``roles=`` at least one
+gate-attested approver must hold the ``promotion.approve`` capability in the
+:class:`~.roles.RoleAssignments`; with ``incident_lock=`` a declared incident
+refuses promotion by anyone but the lock holder. The gate binds its ledger
 once (private capability) and requires the PDP to be bound to the *same*
 ledger, so a permissive PDP cannot be paired with the harness ledger.
 """
@@ -20,6 +23,7 @@ import re
 import threading
 import warnings
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from acgs_lite.control_plane import receipt_ledger as _ledger_module
 from acgs_lite.control_plane.approvals import SignedApproval
@@ -37,6 +41,11 @@ from acgs_lite.control_plane.principal import Principal
 from acgs_lite.control_plane.receipt_ledger import ReceiptEmissionError, ReceiptLedger
 from acgs_lite.control_plane.receipts import SignedControlPlaneReceipt, promotion_evidence_keys
 from acgs_lite.control_plane.tiers import ActionTier
+
+if TYPE_CHECKING:
+    from acgs_lite.control_plane.identity import AdminAttestor
+    from acgs_lite.control_plane.incident import IncidentMutationLock
+    from acgs_lite.control_plane.roles import RoleAssignments
 
 __all__ = ["PROMOTION_ACTION", "PromotionGate", "PromotionRejected"]
 
@@ -68,7 +77,29 @@ class PromotionGate:
         pdp: PolicyDecisionPoint,
         evidence_policy: EvidencePolicy = DEFAULT_EVIDENCE_POLICY,
         tier: ActionTier = DEFAULT_PROMOTION_TIER,
+        roles: RoleAssignments | None = None,
+        incident_lock: IncidentMutationLock | None = None,
+        admin_attestor: AdminAttestor | None = None,
     ) -> None:
+        """With *admin_attestor* :meth:`promote` needs the requester's
+        verified single-use HUMAN ``admin_credential=``."""
+        from acgs_lite.control_plane.identity import checked_attestor
+
+        self._attestor = checked_attestor(admin_attestor)
+        if roles is not None:
+            from acgs_lite.control_plane.roles import RoleAssignments
+
+            if type(roles) is not RoleAssignments:
+                raise TypeError("roles must be a RoleAssignments")
+            if pdp.approval_gate is None:
+                raise ValueError("role-checked promotion needs a PDP with an ApprovalGate")
+        if incident_lock is not None:
+            from acgs_lite.control_plane.incident import IncidentMutationLock
+
+            if type(incident_lock) is not IncidentMutationLock:
+                raise TypeError("incident_lock must be an IncidentMutationLock")
+        self._roles = roles
+        self._incident_lock = incident_lock
         if type(ledger) is not ReceiptLedger:
             raise TypeError("ledger must be a ReceiptLedger")
         if not isinstance(run_verifier, ExternalRunVerifier):
@@ -113,6 +144,7 @@ class PromotionGate:
         evidence: Sequence[ExternalRunRef],
         approvers: Sequence[Principal] = (),
         approvals: Sequence[SignedApproval] = (),
+        admin_credential: str | None = None,
     ) -> SignedControlPlaneReceipt:
         """Promote *candidate_id*.
 
@@ -122,6 +154,10 @@ class PromotionGate:
         """
         if not isinstance(principal, Principal):
             raise PromotionRejected("principal must be a Principal")
+        if self._attestor is not None:
+            self._attestor.require(
+                principal, admin_credential, admin_only=False, error=PromotionRejected
+            )
         if not isinstance(candidate_id, str) or not candidate_id.strip():
             raise PromotionRejected("candidate_id must be a non-empty string")
         if not isinstance(candidate_digest, str) or not _DIGEST.fullmatch(candidate_digest):
@@ -188,6 +224,10 @@ class PromotionGate:
         reused = self._reused_evidence(candidate_id, refs)
         if reused:
             raise PromotionRejected("; ".join(reused))
+        if self._incident_lock is not None:
+            denial = self._incident_lock.write_denial(principal)
+            if denial is not None:
+                raise PromotionRejected(f"incident: {denial}")
         request = DecisionRequest(
             principal=principal,
             action=PROMOTION_ACTION,
@@ -200,19 +240,64 @@ class PromotionGate:
             },
             approvals=approval_tuple,
         )
+        gate = self._pdp.approval_gate
+        if self._roles is not None and gate is not None:
+            from acgs_lite.control_plane.roles import CAP_PROMOTION_APPROVE
+
+            quorum = gate.evaluate(request, approval_tuple, record_request=False)
+            if not any(
+                self._roles.has_capability(a, CAP_PROMOTION_APPROVE) for a in quorum.approvers
+            ):
+                raise PromotionRejected(
+                    "no attested approver holds the promotion.approve capability"
+                )
         decision, decided = self._pdp._decide_attested(request)
         if not decision.allowed or decided is None:
             raise PromotionRejected(f"PDP denied promotion: {decision.reason}", decision)
-        switch = self._pdp.kill_switch
-        if switch is not None:
+        if self._roles is not None and gate is not None:
+            if not any(
+                a.canonical_id != principal.canonical_id
+                and self._roles.has_capability(a, CAP_PROMOTION_APPROVE)
+                for a in decided.approvers
+            ):
+                raise PromotionRejected(
+                    "final approval lacks an independent promotion.approve approver", decision
+                )
+        if self._incident_lock is None:
             try:
-                engaged = bool(switch.is_engaged())
-            except Exception:
-                engaged = True
-            if engaged:
-                raise PromotionRejected("kill switch engaged; promotion not performed", decision)
+                # The receipt cites the gate-attested approvers, not host input.
+                self._require_not_halted(decision)
+                return self._append_promotion(decision, decided)
+            except ReceiptEmissionError as exc:
+                raise PromotionRejected(f"promotion receipt could not be emitted: {exc}") from exc
+        from acgs_lite.control_plane.incident import IncidentLockError
+
         try:
-            # The receipt cites the gate-attested approvers, not host input.
-            return self._append_promotion(decision, decided)
-        except ReceiptEmissionError as exc:
-            raise PromotionRejected(f"promotion receipt could not be emitted: {exc}") from exc
+            # Held from the re-check through the receipt append, so an
+            # incident cannot be declared between the check and the commit.
+            with self._incident_lock._locked():
+                # A PDP listener may have declared an incident (or moved the
+                # holder) during the decision: re-check before the receipt.
+                denial = self._incident_lock.write_denial(principal)
+                if denial is not None:
+                    raise PromotionRejected(f"incident: {denial}", decision)
+                try:
+                    self._require_not_halted(decision)
+                    return self._append_promotion(decision, decided)
+                except ReceiptEmissionError as exc:
+                    raise PromotionRejected(
+                        f"promotion receipt could not be emitted: {exc}"
+                    ) from exc
+        except IncidentLockError as exc:
+            raise PromotionRejected(f"incident lock unavailable: {exc}", decision) from exc
+
+    def _require_not_halted(self, decision: Decision) -> None:
+        switch = self._pdp.kill_switch
+        if switch is None:
+            return
+        try:
+            engaged = bool(switch.is_engaged())
+        except Exception:
+            engaged = True
+        if engaged:
+            raise PromotionRejected("kill switch engaged; promotion not performed", decision)

@@ -173,6 +173,8 @@ class RunValidation:
     valid: bool
     reason: str
     verifier_id: str
+    workflow: str | None = None
+    """Workflow independently observed by the verifier, never caller asserted."""
 
 
 @runtime_checkable
@@ -399,7 +401,9 @@ class TrustedRunRegistry:
     ``trusted_public_keys`` (default: the signer's own key). An unsigned,
     mis-signed or malformed line fails the open (a file write alone cannot
     forge a run). A read-only party passes ``trusted_public_keys`` and no
-    signer; it cannot register runs.
+    signer; it cannot register runs. Backup consumption is a signed record in
+    the same log and is atomically shared across instances and restarts.
+    Only a persistent signing registry can consume backups.
     """
 
     verifier_id = "trusted-run-registry"
@@ -418,6 +422,7 @@ class TrustedRunRegistry:
             raise TypeError("signer must implement ReceiptSigner")
         self._lock = threading.Lock()
         self._records: dict[tuple[str, str], _RunRecord] = {}
+        self._backup_claims: set[tuple[str, str]] = set()
         self._signer = signer
         self._path: Path | None = None
         self._keys: dict[str, str] = {}
@@ -472,6 +477,7 @@ class TrustedRunRegistry:
         except UnicodeDecodeError as exc:
             raise ValueError("run registry is not UTF-8") from exc
         added: dict[tuple[str, str], _RunRecord] = {}
+        claims: set[tuple[str, str]] = set()
         for line in text.splitlines():
             self._lines += 1
             number = self._lines
@@ -489,7 +495,19 @@ class TrustedRunRegistry:
                     SIGNATURE_ALGORITHM, key, _record_message(envelope["record"]), signature
                 ):
                     raise ValueError("bad registry line signature")
-                record = _record_from_dict(envelope["record"])
+                payload = envelope["record"]
+                if isinstance(payload, Mapping) and payload.get("kind") == "backup_consumed":
+                    if set(payload) != {"kind", "ref"}:
+                        raise ValueError("malformed backup consumption record")
+                    ref = ExternalRunRef.from_dict(payload["ref"])
+                    if ref.artifact_digest is None or ref.source is EvidenceSource.AGENT_LOG:
+                        raise ValueError("backup consumption needs independent bound evidence")
+                    claim_key = (ref.provider, ref.run_id)
+                    if claim_key in self._backup_claims or claim_key in claims:
+                        raise ValueError("duplicate backup consumption")
+                    claims.add(claim_key)
+                    continue
+                record = _record_from_dict(payload)
             except (ValueError, TypeError) as exc:
                 raise ValueError(f"run registry line {number}: {exc}") from exc
             run_key = (record.provider, record.run_id)
@@ -497,10 +515,24 @@ class TrustedRunRegistry:
                 raise ValueError(f"duplicate run in registry: {run_key}")
             added[run_key] = record
         self._records.update(added)
+        self._backup_claims.update(claims)
 
     def __len__(self) -> int:
         with self._lock:
             return len(self._records)
+
+    def registered_conclusion(self, ref: ExternalRunRef) -> str | None:
+        """The conclusion recorded for *ref*'s run if it is registered with the
+        same source and artifact digest, else ``None``."""
+        if not isinstance(ref, ExternalRunRef):
+            return None
+        with self._lock:
+            record = self._records.get((ref.provider, ref.run_id))
+        if record is None or record.source is not ref.source:
+            return None
+        if record.artifact_digest != ref.artifact_digest:
+            return None
+        return record.conclusion
 
     @property
     def signing_public_key_hex(self) -> str | None:
@@ -561,7 +593,43 @@ class TrustedRunRegistry:
                 return
             self._append_persisted(key, record, ref.label)
 
-    def _append_persisted(self, key: tuple[str, str], record: _RunRecord, label: str) -> None:
+    @property
+    def supports_durable_backup_consumption(self) -> bool:
+        """Whether this registry can durably spend independently verified backups."""
+        return self._path is not None and self._signer is not None
+
+    def backup_consumed(self, ref: ExternalRunRef) -> bool:
+        """Read shared consumption state; unavailable or corrupt storage raises."""
+        if not self.supports_durable_backup_consumption:
+            raise RunRegistrationRejected("backup consumption needs a persistent signing registry")
+        with self._lock:
+            self._refresh_persisted()
+            return (ref.provider, ref.run_id) in self._backup_claims
+
+    def consume_backup(self, ref: ExternalRunRef) -> bool:
+        """Atomically spend a host-verified backup before its destructive action.
+
+        The caller must independently validate the run and its action binding.
+        Claims share the signed, fsynced registry log; they are never released,
+        including when the action later fails. Memory-only/read-only stores deny.
+        """
+        if (
+            not self.supports_durable_backup_consumption
+            or not isinstance(ref, ExternalRunRef)
+            or ref.artifact_digest is None
+            or ref.source is EvidenceSource.AGENT_LOG
+        ):
+            return False
+        with self._lock:
+            try:
+                self._append_persisted((ref.provider, ref.run_id), ref, ref.label)
+            except (OSError, ValueError, RunRegistrationRejected):
+                return False
+        return True
+
+    def _append_persisted(
+        self, key: tuple[str, str], record: _RunRecord | ExternalRunRef, label: str
+    ) -> None:
         """Read/check/append as one transaction under an exclusive file lock,
         so registries sharing the file cannot both register one run."""
         if self._path is None or self._signer is None:
@@ -570,7 +638,10 @@ class TrustedRunRegistry:
             fcntl: Any = importlib.import_module("fcntl")
         except ImportError as exc:  # pragma: no cover - non-POSIX only
             raise RunRegistrationRejected("persisted run registry needs POSIX flock") from exc
-        payload = record.to_dict()
+        is_claim = isinstance(record, ExternalRunRef)
+        payload = (
+            {"kind": "backup_consumed", "ref": record.to_dict()} if is_claim else record.to_dict()
+        )
         line = (
             json.dumps(
                 {
@@ -596,7 +667,10 @@ class TrustedRunRegistry:
                     except ValueError as exc:
                         raise RunRegistrationRejected(f"run registry changed: {exc}") from exc
                     self._end = size
-                if key in self._records:
+                if is_claim:
+                    if key in self._backup_claims:
+                        raise RunRegistrationRejected(f"backup {label} already consumed")
+                elif key in self._records:
                     raise RunRegistrationRejected(f"run {label} is already registered")
                 try:
                     handle.write(line)
@@ -608,7 +682,10 @@ class TrustedRunRegistry:
                     handle.truncate(size)
                     raise
                 self._end = size + len(line)
-                self._records[key] = record
+                if isinstance(record, ExternalRunRef):
+                    self._backup_claims.add(key)
+                else:
+                    self._records[key] = record
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
@@ -753,7 +830,9 @@ class GitHubActionsRunVerifier:
                     return invalid("artifact digest is not attested by the run")
         except Exception as exc:
             return invalid(f"fetch failed: {type(exc).__name__}")
-        return RunValidation(True, "completed successful workflow run", self.verifier_id)
+        return RunValidation(
+            True, "completed successful workflow run", self.verifier_id, str(payload["path"])
+        )
 
 
 class CompositeRunVerifier:

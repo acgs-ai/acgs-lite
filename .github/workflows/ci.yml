@@ -146,9 +146,16 @@ jobs:
           python -c "import acgs_lite_rust; print(acgs_lite_rust.__file__)"
       - name: Install pinned Lean qualification toolchain
         run: |
-          curl --fail --location --connect-timeout 20 --max-time 300 \
+          if ! curl --fail --location --connect-timeout 20 --max-time 300 \
+            --retry 3 --retry-delay 5 --retry-max-time 120 \
             --output "$RUNNER_TEMP/lean.tar.zst" \
-            https://github.com/leanprover/lean4/releases/download/v4.34.0/lean-4.34.0-linux.tar.zst
+            "https://github.com/leanprover/lean4/releases/download/v4.34.0/lean-4.34.0-linux.tar.zst?download=1"; then
+            curl --fail --location --connect-timeout 20 --max-time 300 \
+              --retry 3 --retry-delay 5 --retry-max-time 120 --retry-all-errors \
+              --header 'Accept: application/octet-stream' \
+              --output "$RUNNER_TEMP/lean.tar.zst" \
+              https://api.github.com/repos/leanprover/lean4/releases/assets/563514501
+          fi
           echo "caaa98356098c85dc0fcbbd28e1ec66f39eb6551829972b752ff20e1286b646b  $RUNNER_TEMP/lean.tar.zst" | sha256sum --check
           tar --zstd -xf "$RUNNER_TEMP/lean.tar.zst" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/lean-4.34.0-linux/bin" >> "$GITHUB_PATH"

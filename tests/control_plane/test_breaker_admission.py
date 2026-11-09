@@ -126,7 +126,7 @@ async def test_async_body_uses_its_original_admission(
         return "done"
 
     fn = (lambda path: write(path)) if sync_wrapper else write
-    dispatcher.register("write", fn, path_params={"path"})
+    dispatcher.register("write", fn, path_params={"path"}, merge_capable=False)
     recorder.record_rollback("loop", "first")
     now[0] = 1001.0
     original = asyncio.to_thread

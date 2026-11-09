@@ -82,8 +82,10 @@ if TYPE_CHECKING:
 
     ApprovalGate: TypeAlias = "approval_types.ApprovalGate"
     QuorumResult: TypeAlias = "approval_types.QuorumResult"
+    import acgs_lite.control_plane.killswitch as killswitch_types
     import acgs_lite.control_plane.telemetry as telemetry_types
-    from acgs_lite.control_plane.killswitch import KillSwitch
+
+    KillSwitch: TypeAlias = "killswitch_types.KillSwitch"
 
     TelemetryRecorder: TypeAlias = "telemetry_types.TelemetryRecorder"
 
@@ -136,6 +138,8 @@ class Decision:
     policy_set_digest: str = ""
     decision_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     """Opaque id, recorded in the audit entry; safe to show to an agent."""
+    credential_id: str | None = None
+    """Phase 6b: id of the verified credential behind the request (receipted)."""
 
     @classmethod
     def denied(
@@ -582,6 +586,8 @@ class PolicyDecisionPoint:
         action: str = "",
         resource: str = "",
         error: str = "dispatch_denied",
+        credential_id: str | None = None,
+        limit_key: str | None = None,
     ) -> Decision:
         """Publish (audit, receipt, listeners) a deny decided outside the PDP,
         e.g. a dispatcher pre-check. It can only ever record a deny.
@@ -590,10 +596,18 @@ class PolicyDecisionPoint:
         kind (the principal was never validated). Per principal id at most
         ``pre_denial_receipt_limit`` such receipts are written per window;
         beyond that the call still denies but is only counted
-        (:attr:`suppressed_denial_receipts`).
+        (:attr:`suppressed_denial_receipts`). ``limit_key`` replaces the
+        principal id as the rate-limit key (e.g. a peer uid, Phase 6b);
+        ``credential_id`` is receipted when the credential was verified.
         """
         return self._record_denial(
-            reason, principal_id=principal_id, action=action, resource=resource, error=error
+            reason,
+            principal_id=principal_id,
+            action=action,
+            resource=resource,
+            error=error,
+            credential_id=credential_id,
+            limit_key=limit_key,
         )
 
     def _record_denial(
@@ -606,22 +620,28 @@ class PolicyDecisionPoint:
         error: str = "dispatch_denied",
         telemetry: bool = True,
         principal_kind: PrincipalKind | None = None,
+        credential_id: str | None = None,
+        limit_key: str | None = None,
         group_id: str | None = None,
     ) -> Decision:
         """In-package (dispatcher): :meth:`record_denial`, optionally without
         telemetry for dry runs. It can still only record a deny.
         ``principal_kind`` (the dispatcher's validated Principal) feeds only
-        the telemetry segment; the receipt stays unattributed."""
-        decision = Decision.denied(
-            reason,
-            constitution_hash=self._constitution_hash,
-            policy_digest=self._policy_digest,
-            principal_id=principal_id,
-            action=action,
-            resource=resource,
-            error=error,
+        the telemetry segment; the receipt stays unattributed.
+        ``limit_key`` (default the principal id) keys the receipt rate limit."""
+        decision = replace(
+            Decision.denied(
+                reason,
+                constitution_hash=self._constitution_hash,
+                policy_digest=self._policy_digest,
+                principal_id=principal_id,
+                action=action,
+                resource=resource,
+                error=error,
+            ),
+            credential_id=credential_id,
         )
-        receipted = self._pre_denial_within_limit(principal_id)
+        receipted = self._pre_denial_within_limit(principal_id if limit_key is None else limit_key)
         if not receipted:
             with self._receipt_failures_lock:
                 self._suppressed_denial_receipts += 1
@@ -678,6 +698,9 @@ class PolicyDecisionPoint:
         """Audit, emit a receipt and notify listeners. None of them can turn a
         deny into an allow; an allow whose audit write or receipt emission
         fails becomes a deny (and that deny is audited and receipted)."""
+        credential_id = getattr(request, "credential_id", None)
+        if decision.credential_id is None and isinstance(credential_id, str):
+            decision = replace(decision, credential_id=credential_id)
         try:
             decision = self._audit(decision)
         except Exception as exc:  # pragma: no cover - _audit handles its own errors
@@ -934,7 +957,7 @@ class PolicyDecisionPoint:
         reason: str = "audit record failed; allow withdrawn",
         error: str = "audit_failed",
     ) -> Decision:
-        return Decision.denied(
+        denied = Decision.denied(
             reason,
             constitution_hash=decision.constitution_hash,
             policy_digest=decision.policy_digest,
@@ -946,6 +969,7 @@ class PolicyDecisionPoint:
             error=error,
             policy_set_digest=decision.policy_set_digest,
         ).with_id(decision.decision_id)
+        return replace(denied, credential_id=decision.credential_id)
 
     def _audit(self, decision: Decision) -> Decision:
         if self._audit_log is None:

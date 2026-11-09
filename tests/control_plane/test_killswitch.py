@@ -75,8 +75,8 @@ def wired(
                 os.unlink(path)
             return "ok"
 
-        d.register("read", read, path_params={"path"})
-        d.register("rm", rm, path_params={"path"})
+        d.register("read", read, path_params={"path"}, merge_capable=False)
+        d.register("rm", rm, path_params={"path"}, merge_capable=False)
         yield d, pdp, calls
 
 
