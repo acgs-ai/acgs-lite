@@ -77,9 +77,9 @@ from acgs_lite.fail_closed import fail_closed
 from acgs_lite.legitimacy.invocation import bind_policy
 
 if TYPE_CHECKING:
+    import acgs_lite.control_plane.receipt_ledger as receipt_ledger_types
     from acgs_lite.control_plane.approvals import ApprovalGate, QuorumResult
     from acgs_lite.control_plane.killswitch import KillSwitch
-    from acgs_lite.control_plane.receipt_ledger import ReceiptLedger
     from acgs_lite.control_plane.telemetry import TelemetryRecorder
 
 __all__ = [
@@ -252,7 +252,7 @@ class PolicyDecisionPoint:
         durable_audit: bool = False,
         listeners: Sequence[Callable[[Decision], None]] = (),
         max_workers: int = DEFAULT_MAX_WORKERS,
-        receipt_ledger: ReceiptLedger | None = None,
+        receipt_ledger: receipt_ledger_types.ReceiptLedger | None = None,
         pre_denial_receipt_limit: int | None = DEFAULT_PRE_DENIAL_RECEIPT_LIMIT,
         pre_denial_window_s: float = DEFAULT_PRE_DENIAL_WINDOW_S,
         approval_gate: ApprovalGate | None = None,
@@ -301,7 +301,7 @@ class PolicyDecisionPoint:
         # Capability of the one CoreChangeWriter bound to this PDP (if any).
         self._core_writer_token: object | None = None
         self._core_writer_lock = threading.Lock()
-        self._receipt_ledger: ReceiptLedger | None = None
+        self._receipt_ledger: receipt_ledger_types.ReceiptLedger | None = None
         # The ledger token is held only by this closure, never as an attribute.
         self._append_receipt: Callable[[Decision, DecisionRequest | None, str], object] | None
         self._append_receipt = None
@@ -377,7 +377,7 @@ class PolicyDecisionPoint:
         return self._kill_switch
 
     @property
-    def receipt_ledger(self) -> ReceiptLedger | None:
+    def receipt_ledger(self) -> receipt_ledger_types.ReceiptLedger | None:
         return self._receipt_ledger
 
     @property

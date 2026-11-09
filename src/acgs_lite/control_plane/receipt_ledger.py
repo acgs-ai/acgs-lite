@@ -39,6 +39,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+import acgs_lite.control_plane.pdp as pdp
 from acgs_lite.control_plane.context import DecisionRequest
 from acgs_lite.control_plane.evidence import (
     DEFAULT_EVIDENCE_POLICY,
@@ -49,7 +50,6 @@ from acgs_lite.control_plane.evidence import (
     require_audit_store_path,
 )
 from acgs_lite.control_plane.immutable_core import DEFAULT_IMMUTABLE_CORE, ImmutableCoreRegistry
-from acgs_lite.control_plane.pdp import Decision
 from acgs_lite.control_plane.principal import Principal, PrincipalKind
 from acgs_lite.control_plane.receipts import (
     GENESIS_RECEIPT_HASH,
@@ -118,9 +118,9 @@ class ReceiptStoreCorrupted(ValueError):
 class ReceiptStore(Protocol):
     def append(self, signed: SignedControlPlaneReceipt) -> None:
         """Append iff the stored tail hash equals ``signed.receipt.prev_receipt_hash``."""
-        ...
 
-    def read_all(self) -> tuple[SignedControlPlaneReceipt, ...]: ...
+    def read_all(self) -> tuple[SignedControlPlaneReceipt, ...]:
+        """Read every persisted receipt in append order."""
 
 
 class InMemoryReceiptStore:
@@ -369,7 +369,7 @@ class ReceiptLedger:
 
     def append_decision(
         self,
-        decision: Decision,
+        decision: pdp.Decision,
         request: DecisionRequest | None = None,
         *,
         capability: object,
@@ -383,7 +383,7 @@ class ReceiptLedger:
             raise ReceiptCapabilityError("append_decision requires the bound PDP's capability")
         if origin not in (ORIGIN_PDP, ORIGIN_DISPATCHER_PRE_DENIAL):
             raise ReceiptEmissionError(f"invalid decision receipt origin {origin!r}")
-        if not isinstance(decision, Decision):
+        if not isinstance(decision, pdp.Decision):
             raise ReceiptEmissionError("decision must be a Decision")
         if decision.allowed and (not isinstance(request, DecisionRequest) or origin != ORIGIN_PDP):
             raise ReceiptEmissionError("an allowed decision needs its request (origin pdp)")
@@ -400,7 +400,7 @@ class ReceiptLedger:
 
     def append_promotion(
         self,
-        decision: Decision,
+        decision: pdp.Decision,
         request: DecisionRequest,
         *,
         capability: object,
@@ -408,7 +408,7 @@ class ReceiptLedger:
         """Gate-only. Re-asserts the promotion invariants before signing."""
         if self._is_gate is None or not self._is_gate(capability):
             raise ReceiptCapabilityError("append_promotion requires the bound gate's capability")
-        if not isinstance(decision, Decision) or decision.allowed is not True:
+        if not isinstance(decision, pdp.Decision) or decision.allowed is not True:
             raise ReceiptEmissionError("a promotion receipt requires an allowed decision")
         if not isinstance(request, DecisionRequest) or request.principal.kind is not (
             PrincipalKind.HUMAN
@@ -431,13 +431,13 @@ class ReceiptLedger:
     def _append(
         self,
         kind: ReceiptKind,
-        decision: Decision,
+        decision: pdp.Decision,
         request: DecisionRequest | None,
         external_runs: Sequence[ExternalRunRef],
         candidate_digest: str | None,
         origin: str,
     ) -> SignedControlPlaneReceipt:
-        if not isinstance(decision, Decision):
+        if not isinstance(decision, pdp.Decision):
             raise ReceiptEmissionError("decision must be a Decision")
         principal = getattr(request, "principal", None)
         if not isinstance(principal, Principal):

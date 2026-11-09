@@ -693,10 +693,9 @@ class TestChain:
                 JSONLReceiptStore(bad, registry=core)
         with pytest.raises(PermissionError):
             JSONLReceiptStore(tmp_path / "audit" / "r.jsonl")  # DEFAULT core has no repo_root
-        with pytest.raises(TypeError):
-            JSONLReceiptStore(  # type: ignore[call-arg]
-                tmp_path / "workspace" / "r.jsonl", require_core_path=False
-            )
+        unsupported_options: dict[str, Any] = {"require_core_path": False}
+        with pytest.raises(TypeError, match="require_core_path"):
+            JSONLReceiptStore(tmp_path / "workspace" / "r.jsonl", **unsupported_options)
 
     def test_jsonl_partial_write_rolled_back(
         self,
