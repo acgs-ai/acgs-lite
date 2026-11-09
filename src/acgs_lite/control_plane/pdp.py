@@ -52,7 +52,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from acgs_lite.audit import AuditEntry, AuditLog
 from acgs_lite.control_plane.context import DecisionContext, DecisionRequest
@@ -74,6 +74,9 @@ if TYPE_CHECKING:
     import acgs_lite.control_plane.receipt_ledger as receipt_ledger_types
     from acgs_lite.control_plane.approvals import ApprovalGate, QuorumResult
     from acgs_lite.control_plane.killswitch import KillSwitch
+
+    # A forward alias avoids a module-member lookup in import-order analysis.
+    ReceiptLedger: TypeAlias = "receipt_ledger_types.ReceiptLedger"
 
 __all__ = [
     "DEFAULT_TIMEOUT_S",
@@ -243,7 +246,7 @@ class PolicyDecisionPoint:
         durable_audit: bool = False,
         listeners: Sequence[Callable[[Decision], None]] = (),
         max_workers: int = DEFAULT_MAX_WORKERS,
-        receipt_ledger: receipt_ledger_types.ReceiptLedger | None = None,
+        receipt_ledger: ReceiptLedger | None = None,
         pre_denial_receipt_limit: int | None = DEFAULT_PRE_DENIAL_RECEIPT_LIMIT,
         pre_denial_window_s: float = DEFAULT_PRE_DENIAL_WINDOW_S,
         approval_gate: ApprovalGate | None = None,
@@ -284,7 +287,7 @@ class PolicyDecisionPoint:
         # Capability of the one CoreChangeWriter bound to this PDP (if any).
         self._core_writer_token: object | None = None
         self._core_writer_lock = threading.Lock()
-        self._receipt_ledger: receipt_ledger_types.ReceiptLedger | None = None
+        self._receipt_ledger: ReceiptLedger | None = None
         # The ledger token is held only by this closure, never as an attribute.
         self._append_receipt: Callable[[Decision, DecisionRequest | None, str], object] | None
         self._append_receipt = None
@@ -360,7 +363,7 @@ class PolicyDecisionPoint:
         return self._kill_switch
 
     @property
-    def receipt_ledger(self) -> receipt_ledger_types.ReceiptLedger | None:
+    def receipt_ledger(self) -> ReceiptLedger | None:
         return self._receipt_ledger
 
     @property
