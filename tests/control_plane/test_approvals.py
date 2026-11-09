@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -597,6 +599,66 @@ class TestPdpIntegration:
         bad2 = DecisionRequest(ALICE, "file.write", "workspace/a", ActionTier.T1)
         object.__setattr__(bad2, "approvals", ["x"])
         assert gated_pdp.decide(bad2).error == "invalid_request"
+
+    @pytest.mark.parametrize("denied", [False, True])
+    def test_receipt_omits_unverified_approval_metadata(
+        self, constitution: Constitution, permit_all: PolicySet, denied: bool
+    ) -> None:
+        ledger = ReceiptLedger(
+            Ed25519ReceiptSigner.from_seed(b"\x02" * 32, key_id="h"), store=InMemoryReceiptStore()
+        )
+        forged = SimpleNamespace(
+            approver_id="bob", approval_id="forged", action_hash="sha256:" + "a" * 64
+        )
+        request = DecisionRequest(
+            ALICE,
+            "file.read",
+            "workspace/a",
+            ActionTier.T0,
+            approvers=(Principal("bob", PrincipalKind.HUMAN),),
+            approvals=(forged,),
+            attributes={"approvals_verified": True},
+        )
+        with PolicyDecisionPoint.for_constitution(
+            constitution, None if denied else permit_all, receipt_ledger=ledger
+        ) as pdp:
+            assert pdp.decide(request).allowed is not denied
+        refs = ledger.receipts()[0].receipt.approvers
+        assert len(refs) == 1 and refs[0].principal_id == "bob"
+        assert refs[0].approval_id is None and refs[0].action_hash is None
+
+    @pytest.mark.parametrize("tier", [ActionTier.T0, ActionTier.T3])
+    def test_receipt_cites_only_gate_counted_approvals(
+        self,
+        constitution: Constitution,
+        permit_all: PolicySet,
+        approval_gate: ApprovalGate,
+        approver_factory: Factory,
+        tier: ActionTier,
+    ) -> None:
+        ledger = ReceiptLedger(
+            Ed25519ReceiptSigner.from_seed(b"\x02" * 32, key_id="h"), store=InMemoryReceiptStore()
+        )
+        request = DecisionRequest(
+            ALICE,
+            "file.read",
+            "workspace/a",
+            tier,
+            attributes={"approvals_verified": True},
+        )
+        digest = action_hash(request)
+        valid = approver_factory("bob")(digest)
+        forged = SimpleNamespace(approver_id="carol", approval_id="forged", action_hash=digest)
+        request = replace(request, approvals=(valid, forged))
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, receipt_ledger=ledger, approval_gate=approval_gate
+        ) as pdp:
+            decision = pdp.decide(request)
+        assert decision.allowed is (tier is ActionTier.T0)
+        refs = ledger.receipts()[0].receipt.approvers
+        assert [(r.principal_id, r.approval_id, r.action_hash) for r in refs] == [
+            ("bob", valid.approval_id, digest)
+        ]
 
     def test_receipt_cites_approval_id_and_action_hash(
         self,
