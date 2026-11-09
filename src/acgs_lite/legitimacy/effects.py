@@ -159,8 +159,12 @@ class EffectStore:
         if row is None:
             raise ValueError("unknown effect key")
         return EffectRecord(
-            EffectRequest(row["key"], row["provider_id"], row["grant_identity"], row["action_json"]),
-            row["budget_id"], row["amount"], EffectState(row["state"]),
+            EffectRequest(
+                row["key"], row["provider_id"], row["grant_identity"], row["action_json"]
+            ),
+            row["budget_id"],
+            row["amount"],
+            EffectState(row["state"]),
         )
 
     def get(self, key: str) -> EffectRecord:
@@ -171,11 +175,15 @@ class EffectStore:
         _text(budget_id)
         _units(capacity)
         with self._transaction() as db:
-            row = db.execute("SELECT capacity FROM effect_budgets WHERE id=?", (budget_id,)).fetchone()
+            row = db.execute(
+                "SELECT capacity FROM effect_budgets WHERE id=?", (budget_id,)
+            ).fetchone()
             if row is not None and row[0] != capacity:
                 raise ValueError("budget capacity is immutable")
-            db.execute("INSERT OR IGNORE INTO effect_budgets(id,capacity) VALUES (?,?)",
-                       (budget_id, capacity))
+            db.execute(
+                "INSERT OR IGNORE INTO effect_budgets(id,capacity) VALUES (?,?)",
+                (budget_id, capacity),
+            )
 
     def budget(self, budget_id: str) -> EffectBudget:
         with self._transaction() as db:
@@ -184,8 +192,9 @@ class EffectStore:
                 raise ValueError("unknown budget")
             return EffectBudget(row["capacity"], row["reserved"], row["settled"])
 
-    def reserve(self, *, provider_id: str, grant_identity: str, action: object,
-                budget_id: str, amount: int) -> EffectRecord:
+    def reserve(
+        self, *, provider_id: str, grant_identity: str, action: object, budget_id: str, amount: int
+    ) -> EffectRecord:
         """Bind an opaque evidence reference once; this does not validate a grant."""
         for value in (provider_id, grant_identity, budget_id):
             _text(value)
@@ -194,24 +203,34 @@ class EffectStore:
         canonical = json.dumps(action, sort_keys=True, separators=(",", ":"), allow_nan=False)
         digest = hashlib.sha256(b"acgs-effect-action-v1\x00" + canonical.encode()).hexdigest()
         binding = json.dumps([provider_id, grant_identity, digest], separators=(",", ":"))
-        key = "acgs:effect:v1:" + hashlib.sha256(
-            b"acgs-provider-effect-v1\x00" + binding.encode()
-        ).hexdigest()
+        key = (
+            "acgs:effect:v1:"
+            + hashlib.sha256(b"acgs-provider-effect-v1\x00" + binding.encode()).hexdigest()
+        )
         with self._transaction() as db:
-            row = db.execute("SELECT key FROM external_effects WHERE grant_identity=?",
-                             (grant_identity,)).fetchone()
+            row = db.execute(
+                "SELECT key FROM external_effects WHERE grant_identity=?", (grant_identity,)
+            ).fetchone()
             if row is not None:
                 record = self._get(db, row[0])
-                if (record.request != EffectRequest(key, provider_id, grant_identity, canonical)
-                        or record.budget_id != budget_id or record.amount != amount):
+                if (
+                    record.request != EffectRequest(key, provider_id, grant_identity, canonical)
+                    or record.budget_id != budget_id
+                    or record.amount != amount
+                ):
                     raise ValueError("grant effect binding is immutable")
                 return record
-            updated = db.execute("""UPDATE effect_budgets SET reserved=reserved+?
-                WHERE id=? AND ? <= capacity - settled - reserved""", (amount, budget_id, amount))
+            updated = db.execute(
+                """UPDATE effect_budgets SET reserved=reserved+?
+                WHERE id=? AND ? <= capacity - settled - reserved""",
+                (amount, budget_id, amount),
+            )
             if updated.rowcount != 1:
                 raise ValueError("unknown budget or insufficient capacity")
-            db.execute("INSERT INTO external_effects VALUES (?,?,?,?,?,?,?)",
-                       (key, provider_id, grant_identity, canonical, budget_id, amount, "reserved"))
+            db.execute(
+                "INSERT INTO external_effects VALUES (?,?,?,?,?,?,?)",
+                (key, provider_id, grant_identity, canonical, budget_id, amount, "reserved"),
+            )
             return self._get(db, key)
 
     def _claim(self, key: str, provider_id: str) -> tuple[EffectRecord, bool]:
@@ -238,10 +257,14 @@ class EffectStore:
             )
 
     def _finish(self, request: EffectRequest, result: ProviderResult) -> EffectRecord:
-        if (not isinstance(result, ProviderResult) or result.key != request.key
-                or result.provider_id != request.provider_id
-                or not isinstance(result.outcome, EffectOutcome) or type(result.fenced) is not bool
-                or (result.outcome is EffectOutcome.NOT_DONE and not result.fenced)):
+        if (
+            not isinstance(result, ProviderResult)
+            or result.key != request.key
+            or result.provider_id != request.provider_id
+            or not isinstance(result.outcome, EffectOutcome)
+            or type(result.fenced) is not bool
+            or (result.outcome is EffectOutcome.NOT_DONE and not result.fenced)
+        ):
             raise ValueError("invalid or unfenced provider outcome")
         target = EffectState(result.outcome.value)
         with self._transaction() as db:
@@ -254,9 +277,14 @@ class EffectStore:
                 raise ValueError("effect has not been dispatched")
             if target is not EffectState.UNKNOWN:
                 settled = record.amount if target is EffectState.DONE else 0
-                db.execute("""UPDATE effect_budgets SET reserved=reserved-?, settled=settled+?
-                    WHERE id=?""", (record.amount, settled, record.budget_id))
-            db.execute("UPDATE external_effects SET state=? WHERE key=?", (target.value, request.key))
+                db.execute(
+                    """UPDATE effect_budgets SET reserved=reserved-?, settled=settled+?
+                    WHERE id=?""",
+                    (record.amount, settled, record.budget_id),
+                )
+            db.execute(
+                "UPDATE external_effects SET state=? WHERE key=?", (target.value, request.key)
+            )
             return self._get(db, request.key)
 
     def send(self, key: str, provider: EffectProvider) -> EffectRecord:

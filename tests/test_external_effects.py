@@ -48,7 +48,9 @@ class Provider:
             if request.key in self.done:
                 return ProviderResult(request.key, self.provider_id, EffectOutcome.DONE)
             self.fenced.add(request.key)
-            return ProviderResult(request.key, self.provider_id, EffectOutcome.NOT_DONE, fenced=True)
+            return ProviderResult(
+                request.key, self.provider_id, EffectOutcome.NOT_DONE, fenced=True
+            )
 
 
 @pytest.fixture
@@ -59,8 +61,13 @@ def store(tmp_path):
 
 
 def reserve(store, grant="grant", **changes):
-    args = dict(provider_id="payments", grant_identity=grant, action={"amount": 4},
-                budget_id="budget", amount=4)
+    args = dict(
+        provider_id="payments",
+        grant_identity=grant,
+        action={"amount": 4},
+        budget_id="budget",
+        amount=4,
+    )
     args.update(changes)
     return store.reserve(**args)
 
@@ -70,8 +77,12 @@ def test_persisted_action_stable_key_and_rebinding(store):
     first = reserve(store, action=payload)
     payload["a"].append(2)
     assert reserve(store, action={"a": [1], "b": 2}) == first
-    for change in ({"action": payload}, {"amount": 5}, {"budget_id": "other"},
-                   {"provider_id": "other"}):
+    for change in (
+        {"action": payload},
+        {"amount": 5},
+        {"budget_id": "other"},
+        {"provider_id": "other"},
+    ):
         with pytest.raises(ValueError, match="binding"):
             reserve(store, **change)
     provider = Provider()
@@ -137,14 +148,22 @@ def test_unknown_is_per_key_and_retains_exposure(store):
         reserve(store, "grant3")
 
 
-@pytest.mark.parametrize("change", [dict(key="wrong"), dict(provider_id="wrong"),
-    dict(outcome="done"), dict(outcome=EffectOutcome.NOT_DONE, fenced=False),
-    dict(fenced=1)])
+@pytest.mark.parametrize(
+    "change",
+    [
+        dict(key="wrong"),
+        dict(provider_id="wrong"),
+        dict(outcome="done"),
+        dict(outcome=EffectOutcome.NOT_DONE, fenced=False),
+        dict(fenced=1),
+    ],
+)
 def test_invalid_provider_outcomes_retain_reservation(store, change):
     effect = reserve(store)
     provider = Provider()
     provider.send = lambda request: replace(
-        ProviderResult(request.key, "payments", EffectOutcome.DONE), **change)
+        ProviderResult(request.key, "payments", EffectOutcome.DONE), **change
+    )
     with pytest.raises(ValueError):
         store.send(effect.key, provider)
     assert store.get(effect.key).state is EffectState.UNKNOWN
@@ -159,8 +178,7 @@ def test_invalid_units(store, amount):
         store.create_budget("other", amount)
 
 
-@pytest.mark.parametrize("payload", [{1: "x"}, {"x": float("nan")}, {"x": object()},
-                                       {"x": (1, 2)}])
+@pytest.mark.parametrize("payload", [{1: "x"}, {"x": float("nan")}, {"x": object()}, {"x": (1, 2)}])
 def test_invalid_action(store, payload):
     with pytest.raises(ValueError):
         reserve(store, action=payload)
@@ -168,19 +186,23 @@ def test_invalid_action(store, payload):
 
 def test_concurrent_clients_single_dispatch_and_budget_conservation(store):
     provider = Provider()
+
     def work(number):
         client = EffectStore(store.path)
         effect = reserve(client)
         return client.send(effect.key, provider)
+
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(work, range(16)))
     assert len(provider.calls) == 1
     assert store.budget("budget").settled == 4
+
     def reserve_other(number):
         try:
             return reserve(EffectStore(store.path), f"g{number}")
         except ValueError:
             return None
+
     with ThreadPoolExecutor(max_workers=8) as pool:
         assert sum(x is not None for x in pool.map(reserve_other, range(16))) == 1
     assert store.budget("budget").reserved == 4
@@ -191,10 +213,12 @@ def test_live_send_can_be_fenced_during_reconciliation(store):
     provider = Provider()
     entered, release = Event(), Event()
     original = provider.send
+
     def delayed(request):
         entered.set()
         assert release.wait(5)
         return original(request)
+
     provider.send = delayed
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(store.send, effect.key, provider)
@@ -213,8 +237,10 @@ def test_live_send_can_be_fenced_during_reconciliation(store):
 def test_failed_database_claim_prevents_callback(store, monkeypatch):
     effect = reserve(store)
     provider = Provider()
+
     def fail(*args):
         raise OSError("disk failure")
+
     monkeypatch.setattr(store, "_claim", fail)
     with pytest.raises(OSError):
         store.send(effect.key, provider)
@@ -233,9 +259,16 @@ def test_wrong_provider_and_reserved_reconciliation_fail_closed(store):
     assert store.get(effect.key).state is EffectState.RESERVED
 
 
-@pytest.mark.parametrize("result", [None, {}, ProviderResult("wrong", "payments", EffectOutcome.DONE),
-    ProviderResult("placeholder", "wrong", EffectOutcome.DONE),
-    ProviderResult("placeholder", "payments", EffectOutcome.NOT_DONE)])
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        {},
+        ProviderResult("wrong", "payments", EffectOutcome.DONE),
+        ProviderResult("placeholder", "wrong", EffectOutcome.DONE),
+        ProviderResult("placeholder", "payments", EffectOutcome.NOT_DONE),
+    ],
+)
 def test_bad_reconciliation_never_releases_money(store, result):
     effect = reserve(store)
     store._claim(effect.key, "payments")
@@ -255,7 +288,9 @@ def test_concurrent_reconciliation_settles_once(store):
     provider = Provider()
     provider.send(request.request)
     with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(lambda _: EffectStore(store.path).reconcile(effect.key, provider), range(24)))
+        results = list(
+            pool.map(lambda _: EffectStore(store.path).reconcile(effect.key, provider), range(24))
+        )
     assert all(result.state is EffectState.DONE for result in results)
     assert store.budget("budget").settled == 4
     assert store.budget("budget").reserved == 0
@@ -266,14 +301,18 @@ def test_conflicting_terminal_evidence_rejected(store):
     provider = Provider()
     store.send(effect.key, provider)
     with pytest.raises(ValueError, match="conflicting"):
-        store._finish(effect.request, ProviderResult(effect.key, "payments", EffectOutcome.NOT_DONE, True))
+        store._finish(
+            effect.request, ProviderResult(effect.key, "payments", EffectOutcome.NOT_DONE, True)
+        )
     assert store.get(effect.key).state is EffectState.DONE
     assert store.budget("budget").settled == 4
 
 
 def test_reservation_and_settlement_rollback_atomically(store):
     with sqlite3.connect(store.path) as db:
-        db.execute("CREATE TRIGGER fail_insert BEFORE INSERT ON external_effects BEGIN SELECT RAISE(ABORT, 'fail'); END")
+        db.execute(
+            "CREATE TRIGGER fail_insert BEFORE INSERT ON external_effects BEGIN SELECT RAISE(ABORT, 'fail'); END"
+        )
     with pytest.raises(sqlite3.IntegrityError):
         reserve(store)
     assert store.budget("budget").reserved == 0
@@ -281,7 +320,9 @@ def test_reservation_and_settlement_rollback_atomically(store):
         db.execute("DROP TRIGGER fail_insert")
     effect = reserve(store)
     with sqlite3.connect(store.path) as db:
-        db.execute("CREATE TRIGGER fail_finish BEFORE UPDATE ON external_effects WHEN NEW.state='done' BEGIN SELECT RAISE(ABORT, 'fail'); END")
+        db.execute(
+            "CREATE TRIGGER fail_finish BEFORE UPDATE ON external_effects WHEN NEW.state='done' BEGIN SELECT RAISE(ABORT, 'fail'); END"
+        )
     provider = Provider()
     with pytest.raises(sqlite3.IntegrityError):
         store.send(effect.key, provider)
@@ -308,11 +349,14 @@ def test_uncertainty_persistence_failure_preserves_original_error(store, monkeyp
     effect = reserve(store)
     provider = Provider()
     original = TimeoutError("provider timeout")
+
     def fail_transaction():
         raise sqlite3.OperationalError("disk unavailable")
+
     def fail_send(request):
         monkeypatch.setattr(store, "_transaction", fail_transaction)
         raise original
+
     provider.send = fail_send
     with pytest.raises(TimeoutError) as raised:
         store.send(effect.key, provider)
@@ -336,7 +380,7 @@ def test_abrupt_process_exit_recovery_with_durable_provider(store, tmp_path, com
     provider_path = tmp_path / "provider.sqlite"
     with sqlite3.connect(provider_path) as db:
         db.execute("CREATE TABLE effects (key TEXT PRIMARY KEY)")
-    program = '''
+    program = """
 import os, sqlite3, sys
 from acgs_lite.legitimacy.effects import EffectStore
 class Provider:
@@ -347,12 +391,24 @@ class Provider:
                 db.execute("INSERT INTO effects VALUES (?)", (request.key,))
         os._exit(17)
 EffectStore(sys.argv[1]).send(sys.argv[3], Provider())
-'''
-    result = subprocess.run([sys.executable, "-c", program, str(store.path), str(provider_path),
-                             effect.key, str(completed)], env=os.environ.copy(), timeout=10)
+"""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            program,
+            str(store.path),
+            str(provider_path),
+            effect.key,
+            str(completed),
+        ],
+        env=os.environ.copy(),
+        timeout=10,
+    )
     assert result.returncode == 17
     reopened = EffectStore(store.path)
     assert reopened.get(effect.key).state is EffectState.IN_FLIGHT
+
     class DurableQuery(Provider):
         def query_and_fence(self, request):
             with sqlite3.connect(provider_path) as db:
@@ -361,8 +417,13 @@ EffectStore(sys.argv[1]).send(sys.argv[3], Provider())
                 db.execute("CREATE TABLE IF NOT EXISTS fences (key TEXT PRIMARY KEY)")
                 if not found:
                     db.execute("INSERT OR IGNORE INTO fences VALUES (?)", (request.key,))
-            return ProviderResult(request.key, "payments",
-                EffectOutcome.DONE if found else EffectOutcome.NOT_DONE, fenced=not found)
+            return ProviderResult(
+                request.key,
+                "payments",
+                EffectOutcome.DONE if found else EffectOutcome.NOT_DONE,
+                fenced=not found,
+            )
+
     state = reopened.reconcile(effect.key, DurableQuery()).state
     assert state is (EffectState.DONE if completed else EffectState.NOT_DONE)
     assert reopened.budget("budget").settled == (4 if completed else 0)

@@ -14,6 +14,7 @@ PUBLIC_SURFACES = (
     REPO_ROOT / "docs" / "cli.md",
 )
 
+
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
