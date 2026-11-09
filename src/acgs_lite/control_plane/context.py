@@ -8,14 +8,16 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from acgs_lite.control_plane.immutable_core import CoreCategory, ImmutableCoreRegistry
 from acgs_lite.control_plane.principal import Principal
 from acgs_lite.control_plane.tiers import ActionTier
 
 if TYPE_CHECKING:
-    from acgs_lite.control_plane.approvals import QuorumResult
+    import acgs_lite.control_plane.approvals as approval_types
+
+    QuorumResult: TypeAlias = "approval_types.QuorumResult"
 
 __all__ = [
     "READ_ONLY_ACTIONS",
