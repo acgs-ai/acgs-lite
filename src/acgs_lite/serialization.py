@@ -120,6 +120,14 @@ _MAX_PROJECTION_DEPTH = 32
 # a value with more distinct leaves denies rather than going partly unchecked.
 _MAX_RAW_LEAVES = 256
 
+# The leaf cap is per governed value, so ``f(*parts)`` with many wide values would
+# still fan out (100 x 257 payloads). Cap the payloads one projection call returns
+# (all the values passed to it together); a call that would need more denies before
+# any of its payloads reaches the engine. The per-value character budget is not
+# summed across values: ``max_chars`` stays a per-payload limit, and this count cap
+# already bounds the work to ``_MAX_PAYLOADS_PER_CALL`` payloads of that size.
+_MAX_PAYLOADS_PER_CALL = 1024
+
 
 class _Budget:
     """Lower bound on the serialized length, so shared-reference blowups stop early."""
@@ -302,7 +310,8 @@ def governance_payloads_for_enforcement(
     return deny: JSON escaping would conceal them from rule matching. Tab,
     newline and carriage return stay valid. Every distinct non-empty nested text
     and key is also returned raw, after its value's JSON payload; a value with
-    more than 256 such distinct leaves denies with ``GOVERNANCE-PAYLOAD-UNEVALUABLE``.
+    more than 256 such distinct leaves denies with ``GOVERNANCE-PAYLOAD-UNEVALUABLE``,
+    as do values that together project to more than 1024 payloads.
 
     Everything else denies with ``GOVERNANCE-PAYLOAD-UNEVALUABLE`` at any depth:
     ``Enum`` members, dataclasses, pydantic models, ``datetime``/``date``/``time``,
@@ -324,6 +333,12 @@ def governance_payloads_for_enforcement(
                     rule_id=_OVERSIZE_RULE_ID,
                 )
             payloads.append(payload)
+            if len(payloads) > _MAX_PAYLOADS_PER_CALL:
+                raise GovernancePayloadError(
+                    f"governed values project to more than {_MAX_PAYLOADS_PER_CALL} "
+                    "payloads; the call is denied rather than partly evaluated",
+                    rule_id=_UNEVALUABLE_RULE_ID,
+                )
         accounted += 1
     if accounted != len(values):
         raise GovernancePayloadError(

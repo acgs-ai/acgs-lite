@@ -149,6 +149,41 @@ def _deny_unless_valid(result: object, *, action: str) -> None:
     )
 
 
+def _project_for_enforcement(
+    *values: Any,
+    audit_log: AuditLog,
+    agent_id: str,
+    stage: str,
+    constitutional_hash: str,
+    durable: bool = False,
+) -> list[str]:
+    """Project ``values`` for enforcement; audit a projection denial, then re-raise.
+
+    A :class:`GovernancePayloadError` (oversize, not JSON-native, too many leaves or
+    payloads) is raised before the engine sees anything, so without this the audit
+    trail would hold no denial for the call. The entry records the stage and rule
+    id, never the payload itself (it may be oversize or unevaluable).
+    """
+    try:
+        return governance_payloads_for_enforcement(*values)
+    except GovernancePayloadError as exc:
+        entry = AuditEntry(
+            id=f"payload-denied-{uuid.uuid4().hex}",
+            type="validation",
+            agent_id=agent_id,
+            action=f"governance_payload_denied:{stage}",
+            valid=False,
+            violations=[exc.rule_id or "GOVERNANCE-PAYLOAD-UNEVALUABLE"],
+            constitutional_hash=constitutional_hash,
+            metadata={"stage": stage, "rule_id": exc.rule_id, "reason": str(exc)[:500]},
+        )
+        if durable:
+            audit_log.record_durable(entry)
+        else:
+            audit_log.record(entry)
+        raise
+
+
 @runtime_checkable
 class AgentProtocol(Protocol):
     """Protocol for agent-like objects that ACGS can wrap."""
@@ -445,7 +480,14 @@ class GovernedAgent:
         (oversize and non-JSON values raise :class:`GovernancePayloadError`), and a
         blocking verdict denies whatever ``strict`` is set to.
         """
-        for payload in governance_payloads_for_enforcement(*values):
+        payloads = _project_for_enforcement(
+            *values,
+            audit_log=self.audit_log,
+            agent_id=agent_id,
+            stage="payload",
+            constitutional_hash=self.engine._const_hash,
+        )
+        for payload in payloads:
             _deny_unless_valid(
                 self.engine.validate(payload, agent_id=agent_id, context=context),
                 action=payload,
@@ -1238,9 +1280,15 @@ class GovernedCallable:
         Only ALLOW and ALLOW_WITH_CONTROLS are mintable. Parameter defaults the call
         relies on are evaluated after the call arguments, since the digest commits them.
         """
-        payloads = governance_payloads_for_enforcement(*args, kwargs)
-        payloads += governance_payloads_for_enforcement(
-            *defaulted_argument_values(func, args, kwargs)
+        audit: dict[str, Any] = {
+            "audit_log": self.audit_log,
+            "agent_id": self.agent_id,
+            "constitutional_hash": self.engine._const_hash,
+            "durable": self.require_durable_audit,
+        }
+        payloads = _project_for_enforcement(*args, kwargs, stage="issue:arguments", **audit)
+        payloads += _project_for_enforcement(
+            *defaulted_argument_values(func, args, kwargs), stage="issue:defaults", **audit
         )
         results = [
             self.engine.validate(payload, agent_id=self.agent_id, strict=False)
@@ -1718,6 +1766,12 @@ class GovernedCallable:
         )
 
         audit_log = self.audit_log
+        projection_audit: dict[str, Any] = {
+            "audit_log": audit_log,
+            "agent_id": agent_id,
+            "constitutional_hash": engine._const_hash,
+            "durable": self.require_durable_audit,
+        }
         # Same binding option _gate passes to bind_invocation.
         include_receiver = self.authorization_profile is AuthorizationProfile.PRODUCTION
 
@@ -1783,13 +1837,17 @@ class GovernedCallable:
                             require_durable_audit=self.require_durable_audit,
                         )
 
-                    for payload in governance_payloads_for_enforcement(*args, kwargs):
+                    for payload in _project_for_enforcement(
+                        *args, kwargs, stage="arguments", **projection_audit
+                    ):
                         _deny_unless_valid(
                             engine.validate(payload, agent_id=agent_id), action=payload
                         )
                     # Defaults are digested into the binding, so they are evaluated too.
-                    for payload in governance_payloads_for_enforcement(
-                        *defaulted_argument_values(func, args, kwargs)
+                    for payload in _project_for_enforcement(
+                        *defaulted_argument_values(func, args, kwargs),
+                        stage="defaults",
+                        **projection_audit,
                     ):
                         _deny_unless_valid(
                             engine.validate(payload, agent_id=agent_id), action=payload
@@ -1810,7 +1868,9 @@ class GovernedCallable:
                         self._circuit_breaker.check()
                     execution_started = True
                     result = await func(*args, **kwargs)
-                    for output_payload in governance_payloads_for_enforcement(result):
+                    for output_payload in _project_for_enforcement(
+                        result, stage="output", **projection_audit
+                    ):
                         _deny_unless_valid(
                             engine.validate(output_payload, agent_id=f"{agent_id}:output"),
                             action=output_payload,
@@ -1869,13 +1929,17 @@ class GovernedCallable:
                             require_durable_audit=self.require_durable_audit,
                         )
 
-                    for payload in governance_payloads_for_enforcement(*args, kwargs):
+                    for payload in _project_for_enforcement(
+                        *args, kwargs, stage="arguments", **projection_audit
+                    ):
                         _deny_unless_valid(
                             engine.validate(payload, agent_id=agent_id), action=payload
                         )
                     # Defaults are digested into the binding, so they are evaluated too.
-                    for payload in governance_payloads_for_enforcement(
-                        *defaulted_argument_values(func, args, kwargs)
+                    for payload in _project_for_enforcement(
+                        *defaulted_argument_values(func, args, kwargs),
+                        stage="defaults",
+                        **projection_audit,
                     ):
                         _deny_unless_valid(
                             engine.validate(payload, agent_id=agent_id), action=payload
@@ -1896,7 +1960,9 @@ class GovernedCallable:
                         self._circuit_breaker.check()
                     execution_started = True
                     result = func(*args, **kwargs)
-                    for output_payload in governance_payloads_for_enforcement(result):
+                    for output_payload in _project_for_enforcement(
+                        result, stage="output", **projection_audit
+                    ):
                         _deny_unless_valid(
                             engine.validate(output_payload, agent_id=f"{agent_id}:output"),
                             action=output_payload,

@@ -388,6 +388,23 @@ This is a semver-major change (4.0.0): the production profile of the stable
   (the breaker counts as tripped). This supersedes the 3.0.2 note that the opt-in
   "never applies to the signal dir itself". Regression tests:
   `tests/test_halt_signal_dir.py`.
+- One projection of governed values (the call arguments, the defaults it relies
+  on, or the output) is capped at 1024 payloads in total
+  (`_MAX_PAYLOADS_PER_CALL` in `acgs_lite.serialization`). The 256-leaf cap is
+  per value, so `f(*parts)` with 100 wide dicts previously made 25,702 engine calls
+  and was allowed; it now denies with `GOVERNANCE-PAYLOAD-UNEVALUABLE` before any
+  payload reaches the engine and before the wrapped function runs. The per-value
+  character limit is unchanged and not summed across values. Regression tests:
+  `tests/test_governed_raw_leaf_cap.py`.
+- Payload denials raised while projecting governed values (oversize, not
+  JSON-native, too many leaves or payloads) are now audited. They happen before the
+  engine runs, so the audit log previously showed only the MACI check and earlier
+  passing validations for a denied call. `GovernedAgent` input, kwargs and output,
+  and `GovernedCallable` arguments, defaults, output and `issue_grant` now record a
+  `validation` entry with `valid=False`, the payload rule id in `violations` and the
+  stage in `action` (`governance_payload_denied:<stage>`), then re-raise. The entry
+  never contains the payload. With `require_durable_audit=True` it is written with
+  `record_durable()`. Regression tests: `tests/test_governed_payload_denial_audit.py`.
 
 ### Added
 
@@ -466,7 +483,7 @@ This is a semver-major change (4.0.0): the production profile of the stable
   (`ENOTDIR`) counts as tripped. Trusted owners are the current user and root only;
   extra ancestor-owner uids (e.g. the user-namespace overflow uid 65534) must be opted
   in via `ACGS_HALT_TRUSTED_UIDS` (comma-separated; never applies to the signal dir
-  itself).
+  itself; superseded in Unreleased, where the signal dir trusts the same set).
 - **Behaviour change:** a breaker whose signal dir is missing or fails these checks
   counts as tripped (`check()` raises `GovernanceHaltError("halted (untrusted signal
   dir: ...)")`, `breaker-status` reports HALTED, `resume` exits 2). This includes the

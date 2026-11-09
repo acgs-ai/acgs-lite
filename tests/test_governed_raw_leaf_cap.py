@@ -18,7 +18,11 @@ from acgs_lite import GovernedAgent, MACIRole
 from acgs_lite.constitution import Constitution, Rule, Severity
 from acgs_lite.governed import GovernedCallable
 from acgs_lite.legitimacy import DecisionReceipt, ExecutionBoundary
-from acgs_lite.serialization import _MAX_RAW_LEAVES, GovernancePayloadError
+from acgs_lite.serialization import (
+    _MAX_PAYLOADS_PER_CALL,
+    _MAX_RAW_LEAVES,
+    GovernancePayloadError,
+)
 
 UNEVALUABLE = "GOVERNANCE-PAYLOAD-UNEVALUABLE"
 MODES = pytest.mark.parametrize("mode", ["run", "arun"])
@@ -227,3 +231,82 @@ def test_callable_benign_payload_unaffected() -> None:
 
     data = {"name": "alice", "tags": ["x", "y"], "n": 1}
     assert f(data, decision_receipt=_receipt("f")) == {"echo": data}
+
+
+# --- Per-call payload cap ----------------------------------------------------------
+
+
+def _star(guard: GovernedCallable, asynchronous: bool, calls: list[int]) -> Any:
+    def sync_f(*parts: Any) -> str:
+        calls.append(len(parts))
+        return "ok"
+
+    async def async_f(*parts: Any) -> str:
+        return sync_f(*parts)
+
+    return guard(async_f if asynchronous else sync_f)
+
+
+def _at_call_cap(extra: int = 0) -> list[Any]:
+    # 3 x (blob + 256 keys) + 252 strings + the empty kwargs blob "{}" = 1024.
+    strings = [f"s{i}" for i in range(252 + extra)]
+    return [_wide(_MAX_RAW_LEAVES) for _ in range(3)] + strings
+
+
+def test_call_cap_value() -> None:
+    assert _MAX_PAYLOADS_PER_CALL == 1024
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_callable_star_args_at_call_cap_passes(
+    asynchronous: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    guard = GovernedCallable(_constitution())
+    seen = _spy(monkeypatch, guard.engine)
+    calls: list[int] = []
+    f = _star(guard, asynchronous, calls)
+    parts = _at_call_cap()
+    call = f(*parts, decision_receipt=_receipt(f.__name__))
+    assert (asyncio.run(call) if asynchronous else call) == "ok"
+    assert calls == [len(parts)]
+    # Argument payloads plus the one output payload.
+    assert len(seen) == _MAX_PAYLOADS_PER_CALL + 1
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("shape", ["one-over", "many-wide"])
+def test_callable_star_args_over_call_cap_denied_before_engine(
+    asynchronous: bool, shape: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    guard = GovernedCallable(_constitution())
+    seen = _spy(monkeypatch, guard.engine)
+    calls: list[int] = []
+    f = _star(guard, asynchronous, calls)
+    values = (
+        _at_call_cap(extra=1)
+        if shape == "one-over"
+        else [_wide(_MAX_RAW_LEAVES) for _ in range(100)]
+    )
+    with pytest.raises(GovernancePayloadError) as excinfo:
+        call = f(*values, decision_receipt=_receipt(f.__name__))
+        if asynchronous:
+            asyncio.run(call)
+    assert excinfo.value.rule_id == UNEVALUABLE
+    assert str(_MAX_PAYLOADS_PER_CALL) in str(excinfo.value)
+    assert seen == []
+    assert calls == []
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_callable_issue_grant_over_call_cap_denied(
+    asynchronous: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    guard = GovernedCallable(_constitution())
+    seen = _spy(monkeypatch, guard.engine)
+    calls: list[int] = []
+    f = _star(guard, asynchronous, calls)
+    with pytest.raises(GovernancePayloadError) as excinfo:
+        f.issue_grant(*[_wide(_MAX_RAW_LEAVES) for _ in range(100)])
+    assert excinfo.value.rule_id == UNEVALUABLE
+    assert seen == []
+    assert calls == []
