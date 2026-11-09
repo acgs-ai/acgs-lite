@@ -17,19 +17,30 @@ deny. Every decision carries ``constitution_hash`` and ``policy_digest``
 (from :func:`acgs_lite.legitimacy.invocation.bind_policy`; the digest is the
 real "policy unchanged" proof because ``Constitution.hash`` omits patterns,
 ``enabled`` and conditions).
+
+Receipts (Phase 2): with ``receipt_ledger=`` the PDP binds that
+:class:`~acgs_lite.control_plane.receipt_ledger.ReceiptLedger` (one PDP per
+ledger, via a private capability) and appends a receipt for every decision it
+publishes. Publishing is private: no public method accepts a caller-built
+:class:`Decision` except :meth:`PolicyDecisionPoint.record_denial`, which can
+only record a deny. Unlike best-effort ``listeners``, a receipt failure on an
+allow withdraws the allow; on a deny it increments
+:attr:`PolicyDecisionPoint.receipt_failures` and is audited best-effort.
 """
 
 from __future__ import annotations
 
+import collections
 import concurrent.futures
 import logging
 import math
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from acgs_lite.audit import AuditEntry, AuditLog
 from acgs_lite.control_plane.context import DecisionContext, DecisionRequest
@@ -42,9 +53,16 @@ from acgs_lite.control_plane.policy import (
     PolicyStatement,
 )
 from acgs_lite.control_plane.principal import Principal, PrincipalKind
+from acgs_lite.control_plane.receipts import ORIGIN_DISPATCHER_PRE_DENIAL, ORIGIN_PDP
 from acgs_lite.control_plane.tiers import ActionTier
 from acgs_lite.fail_closed import fail_closed
 from acgs_lite.legitimacy.invocation import bind_policy
+
+if TYPE_CHECKING:
+    import acgs_lite.control_plane.receipt_ledger as receipt_ledger_types
+
+    # A forward alias avoids a module-member lookup in import-order analysis.
+    ReceiptLedger: TypeAlias = "receipt_ledger_types.ReceiptLedger"
 
 __all__ = [
     "DEFAULT_TIMEOUT_S",
@@ -64,6 +82,9 @@ logger = logging.getLogger(__name__)
 # value; it is configurable per PDP.
 DEFAULT_TIMEOUT_S = 0.25
 DEFAULT_MAX_WORKERS = 4
+DEFAULT_PRE_DENIAL_RECEIPT_LIMIT = 100
+DEFAULT_PRE_DENIAL_WINDOW_S = 60.0
+_MAX_TRACKED_PRE_DENIAL_KEYS = 4096
 
 
 def _now() -> str:
@@ -209,6 +230,9 @@ class PolicyDecisionPoint:
         durable_audit: bool = False,
         listeners: Sequence[Callable[[Decision], None]] = (),
         max_workers: int = DEFAULT_MAX_WORKERS,
+        receipt_ledger: ReceiptLedger | None = None,
+        pre_denial_receipt_limit: int | None = DEFAULT_PRE_DENIAL_RECEIPT_LIMIT,
+        pre_denial_window_s: float = DEFAULT_PRE_DENIAL_WINDOW_S,
     ) -> None:
         if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)):
             raise ValueError("timeout_s must be a number")
@@ -222,6 +246,40 @@ class PolicyDecisionPoint:
             # Otherwise every allow would go out unrecorded although
             # durability was explicitly requested.
             raise ValueError("durable_audit=True requires an audit_log")
+        if pre_denial_receipt_limit is not None and (
+            isinstance(pre_denial_receipt_limit, bool)
+            or not isinstance(pre_denial_receipt_limit, int)
+            or pre_denial_receipt_limit < 1
+        ):
+            raise ValueError("pre_denial_receipt_limit must be None or an int >= 1")
+        if not math.isfinite(pre_denial_window_s) or pre_denial_window_s <= 0:
+            raise ValueError("pre_denial_window_s must be a positive finite number")
+        self._receipt_ledger: ReceiptLedger | None = None
+        # The ledger token is held only by this closure, never as an attribute.
+        self._append_receipt: Callable[[Decision, DecisionRequest | None, str], object] | None
+        self._append_receipt = None
+        if receipt_ledger is not None:
+            from acgs_lite.control_plane import receipt_ledger as ledger_module
+
+            # Exact type: a subclass could intercept the capability token.
+            if type(receipt_ledger) is not ledger_module.ReceiptLedger:
+                raise ValueError("receipt_ledger must be a ReceiptLedger")
+            token = receipt_ledger.bind_decision_source(ledger_module._PDP_BINDING)
+            bound = receipt_ledger
+
+            def append_receipt(
+                decision: Decision, request: DecisionRequest | None, origin: str
+            ) -> object:
+                return bound.append_decision(decision, request, capability=token, origin=origin)
+
+            self._append_receipt = append_receipt
+            self._receipt_ledger = receipt_ledger
+        self._receipt_failures = 0
+        self._suppressed_denial_receipts = 0
+        self._receipt_failures_lock = threading.Lock()
+        self._pre_denial_limit = pre_denial_receipt_limit
+        self._pre_denial_window_s = float(pre_denial_window_s)
+        self._pre_denials: dict[str, collections.deque[float]] = {}
         self._policy_set = policy_set
         self._constitution_hash = constitution_hash if isinstance(constitution_hash, str) else ""
         self._policy_digest = policy_digest if isinstance(policy_digest, str) else ""
@@ -263,6 +321,34 @@ class PolicyDecisionPoint:
     def timeout_s(self) -> float:
         return self._timeout_s
 
+    @property
+    def receipt_ledger(self) -> ReceiptLedger | None:
+        return self._receipt_ledger
+
+    @property
+    def receipt_failures(self) -> int:
+        """Count of receipt emissions that failed (allow or deny)."""
+        with self._receipt_failures_lock:
+            return self._receipt_failures
+
+    @property
+    def suppressed_denial_receipts(self) -> int:
+        """Pre-denials that were denied but not receipted (rate limit)."""
+        with self._receipt_failures_lock:
+            return self._suppressed_denial_receipts
+
+    def __repr__(self) -> str:
+        return (
+            f"PolicyDecisionPoint(constitution_hash={self._constitution_hash!r}, "
+            f"receipts={'bound' if self._receipt_ledger is not None else 'none'})"
+        )
+
+    def __copy__(self) -> PolicyDecisionPoint:
+        raise TypeError("PolicyDecisionPoint cannot be copied")
+
+    def __deepcopy__(self, memo: object) -> PolicyDecisionPoint:
+        raise TypeError("PolicyDecisionPoint cannot be copied")
+
     def close(self) -> None:
         with self._executor_lock:
             if self._executor is not None:
@@ -281,17 +367,88 @@ class PolicyDecisionPoint:
         if decision.error == "fail_closed":
             # The backstop is a shared constant; give each occurrence its own id.
             decision = replace(decision, decision_id=uuid.uuid4().hex, decided_at=_now())
-        return self.publish(decision)
+        return self._publish(decision, request if isinstance(request, DecisionRequest) else None)
 
-    def publish(self, decision: Decision) -> Decision:
-        """Audit and notify listeners. Neither can turn a deny into an allow;
-        an allow whose audit write fails becomes a deny."""
+    def record_denial(
+        self,
+        reason: str,
+        *,
+        principal_id: str = "",
+        action: str = "",
+        resource: str = "",
+        error: str = "dispatch_denied",
+    ) -> Decision:
+        """Publish (audit, receipt, listeners) a deny decided outside the PDP,
+        e.g. a dispatcher pre-check. It can only ever record a deny.
+
+        Its receipt has origin ``dispatcher_pre_denial`` and no principal
+        kind (the principal was never validated). Per principal id at most
+        ``pre_denial_receipt_limit`` such receipts are written per window;
+        beyond that the call still denies but is only counted
+        (:attr:`suppressed_denial_receipts`).
+        """
+        decision = Decision.denied(
+            reason,
+            constitution_hash=self._constitution_hash,
+            policy_digest=self._policy_digest,
+            principal_id=principal_id,
+            action=action,
+            resource=resource,
+            error=error,
+        )
+        receipted = self._pre_denial_within_limit(principal_id)
+        if not receipted:
+            with self._receipt_failures_lock:
+                self._suppressed_denial_receipts += 1
+        return self._publish(decision, None, origin=ORIGIN_DISPATCHER_PRE_DENIAL, receipt=receipted)
+
+    def _pre_denial_within_limit(self, principal_id: str) -> bool:
+        # TODO(control-plane-gap): the pre-denial receipt rate limit (count,
+        # window, keyed by the unvalidated principal id) is design inference.
+        limit = self._pre_denial_limit
+        if limit is None:
+            return True
+        now = time.monotonic()
+        horizon = now - self._pre_denial_window_s
+        with self._receipt_failures_lock:
+            if (
+                principal_id not in self._pre_denials
+                and len(self._pre_denials) >= _MAX_TRACKED_PRE_DENIAL_KEYS
+            ):
+                for key in [k for k, q in self._pre_denials.items() if not q or q[-1] < horizon]:
+                    del self._pre_denials[key]
+                if len(self._pre_denials) >= _MAX_TRACKED_PRE_DENIAL_KEYS:
+                    # Unvalidated labels are attacker-chosen: at capacity a new
+                    # label gets no receipt budget (the call still denies and
+                    # is counted), so the map and the prune scan stay bounded.
+                    return False
+            window = self._pre_denials.setdefault(principal_id, collections.deque())
+            while window and window[0] < horizon:
+                window.popleft()
+            if len(window) >= limit:
+                return False
+            window.append(now)
+            return True
+
+    def _publish(
+        self,
+        decision: Decision,
+        request: DecisionRequest | None,
+        *,
+        origin: str = ORIGIN_PDP,
+        receipt: bool = True,
+    ) -> Decision:
+        """Audit, emit a receipt and notify listeners. None of them can turn a
+        deny into an allow; an allow whose audit write or receipt emission
+        fails becomes a deny (and that deny is audited and receipted)."""
         try:
             decision = self._audit(decision)
         except Exception as exc:  # pragma: no cover - _audit handles its own errors
             logger.error("pdp audit path failed: %s", type(exc).__name__)
             if decision.allowed:
                 decision = self._audit_failure_deny(decision)
+        if receipt:
+            decision = self._emit_receipt(decision, request, origin)
         for listener in self._listeners:
             try:
                 listener(decision)
@@ -440,9 +597,69 @@ class PolicyDecisionPoint:
             policy_set_digest=self._policy_set.source_digest,
         )
 
-    def _audit_failure_deny(self, decision: Decision) -> Decision:
+    def _receipt_failed(self, decision: Decision, exc: BaseException) -> None:
+        logger.error("pdp receipt emission failed: %s", type(exc).__name__)
+        with self._receipt_failures_lock:
+            self._receipt_failures += 1
+        if self._audit_log is None:
+            return
+        try:
+            self._audit_log.record(
+                AuditEntry(
+                    id=f"pdp-receipt-failure-{uuid.uuid4().hex}",
+                    type="pdp_receipt_failure",
+                    agent_id=decision.principal_id,
+                    action=decision.action,
+                    valid=False,
+                    violations=[],
+                    constitutional_hash=decision.constitution_hash,
+                    metadata={
+                        "decision_id": decision.decision_id,
+                        "allowed": decision.allowed,
+                        "error": type(exc).__name__,
+                    },
+                )
+            )
+        except Exception as audit_exc:
+            logger.error("pdp receipt-failure audit failed: %s", type(audit_exc).__name__)
+
+    def _emit_receipt(
+        self, decision: Decision, request: DecisionRequest | None, origin: str
+    ) -> Decision:
+        # TODO(control-plane-gap): receipt emission is synchronous and runs
+        # outside timeout_s, so a slow store delays (but never flips) a
+        # decision; an async/bounded sink is a later-phase concern.
+        append = self._append_receipt
+        if append is None:
+            return decision
+        try:
+            append(decision, request, origin)
+            return decision
+        except Exception as exc:
+            self._receipt_failed(decision, exc)
+            if not decision.allowed:
+                return decision
+        withdrawn = self._audit_failure_deny(
+            decision,
+            reason="receipt emission failed; allow withdrawn",
+            error="receipt_failed",
+        )
+        withdrawn = self._audit(withdrawn)
+        try:
+            append(withdrawn, request, origin)
+        except Exception as exc:
+            self._receipt_failed(withdrawn, exc)
+        return withdrawn
+
+    def _audit_failure_deny(
+        self,
+        decision: Decision,
+        *,
+        reason: str = "audit record failed; allow withdrawn",
+        error: str = "audit_failed",
+    ) -> Decision:
         return Decision.denied(
-            "audit record failed; allow withdrawn",
+            reason,
             constitution_hash=decision.constitution_hash,
             policy_digest=decision.policy_digest,
             inputs_digest=decision.inputs_digest,
@@ -450,7 +667,7 @@ class PolicyDecisionPoint:
             action=decision.action,
             resource=decision.resource,
             tier=decision.tier,
-            error="audit_failed",
+            error=error,
             policy_set_digest=decision.policy_set_digest,
         ).with_id(decision.decision_id)
 
