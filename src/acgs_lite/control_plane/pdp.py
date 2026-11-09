@@ -82,8 +82,10 @@ if TYPE_CHECKING:
 
     ApprovalGate: TypeAlias = "approval_types.ApprovalGate"
     QuorumResult: TypeAlias = "approval_types.QuorumResult"
+    import acgs_lite.control_plane.killswitch as killswitch_types
     import acgs_lite.control_plane.telemetry as telemetry_types
-    from acgs_lite.control_plane.killswitch import KillSwitch
+
+    KillSwitch: TypeAlias = "killswitch_types.KillSwitch"
 
     TelemetryRecorder: TypeAlias = "telemetry_types.TelemetryRecorder"
 

@@ -55,8 +55,10 @@ from acgs_lite.legitimacy.signing import SIGNATURE_ALGORITHM, ReceiptSigner, ver
 
 if TYPE_CHECKING:
     import acgs_lite.control_plane.action_hash as action_hash_module
+    import acgs_lite.control_plane.identity as identity_types
     import acgs_lite.control_plane.telemetry as telemetry_types
-    from acgs_lite.control_plane.identity import AdminAttestor
+
+    AdminAttestor: TypeAlias = "identity_types.AdminAttestor"
 
     OversightEvent: TypeAlias = "telemetry_types.OversightEvent"
     TelemetryRecorder: TypeAlias = "telemetry_types.TelemetryRecorder"

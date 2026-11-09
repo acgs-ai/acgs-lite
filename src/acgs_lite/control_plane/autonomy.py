@@ -36,9 +36,13 @@ from acgs_lite.control_plane.principal import Principal, PrincipalKind
 from acgs_lite.control_plane.tiers import ActionTier
 
 if TYPE_CHECKING:
+    import acgs_lite.control_plane.identity as identity_types
     import acgs_lite.control_plane.pdp as pdp_types
-    from acgs_lite.control_plane.identity import AdminAttestor
-    from acgs_lite.control_plane.killswitch import KillSwitch
+
+    AdminAttestor: TypeAlias = "identity_types.AdminAttestor"
+    import acgs_lite.control_plane.killswitch as killswitch_types
+
+    KillSwitch: TypeAlias = "killswitch_types.KillSwitch"
 
     PolicyDecisionPoint: TypeAlias = "pdp_types.PolicyDecisionPoint"
 

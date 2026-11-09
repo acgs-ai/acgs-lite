@@ -73,7 +73,9 @@ from acgs_lite.control_plane.immutable_core import DEFAULT_IMMUTABLE_CORE, Immut
 from acgs_lite.control_plane.principal import Principal, PrincipalKind
 
 if TYPE_CHECKING:
-    from acgs_lite.control_plane.identity import AdminAttestor
+    import acgs_lite.control_plane.identity as identity_types
+
+    AdminAttestor: TypeAlias = "identity_types.AdminAttestor"
     AutonomyController: TypeAlias = "autonomy_module.AutonomyController"
 
 __all__ = [
