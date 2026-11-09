@@ -304,7 +304,7 @@ class PolicyDecisionPoint:
         self._core_writer_lock = threading.Lock()
         self._receipt_ledger: ReceiptLedger | None = None
         # The ledger token is held only by this closure, never as an attribute.
-        self._append_receipt: Callable[[Decision, DecisionRequest | None, str], object] | None
+        self._append_receipt: Callable[[Decision, DecisionRequest | None, str, bool], object] | None
         self._append_receipt = None
         if receipt_ledger is not None:
             from acgs_lite.control_plane import receipt_ledger as ledger_module
@@ -316,9 +316,18 @@ class PolicyDecisionPoint:
             bound = receipt_ledger
 
             def append_receipt(
-                decision: Decision, request: DecisionRequest | None, origin: str
+                decision: Decision,
+                request: DecisionRequest | None,
+                origin: str,
+                approvals_verified: bool = False,
             ) -> object:
-                return bound.append_decision(decision, request, capability=token, origin=origin)
+                return bound.append_decision(
+                    decision,
+                    request,
+                    capability=token,
+                    origin=origin,
+                    approvals_verified=approvals_verified,
+                )
 
             self._append_receipt = append_receipt
             self._receipt_ledger = receipt_ledger
@@ -453,7 +462,7 @@ class PolicyDecisionPoint:
         (approvers replaced by the gate-attested ones)."""
         decision, typed, quorum = self._evaluate(request, core_write_token=core_write_token)
         decision = self._consume_approvals(decision, quorum)
-        return self._publish(decision, typed), typed
+        return self._publish(decision, typed, approvals_verified=quorum is not None), typed
 
     def _decide_tool_call(
         self, requests: Sequence[DecisionRequest], *, consume: bool
@@ -473,7 +482,13 @@ class PolicyDecisionPoint:
                 ]
         group_id = decisions[0].decision_id if decisions else None
         return tuple(
-            self._publish(decision, item[1], telemetry=consume, group_id=group_id)
+            self._publish(
+                decision,
+                item[1],
+                telemetry=consume,
+                group_id=group_id,
+                approvals_verified=item[2] is not None,
+            )
             for decision, item in zip(decisions, evaluated, strict=True)
         )
 
@@ -653,6 +668,7 @@ class PolicyDecisionPoint:
         telemetry: bool = True,
         group_id: str | None = None,
         principal_kind: PrincipalKind | None = None,
+        approvals_verified: bool = False,
     ) -> Decision:
         """Audit, emit a receipt and notify listeners. None of them can turn a
         deny into an allow; an allow whose audit write or receipt emission
@@ -664,7 +680,7 @@ class PolicyDecisionPoint:
             if decision.allowed:
                 decision = self._audit_failure_deny(decision)
         if receipt:
-            decision = self._emit_receipt(decision, request, origin)
+            decision = self._emit_receipt(decision, request, origin, approvals_verified)
         for listener in self._listeners:
             try:
                 listener(decision)
@@ -875,7 +891,11 @@ class PolicyDecisionPoint:
             logger.error("pdp receipt-failure audit failed: %s", type(audit_exc).__name__)
 
     def _emit_receipt(
-        self, decision: Decision, request: DecisionRequest | None, origin: str
+        self,
+        decision: Decision,
+        request: DecisionRequest | None,
+        origin: str,
+        approvals_verified: bool,
     ) -> Decision:
         # TODO(control-plane-gap): receipt emission is synchronous and runs
         # outside timeout_s, so a slow store delays (but never flips) a
@@ -884,7 +904,7 @@ class PolicyDecisionPoint:
         if append is None:
             return decision
         try:
-            append(decision, request, origin)
+            append(decision, request, origin, approvals_verified)
             return decision
         except Exception as exc:
             self._receipt_failed(decision, exc)
@@ -897,7 +917,7 @@ class PolicyDecisionPoint:
         )
         withdrawn = self._audit(withdrawn)
         try:
-            append(withdrawn, request, origin)
+            append(withdrawn, request, origin, approvals_verified)
         except Exception as exc:
             self._receipt_failed(withdrawn, exc)
         return withdrawn
