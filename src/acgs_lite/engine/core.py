@@ -9,6 +9,7 @@ Constitutional Hash: 608508a9bd224290
 
 from __future__ import annotations
 
+import importlib
 import re
 import time
 import unicodedata
@@ -100,6 +101,52 @@ def _is_hidden_char(c: str) -> bool:
 def _is_plain_ascii(text: str) -> bool:
     """ASCII with no hidden control characters: matching it needs no second pass."""
     return text.isascii() and not _has_ascii_control(text)
+
+
+try:  # Python 3.11+
+    _sre_parser: Any = importlib.import_module("re._parser")
+except ImportError:  # pragma: no cover - Python 3.10
+    _sre_parser = importlib.import_module("sre_parse")
+
+# ASCII letters that re.IGNORECASE also matches to a non-ASCII character which
+# survives str.lower() (dotless i U+0131, I-dot U+0130, Kelvin U+212A, long s
+# U+017F). A match may use those characters, so they never extend an anchor.
+_FOLD_UNSAFE_ANCHOR_CHARS = frozenset("iks")
+_MIN_ANCHOR_LEN = 3
+
+
+def _required_literal_anchor(pattern: str) -> str | None:
+    """Return a literal that every match of ``pattern`` contains, or ``None``.
+
+    The anchor gates whether the regex runs at all, so it must be sound: for
+    every lowered text that ``re.compile(pattern, re.IGNORECASE)`` matches, the
+    anchor is a substring of that text. Only a contiguous run of top-level
+    LITERAL items in the parsed pattern qualifies. Any other item (group,
+    branch, lookaround, repeat, class, ``\\b``, ``.``) ends the run; an optional
+    quantifier binds only to its own item, so ``drops?`` still yields ``drop``.
+    Non-ASCII literals and the fold-unsafe letters i/k/s also end the run. The
+    longest run of at least three characters is returned; when none exists or
+    the pattern cannot be parsed, ``None`` means the regex always runs.
+    """
+    try:
+        parsed = _sre_parser.parse(pattern, re.IGNORECASE)
+    except Exception:
+        return None
+    runs: list[str] = []
+    current: list[str] = []
+    for op, av in parsed:
+        if getattr(op, "name", str(op)) == "LITERAL":
+            char = chr(av)
+            if char.isascii() and char.lower() not in _FOLD_UNSAFE_ANCHOR_CHARS:
+                current.append(char.lower())
+                continue
+        if current:
+            runs.append("".join(current))
+            current = []
+    if current:
+        runs.append("".join(current))
+    best = max(runs, key=len, default="")
+    return best if len(best) >= _MIN_ANCHOR_LEN else None
 
 
 def _match_variants(text: str) -> tuple[str, ...]:
@@ -247,30 +294,8 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 strict=True,
             ):
                 _pattern_rule_idxs.append((idx, pat))
-                cleaned = re.sub(
-                    r"\\[bBdDsSwW]|\\.|\{[^}]*\}|\[[^\]]*\]|[.+*?^$|(){}]", " ", pat_str
-                )
-                words = re.findall(r"[a-z]{3,}", cleaned.lower())
-                anchor = None
-                for w in words:
-                    if w not in ("the", "and", "for", "with"):
-                        anchor = w
-                        break
-                if anchor and re.search(r"\{[0-9,]+\}", pat_str):
-                    _stopwords4 = frozenset(("the", "and", "for", "with"))
-                    for w in reversed(words):
-                        if w not in _stopwords4:
-                            anchor = w
-                            break
+                anchor = _required_literal_anchor(pat_str)
                 if anchor:
-                    if re.fullmatch(r"\\b[a-z]+\\b", pat_str, re.IGNORECASE):
-                        anchor = anchor + " "
-                    elif re.fullmatch(r"\\b[a-z]+\.[a-z]+\\b", pat_str, re.IGNORECASE):
-                        anchor = anchor + "-"
-                    elif re.fullmatch(r"\\b[a-z]+\\s\+[a-z]+\\b", pat_str, re.IGNORECASE):
-                        words2 = re.findall(r"[a-z]{2,}", cleaned.lower())
-                        if len(words2) >= 2:
-                            anchor = words2[0] + " " + words2[1]
                     _anchor_patterns[anchor].append((idx, pat))
                 else:
                     _no_anchor_patterns.append((idx, pat))
