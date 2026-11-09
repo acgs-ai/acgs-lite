@@ -300,6 +300,16 @@
       "flags": 50
     },
     {
+      "pattern": "control-plane/__pycache__/runbooks.*",
+      "regex": "control\\-plane/__pycache__/runbooks\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "control-plane/runbooks.*",
+      "regex": "control\\-plane/runbooks\\.[^/]*",
+      "flags": 50
+    },
+    {
       "pattern": "control-plane/runbooks/**",
       "regex": "control\\-plane/runbooks(?:/.*)?",
       "flags": 50
