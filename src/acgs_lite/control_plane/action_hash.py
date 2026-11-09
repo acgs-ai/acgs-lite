@@ -35,7 +35,7 @@ __all__ = [
 
 ACTION_HASH_DOMAIN = b"acgs-control-plane-action-v1\x00"
 _ATTRIBUTES_DOMAIN = b"acgs-control-plane-action-attributes-v1\x00"
-_ARGUMENTS_DOMAIN = b"acgs-control-plane-tool-arguments-v3\x00"
+_ARGUMENTS_DOMAIN = b"acgs-control-plane-tool-arguments-v4\x00"
 MAX_CANONICAL_DEPTH = 32
 _SUB_REQUEST_ACTIONS = frozenset({"file.read", "file.write"})
 
@@ -56,9 +56,18 @@ def attributes_digest(attributes: Mapping[str, Any]) -> str:
     return _sha256(_ATTRIBUTES_DOMAIN, canonical_json(dict(attributes)))
 
 
-def _canonical_value(value: object, depth: int = 0) -> object:
+def _canonical_value(value: object, depth: int = 0, seen_mutable: set[int] | None = None) -> object:
     if depth > MAX_CANONICAL_DEPTH:
         raise ValueError("arguments nested too deeply")
+    if seen_mutable is None:
+        seen_mutable = set()
+    if isinstance(value, (Mapping, list, set)):
+        identity = id(value)
+        if identity in seen_mutable:
+            raise ValueError("aliased mutable argument containers are not supported")
+        # Keep identities across sibling branches, not only along the recursion
+        # stack: deepcopy preserves shared objects as well as actual cycles.
+        seen_mutable.add(identity)
     if value is None or isinstance(value, (bool, int, str)):
         return value
     if isinstance(value, float):
@@ -69,17 +78,24 @@ def _canonical_value(value: object, depth: int = 0) -> object:
         return {"$bytes": value.hex()}
     if isinstance(value, Mapping):
         items = [
-            [_canonical_value(k, depth + 1), _canonical_value(v, depth + 1)]
+            [
+                _canonical_value(k, depth + 1, seen_mutable),
+                _canonical_value(v, depth + 1, seen_mutable),
+            ]
             for k, v in value.items()
         ]
         return {"$map": items}
     if isinstance(value, list):
-        return [_canonical_value(item, depth + 1) for item in value]
+        return [_canonical_value(item, depth + 1, seen_mutable) for item in value]
     if isinstance(value, tuple):
-        return {"$tuple": [_canonical_value(item, depth + 1) for item in value]}
+        return {"$tuple": [_canonical_value(item, depth + 1, seen_mutable) for item in value]}
     if isinstance(value, (set, frozenset)):
         tag = "$frozenset" if isinstance(value, frozenset) else "$set"
-        return {tag: sorted((_canonical_value(i, depth + 1) for i in value), key=canonical_json)}
+        return {
+            tag: sorted(
+                (_canonical_value(i, depth + 1, seen_mutable) for i in value), key=canonical_json
+            )
+        }
     raise TypeError(f"unsupported argument type {type(value).__name__}")
 
 
@@ -89,8 +105,11 @@ def arguments_digest(arguments: Mapping[str, Any]) -> str:
     Tuples and frozensets have distinct tags because invocation preserves
     these types. Mapping entries preserve insertion order because tools can
     observe it, including through **kwargs. Mappings are tagged separately,
-    so user keys cannot imitate a container tag. The v3 domain invalidates
-    earlier approvals that ignored mapping order; they must be issued again.
+    so user keys cannot imitate a container tag. Shared mutable containers
+    and cycles are rejected: the value encoding cannot describe their alias
+    relationships, which deepcopy would preserve for invocation. Repeated
+    immutable values remain supported. The v4 domain invalidates approvals
+    made before alias rejection; they must be issued again.
     """
     return _sha256(_ARGUMENTS_DOMAIN, canonical_json(_canonical_value(dict(arguments))))
 
