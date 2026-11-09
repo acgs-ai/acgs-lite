@@ -108,20 +108,23 @@ def test_lifecycle_cannot_reassign_during_sync_write(
                 else:
                     other.declare_incident(ADMIN, "new-incident")
             if active:
+                program = (
+                    "import sys\n"
+                    "from acgs_lite.control_plane.incident import IncidentMutationLock, IncidentLockError\n"
+                    "from acgs_lite.control_plane import Principal, PrincipalKind\n"
+                    "lock = IncidentMutationLock(sys.argv[1])\n"
+                    "try:\n"
+                    " lock.transfer(Principal('commander', PrincipalKind.HUMAN), "
+                    "Principal('writer-b', PrincipalKind.AGENT))\n"
+                    "except IncidentLockError as exc:\n"
+                    " sys.exit(0 if 'execution' in str(exc) else 3)\n"
+                    "sys.exit(2)\n"
+                )
                 probe = subprocess.run(
                     [
                         sys.executable,
                         "-c",
-                        "import sys\n"
-                        "from acgs_lite.control_plane.incident import IncidentMutationLock, IncidentLockError\n"
-                        "from acgs_lite.control_plane import Principal, PrincipalKind\n"
-                        "lock = IncidentMutationLock(sys.argv[1])\n"
-                        "try:\n"
-                        " lock.transfer(Principal('commander', PrincipalKind.HUMAN), "
-                        "Principal('writer-b', PrincipalKind.AGENT))\n"
-                        "except IncidentLockError as exc:\n"
-                        " sys.exit(0 if 'execution' in str(exc) else 3)\n"
-                        "sys.exit(2)\n",
+                        program,
                         str(lock.state_path),
                     ],
                     capture_output=True,
