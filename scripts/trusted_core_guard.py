@@ -237,61 +237,63 @@ class Guard:
 
     def protected(self, pr: dict[str, Any]) -> bool:
         count = pr.get("changed_files")
-        if type(count) is not int or not 0 <= count <= 3000:
-            raise Denied("unsupported changed-file count")
+        # GitHub comparison files are only present on page 1 and capped at 300.
+        # Never guess whether a saturated response is complete. Larger changes
+        # need to be split before this guard can authorize them.
+        if type(count) is not int or not 0 <= count < 300:
+            raise Denied("immutable comparison supports fewer than 300 changed files")
+        comparison = self.api.json(
+            self.prefix
+            + f"/compare/{self.env['BASE_SHA']}...{self.env['HEAD_SHA']}?per_page=1&page=1"
+        )
+        require(type(comparison) is dict, "invalid immutable comparison")
+        require(
+            comparison.get("base_commit", {}).get("sha") == self.env["BASE_SHA"],
+            "comparison base revision mismatch",
+        )
+        entries = comparison.get("files")
+        require(type(entries) is list and len(entries) < 300, "incomplete immutable comparison")
+        require(len(entries) == count, "immutable comparison file count mismatch")
         seen: set[str] = set()
         protected = False
-        page = 1
-        while True:
-            entries = self.api.json(
-                self.prefix + f"/pulls/{pr['number']}/files?per_page=100&page={page}"
-            )
-            require(type(entries) is list and len(entries) <= 100, "invalid changed-file page")
-            for item in entries:
-                require(type(item) is dict, "invalid changed-file entry")
-                path = item.get("filename")
+        for item in entries:
+            require(type(item) is dict, "invalid changed-file entry")
+            path = item.get("filename")
+            require(path not in seen if isinstance(path, str) else False, "duplicate changed file")
+            seen.add(path)
+            paths = [path]
+            if item.get("status") == "renamed":
+                require("previous_filename" in item, "rename source missing")
+            if "previous_filename" in item:
+                paths.append(item["previous_filename"])
+            for filename in paths:
                 require(
-                    path not in seen if isinstance(path, str) else False, "duplicate changed file"
+                    isinstance(filename, str) and 0 < len(filename) <= 4096,
+                    "invalid changed path",
                 )
-                seen.add(path)
-                paths = [path]
-                if item.get("status") == "renamed":
-                    require("previous_filename" in item, "rename source missing")
-                if "previous_filename" in item:
-                    paths.append(item["previous_filename"])
-                for filename in paths:
-                    require(
-                        isinstance(filename, str) and 0 < len(filename) <= 4096,
-                        "invalid changed path",
-                    )
-                    require(
-                        not any(ord(c) < 32 or ord(c) == 127 for c in filename)
-                        and "\\" not in filename
-                        and "%" not in filename,
-                        "ambiguous changed path",
-                    )
-                    require(
-                        filename == filename.strip()
-                        and unicodedata.normalize("NFKC", filename) == filename
-                        and not filename.startswith("~")
-                        and re.match(r"[A-Za-z]:", filename) is None
-                        and "://" not in filename
-                        and all(
-                            part not in ("", ".", "..") and part.rstrip(". ") == part
-                            for part in filename.split("/")
-                        ),
-                        "noncanonical changed path",
-                    )
-                    protected |= any(
-                        re.fullmatch(rule["regex"], filename, rule["flags"]) is not None
-                        for rule in self.policy["protected_paths"]
-                    )
-            require(len(seen) <= count, "changed-file count mismatch")
-            if len(entries) < 100:
-                break
-            require(page <= 30, "changed-file pagination exceeds bound")
-            page += 1
-        require(len(seen) == count, "incomplete changed-file pagination")
+                require(
+                    not any(ord(c) < 32 or ord(c) == 127 for c in filename)
+                    and "\\" not in filename
+                    and "%" not in filename,
+                    "ambiguous changed path",
+                )
+                require(
+                    filename == filename.strip()
+                    and unicodedata.normalize("NFKC", filename) == filename
+                    and not filename.startswith("~")
+                    and re.match(r"[A-Za-z]:", filename) is None
+                    and "://" not in filename
+                    and all(
+                        part not in ("", ".", "..") and part.rstrip(". ") == part
+                        for part in filename.split("/")
+                    ),
+                    "noncanonical changed path",
+                )
+                protected |= any(
+                    re.fullmatch(rule["regex"], filename, rule["flags"]) is not None
+                    for rule in self.policy["protected_paths"]
+                )
+        require(len(seen) == count, "incomplete immutable comparison")
         return protected
 
     def workflow(self) -> dict[str, Any]:

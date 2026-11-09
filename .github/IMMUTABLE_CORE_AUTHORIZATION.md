@@ -42,7 +42,9 @@ and the tests require it to cover the current canonical registry.
    authorization workflow ID/path, repository ID, trusted source SHA, event,
    branch, initial/rerun actors, first attempt, completion, age, run-linked
    artifact digest and exact JSON binding. A status description or URL cannot
-   grant authorization. Missing evidence and incomplete PR-file enumeration deny.
+   grant authorization. Changed paths come from an immutable base/head comparison,
+   including rename sources. Missing evidence, incomplete comparisons and changes
+   touching 300 or more files deny; split larger changes before authorization.
 4. Immediately before merge, verify the authentic guard run and authorization
    evidence again, including current account permission, age, PR base/head and
    current main. Merge with the exact head SHA and no admin bypass. If main or
