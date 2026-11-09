@@ -213,7 +213,7 @@ format:
 	$(RUFF) format $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/
 
 typecheck:
-	$(MYPY) $(SRC_DIR)/ --ignore-missing-imports
+	$(MYPY) --config-file pyproject.toml $(SRC_DIR)/ --ignore-missing-imports
 
 check: lint typecheck test
 
