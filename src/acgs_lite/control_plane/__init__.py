@@ -11,7 +11,10 @@ hash with requester/author/sibling exclusion (:mod:`.approvals`,
 resource budgets (:mod:`.budgets`), automatic autonomy demotion
 (:mod:`.autonomy`) and a human-only change class (:mod:`.change_class`)
 whose file writes go only through :class:`CoreChangeWriter`
-(:mod:`.core_write`).
+(:mod:`.core_write`). Phase 4: oversight telemetry -- override rate,
+approval latency, verifier precision/recall and post-merge rework, segmented
+agent vs human (:mod:`.telemetry`, :mod:`.telemetry_api`) -- feeding the
+error budget, plus a per-trigger circuit breaker (:mod:`.breaker`).
 
 Mutating agents must never be able to write to the things that judge them.
 The immutable core is protected twice, by independent code paths:
@@ -49,6 +52,13 @@ if TYPE_CHECKING:
         AutonomyRestoreRejected,
         ErrorBudget,
         FailureKind,
+    )
+    from acgs_lite.control_plane.breaker import (
+        BreakerPolicy,
+        BreakerResetRejected,
+        BreakerState,
+        BreakerStatus,
+        TriggerCircuitBreaker,
     )
     from acgs_lite.control_plane.budgets import (
         BudgetChargeRefused,
@@ -133,6 +143,16 @@ if TYPE_CHECKING:
         ReceiptKind,
         SignedControlPlaneReceipt,
     )
+    from acgs_lite.control_plane.telemetry import (
+        AgentTelemetryRejected,
+        InMemoryTelemetryStore,
+        JSONLTelemetryStore,
+        OversightEvent,
+        OversightMetrics,
+        TelemetryAutonomyBridge,
+        TelemetryRecorder,
+        TelemetryStore,
+    )
     from acgs_lite.control_plane.tiers import ActionTier
 
 # Keep independent receipt verification importable without the issuer.
@@ -150,6 +170,11 @@ _LAZY_EXPORTS = {
     "AutonomyRestoreRejected": "acgs_lite.control_plane.autonomy",
     "ErrorBudget": "acgs_lite.control_plane.autonomy",
     "FailureKind": "acgs_lite.control_plane.autonomy",
+    "BreakerPolicy": "acgs_lite.control_plane.breaker",
+    "BreakerResetRejected": "acgs_lite.control_plane.breaker",
+    "BreakerState": "acgs_lite.control_plane.breaker",
+    "BreakerStatus": "acgs_lite.control_plane.breaker",
+    "TriggerCircuitBreaker": "acgs_lite.control_plane.breaker",
     "BudgetChargeRefused": "acgs_lite.control_plane.budgets",
     "BudgetExhausted": "acgs_lite.control_plane.budgets",
     "BudgetLedger": "acgs_lite.control_plane.budgets",
@@ -220,6 +245,14 @@ _LAZY_EXPORTS = {
     "ControlPlaneReceipt": "acgs_lite.control_plane.receipts",
     "ReceiptKind": "acgs_lite.control_plane.receipts",
     "SignedControlPlaneReceipt": "acgs_lite.control_plane.receipts",
+    "AgentTelemetryRejected": "acgs_lite.control_plane.telemetry",
+    "InMemoryTelemetryStore": "acgs_lite.control_plane.telemetry",
+    "JSONLTelemetryStore": "acgs_lite.control_plane.telemetry",
+    "OversightEvent": "acgs_lite.control_plane.telemetry",
+    "OversightMetrics": "acgs_lite.control_plane.telemetry",
+    "TelemetryAutonomyBridge": "acgs_lite.control_plane.telemetry",
+    "TelemetryRecorder": "acgs_lite.control_plane.telemetry",
+    "TelemetryStore": "acgs_lite.control_plane.telemetry",
     "ActionTier": "acgs_lite.control_plane.tiers",
 }
 
@@ -247,6 +280,7 @@ __all__ = [
     "READ_ONLY_ACTIONS",
     "WRITE_VERBS",
     "ActionTier",
+    "AgentTelemetryRejected",
     "ApprovalAuthority",
     "ApprovalGate",
     "ApprovalRegistrationRejected",
@@ -254,6 +288,10 @@ __all__ = [
     "AutonomyController",
     "AutonomyLevel",
     "AutonomyRestoreRejected",
+    "BreakerPolicy",
+    "BreakerResetRejected",
+    "BreakerState",
+    "BreakerStatus",
     "BudgetChargeRefused",
     "BudgetExhausted",
     "BudgetLedger",
@@ -283,9 +321,13 @@ __all__ = [
     "ImmutableCoreError",
     "ImmutableCoreRegistry",
     "InMemoryReceiptStore",
+    "InMemoryTelemetryStore",
     "JSONLReceiptStore",
+    "JSONLTelemetryStore",
     "KillSwitch",
     "KillSwitchOperationRejected",
+    "OversightEvent",
+    "OversightMetrics",
     "PolicyDecisionPoint",
     "PolicyEffect",
     "PolicyParseError",
@@ -311,8 +353,12 @@ __all__ = [
     "ScopedCredential",
     "SignedApproval",
     "SignedControlPlaneReceipt",
+    "TelemetryAutonomyBridge",
+    "TelemetryRecorder",
+    "TelemetryStore",
     "ToolDenied",
     "ToolResult",
+    "TriggerCircuitBreaker",
     "TrustedRunRegistry",
     "WriteGrant",
     "action_hash",

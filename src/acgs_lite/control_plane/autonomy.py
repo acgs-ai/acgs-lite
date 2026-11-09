@@ -27,7 +27,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 from acgs_lite._compat import StrEnum
 from acgs_lite.audit import AuditEntry, AuditLog
@@ -36,8 +36,10 @@ from acgs_lite.control_plane.principal import Principal, PrincipalKind
 from acgs_lite.control_plane.tiers import ActionTier
 
 if TYPE_CHECKING:
+    import acgs_lite.control_plane.pdp as pdp_types
     from acgs_lite.control_plane.killswitch import KillSwitch
-    from acgs_lite.control_plane.pdp import PolicyDecisionPoint
+
+    PolicyDecisionPoint: TypeAlias = "pdp_types.PolicyDecisionPoint"
 
 __all__ = [
     "AutonomyController",
@@ -156,6 +158,12 @@ class AutonomyController:
         # TODO(control-plane-gap): the right cohort for unscoped agents is
         # design inference; off by default to avoid mass demotion.
         self._demote_unscoped = bool(demote_unscoped_agents)
+        # Every system_id each canonical id has presented. A principal that
+        # presents another system_id (or None) is judged by the most
+        # restrictive of its recorded identities, so dropping or changing the
+        # system_id does not escape a cohort demotion.
+        # TODO(control-plane-gap): in memory and unbounded per controller.
+        self._identities: dict[str, set[str | None]] = {}
         self.audit_failures = 0
 
     _UNSCOPED_COHORT = "\x00unscoped"
@@ -207,10 +215,18 @@ class AutonomyController:
             self.demote(principal, "rollback budget exhausted")
         return self.level(principal)
 
+    def _observe(self, principal: Principal) -> set[str | None]:
+        """Record and return every system_id this canonical id presented."""
+        with self._lock:
+            seen = self._identities.setdefault(principal.canonical_id, set())
+            seen.add(principal.system_id)
+            return set(seen)
+
     def demote(self, principal: Principal, reason: str) -> None:
         """Sticky demotion to P0_ONLY; audited durably (best effort receipt)."""
         if not self._governed(principal):
             return
+        self._observe(principal)
         system = self._cohort(principal)
         with self._lock:
             if principal.canonical_id in self._demoted:
@@ -220,9 +236,25 @@ class AutonomyController:
                 self._demoted_systems.setdefault(system, reason)
         self._record(principal, "autonomy_demotion", reason)
 
+    def demote_cohort(self, system_id: str, reason: str) -> None:
+        """Sticky demotion of every agent whose ``system_id`` is *system_id*
+        (used when a failure cannot be attributed to one principal)."""
+        cohort = Principal(f"cohort:{system_id}", PrincipalKind.AGENT, system_id=system_id)
+        key = cohort.system_id if cohort.system_id is not None else system_id
+        with self._lock:
+            if key in self._demoted_systems:
+                return
+            self._demoted_systems[key] = reason
+        self._record(cohort, "autonomy_demotion", reason)
+
     def is_demoted(self, principal: Principal) -> bool:
+        identities = self._observe(principal)
         with self._lock:
             if principal.canonical_id in self._demoted:
+                return True
+            if any(s is not None and s in self._demoted_systems for s in identities):
+                # A cohort-wide demotion applies whatever demote_system says,
+                # to every system_id this id has ever presented.
                 return True
             cohort = self._cohort(principal)
             return cohort is not None and cohort in self._demoted_systems
@@ -276,6 +308,8 @@ class AutonomyController:
             cohort = self._cohort(principal)
             if cohort is not None:
                 self._demoted_systems.pop(cohort, None)
+            if principal.system_id is not None:
+                self._demoted_systems.pop(principal.system_id, None)
             self._failures.pop(principal.canonical_id, None)
             self._rollbacks.pop(principal.canonical_id, None)
         self._record(principal, "autonomy_restore", f"restored by {admin.id}")
