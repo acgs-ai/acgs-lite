@@ -167,6 +167,21 @@ jobs:
           print(f"Optional integrations: {tests} tests, no skips or failures")
           PY
 
+  rust-core:
+    name: Rust core (cargo test)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.93.1"
+      # Only acgs-validator-core carries Rust unit tests. The pyo3 (extension-module
+      # cdylib), wasm and spacetime members are built by wheels.yml / not testable
+      # with a plain `cargo test`.
+      - name: cargo test (acgs-validator-core)
+        working-directory: rust
+        run: cargo test --locked -p acgs-validator-core
+
   docs:
     name: Docs build and link check
     runs-on: blacksmith-4vcpu-ubuntu-2404
