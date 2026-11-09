@@ -51,10 +51,19 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, cast, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    Protocol,
+    TypeAlias,
+    cast,
+    runtime_checkable,
+)
 
+import acgs_lite.control_plane.autonomy as autonomy_module
 from acgs_lite._compat import StrEnum
-from acgs_lite.control_plane.autonomy import AutonomyController, FailureKind
 from acgs_lite.control_plane.evidence import (
     EvidenceSource,
     ExternalRunRef,
@@ -65,6 +74,7 @@ from acgs_lite.control_plane.principal import Principal, PrincipalKind
 
 if TYPE_CHECKING:
     from acgs_lite.control_plane.identity import AdminAttestor
+    AutonomyController: TypeAlias = "autonomy_module.AutonomyController"
 
 __all__ = [
     "DEFAULT_REWORK_WINDOW_S",
@@ -471,11 +481,14 @@ Listener = Callable[[OversightEvent], None]
 class TelemetryStore(Protocol):
     """Append-only event store. ``subscribe`` listeners run after each append."""
 
-    def append(self, event: OversightEvent) -> None: ...
+    def append(self, event: OversightEvent) -> None:
+        """Append one event and notify subscribed listeners."""
 
-    def read_all(self) -> tuple[OversightEvent, ...]: ...
+    def read_all(self) -> tuple[OversightEvent, ...]:
+        """Return stored events in append order."""
 
-    def subscribe(self, listener: Listener) -> None: ...
+    def subscribe(self, listener: Listener) -> None:
+        """Register a listener for subsequent appends."""
 
 
 def _admit(event: object) -> OversightEvent:
@@ -1302,7 +1315,7 @@ class TelemetryAutonomyBridge:
     """
 
     def __init__(self, autonomy: AutonomyController) -> None:
-        if not isinstance(autonomy, AutonomyController):
+        if not isinstance(autonomy, autonomy_module.AutonomyController):
             raise TypeError("autonomy must be an AutonomyController")
         self._autonomy = autonomy
 
@@ -1319,4 +1332,4 @@ class TelemetryAutonomyBridge:
         if isinstance(event, Rollback):
             self._autonomy.record_rollback(agent)
         else:
-            self._autonomy.record_failure(agent, FailureKind.VERIFICATION_FAILED)
+            self._autonomy.record_failure(agent, autonomy_module.FailureKind.VERIFICATION_FAILED)
