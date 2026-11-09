@@ -65,6 +65,11 @@
       "flags": 50
     },
     {
+      "pattern": "**/sitecustomize*/**",
+      "regex": "(?:[^/]+/)*sitecustomize[^/]*(?:/.*)?",
+      "flags": 50
+    },
+    {
       "pattern": "**/tool-allowlist*",
       "regex": "(?:[^/]+/)*tool\\-allowlist[^/]*",
       "flags": 50
@@ -77,6 +82,51 @@
     {
       "pattern": "**/usercustomize*",
       "regex": "(?:[^/]+/)*usercustomize[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "**/usercustomize*/**",
+      "regex": "(?:[^/]+/)*usercustomize[^/]*(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "*.py",
+      "regex": "[^/]*\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "*.pyc",
+      "regex": "[^/]*\\.pyc",
+      "flags": 50
+    },
+    {
+      "pattern": "*.pyd",
+      "regex": "[^/]*\\.pyd",
+      "flags": 50
+    },
+    {
+      "pattern": "*.so",
+      "regex": "[^/]*\\.so",
+      "flags": 50
+    },
+    {
+      "pattern": "*/__init__*.pyd",
+      "regex": "[^/]*/__init__[^/]*\\.pyd",
+      "flags": 50
+    },
+    {
+      "pattern": "*/__init__*.so",
+      "regex": "[^/]*/__init__[^/]*\\.so",
+      "flags": 50
+    },
+    {
+      "pattern": "*/__init__.py",
+      "regex": "[^/]*/__init__\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "*/__init__.pyc",
+      "regex": "[^/]*/__init__\\.pyc",
       "flags": 50
     },
     {
@@ -297,6 +347,16 @@
     {
       "pattern": "control-plane/**",
       "regex": "control\\-plane(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "control-plane/__pycache__/runbooks.*",
+      "regex": "control\\-plane/__pycache__/runbooks\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "control-plane/runbooks.*",
+      "regex": "control\\-plane/runbooks\\.[^/]*",
       "flags": 50
     },
     {
@@ -707,6 +767,11 @@
     {
       "pattern": "setup.cfg",
       "regex": "setup\\.cfg",
+      "flags": 50
+    },
+    {
+      "pattern": "src/*.py",
+      "regex": "src/[^/]*\\.py",
       "flags": 50
     },
     {
