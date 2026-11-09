@@ -1,0 +1,55 @@
+name: Authorize immutable-core change
+run-name: Authorize PR ${{ inputs.pr_number }} at ${{ inputs.head_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open PR targeting main
+        required: true
+        type: string
+      base_sha:
+        description: Exact current main commit
+        required: true
+        type: string
+      head_sha:
+        description: Exact reviewed PR head commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+jobs:
+  authorize:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.11'
+      - name: Bind delegated maintainer authorization to the live PR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+        run: >-
+          python -I scripts/trusted_core_guard.py authorize
+          --policy .github/immutable-core-policy.json
+          --output "${RUNNER_TEMP}/core-authorization/authorization.json"
+      - name: Preserve run-bound authorization evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: immutable-core-authorization
+          path: ${{ runner.temp }}/core-authorization/authorization.json
+          if-no-files-found: error
+          retention-days: 2
+

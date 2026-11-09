@@ -1,58 +1,71 @@
 name: immutable-core-guard
 
-# Blocks pull requests where an agent-authored change touches the immutable
-# core (evaluator, policy, tool allowlist, IAM, CI rules, audit, control plane).
-# The guard script and its registry are taken from the PR *base* commit, so a
-# PR cannot weaken the guard that judges it.
-#
-# TODO(control-plane-gap): on `pull_request` GitHub runs this workflow file
-# from the PR merge ref, so a PR could edit this file itself. That edit is
-# caught by CODEOWNERS (.github/** needs human review) and must be backed by
-# branch protection making this job a required check. `pull_request_target`
-# would pin the workflow to base but needs a separate security review.
-
+# Only trusted default-branch code runs here. PR content is read through the
+# API as data, never checked out, installed or executed with this token.
 on:
-  pull_request:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR to recheck after authorization
+        required: true
+        type: string
+      base_sha:
+        description: Exact current main commit
+        required: true
+        type: string
+      head_sha:
+        description: Exact PR head commit
+        required: true
+        type: string
 
 permissions:
   contents: read
+  pull-requests: read
+  actions: read
+  statuses: write
 
 jobs:
   guard:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.base_sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.head_sha }}
     steps:
-      - name: Check out PR (full history for the diff)
-        uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          fetch-depth: 0
-      - name: Check out base guard
-        uses: actions/checkout@v7
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: _guard
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
-      - name: Install guard (core deps only)
-        run: pip install -e ./_guard
-      - name: Collect commit messages
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: git log --format=%B "${BASE_SHA}..${HEAD_SHA}" > "${RUNNER_TEMP}/commit-messages.txt"
-      - name: Check immutable core
-        # Untrusted values (branch name, login) pass through env, never
-        # interpolated into the shell script.
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          HEAD_REF: ${{ github.head_ref }}
+          python-version: '3.11'
+      - name: Mark this head pending
+        run: |
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ && "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state=pending -f context=immutable-core/guard \
+            -f description='Checking trusted authorization for this base and head' \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      - name: Verify trusted workflow evidence
+        id: verify
         run: >-
-          python _guard/scripts/check_immutable_core_diff.py
-          --repo .
-          --base "${BASE_SHA}"
-          --head "${HEAD_SHA}"
-          --author "${PR_AUTHOR}"
-          --head-ref "${HEAD_REF}"
-          --commit-messages-file "${RUNNER_TEMP}/commit-messages.txt"
+          python -I scripts/trusted_core_guard.py verify
+          --policy .github/immutable-core-policy.json
+      - name: Publish verification result
+        if: always() && steps.verify.outcome != 'skipped'
+        env:
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+        run: |
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          state=failure
+          if [ "$VERIFY_OUTCOME" = success ]; then state=success; fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state="$state" -f context=immutable-core/guard \
+            -f description='Trusted guard result; base-bound evidence must be rechecked before merge' \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
