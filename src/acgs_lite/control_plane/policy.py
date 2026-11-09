@@ -15,7 +15,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 import yaml
 
@@ -25,7 +25,9 @@ from acgs_lite.control_plane.principal import PrincipalKind
 from acgs_lite.control_plane.tiers import ActionTier
 
 if TYPE_CHECKING:
-    from acgs_lite.control_plane.context import DecisionContext
+    import acgs_lite.control_plane.context as context_types
+
+    DecisionContext: TypeAlias = "context_types.DecisionContext"
 
 __all__ = [
     "INVARIANT_ID_PREFIX",
