@@ -137,7 +137,7 @@ from acgs_lite.control_plane.invariants import requested_by_problem
 from acgs_lite.control_plane.killswitch import KillSwitch
 from acgs_lite.control_plane.pdp import Decision, PolicyDecisionPoint
 from acgs_lite.control_plane.principal import Principal, PrincipalKind, canonical_principal_id
-from acgs_lite.control_plane.runbook import RunbookDenied, RunbookRegistry, StopSignals
+from acgs_lite.control_plane.runbook import RunbookDenied, RunbookRegistry, StopSignals, _Approved
 from acgs_lite.control_plane.tier_policy import (
     DEFAULT_NARROW_MAX_BLAST_RADIUS,
     ActionProfile,
@@ -229,6 +229,7 @@ class _Authorized:
     admission: _BreakerAdmission | None = None
     change_id: str | None = None
     paths: tuple[str, ...] = ()
+    runbook_entry: _Approved | None = None
 
 
 class _Denied(Exception):
@@ -1427,11 +1428,12 @@ class GovernedToolDispatcher:
                         f"repository permissions deny write to {path!r}",
                         telemetry=consume,
                     )
+        runbook_entry = None
         if consume and plan.runbook_id is not None and self._runbooks is not None:
             # Atomic re-validation that spends one rate-limit slot, only once
             # the PDP has permitted the call.
             try:
-                self._runbooks.check_execution(
+                runbook_entry = self._runbooks._check_execution(
                     plan.runbook_id,
                     plan.runbook_hash,
                     tool_name=tool_name,
@@ -1458,7 +1460,9 @@ class GovernedToolDispatcher:
                 session,
                 decisions[0].decision_id if decisions else None,
             )
-        return _Authorized(spec, args, decisions, plan, admission, change_id, tuple(paths))
+        return _Authorized(
+            spec, args, decisions, plan, admission, change_id, tuple(paths), runbook_entry
+        )
 
     def _after_run(
         self,
@@ -1476,12 +1480,13 @@ class GovernedToolDispatcher:
         plan = auth.plan
         if plan.runbook_id is None or plan.runbook_hash is None:
             return
-        if self._runbooks is not None:
-            if success:
-                success = self._runbooks.outcome_succeeded(
-                    plan.runbook_id, value, self._run_verifier
-                )
-            self._runbooks.record_outcome(plan.runbook_id, success=success)
+        if self._runbooks is not None and auth.runbook_entry is not None:
+            self._runbooks._record_execution_outcome(
+                auth.runbook_entry,
+                success=success,
+                value=value,
+                run_verifier=self._run_verifier,
+            )
         if self._review_queue is not None:
             self._review_queue.record(
                 decision_id=auth.decisions[0].decision_id if auth.decisions else "",

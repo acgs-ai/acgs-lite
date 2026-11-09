@@ -549,6 +549,57 @@ class RunbookRegistry:
 
         Raises :class:`RunbookDenied` with the first failing reason.
         """
+        return self._check_execution(
+            runbook_id,
+            cited_hash,
+            tool_name=tool_name,
+            paths=paths,
+            principal=principal,
+            blast_radius=blast_radius,
+            signals=signals,
+            consume=consume,
+            merge_capable=merge_capable,
+        ).runbook
+
+    def _record_execution_outcome(
+        self,
+        entry: _Approved,
+        *,
+        success: bool,
+        value: object,
+        run_verifier: ExternalRunVerifier | None,
+    ) -> None:
+        """Account against the exact approval that admitted this execution.
+
+        Predicate evaluation may call an external verifier. Keep that outside
+        the registry lock; the retained approval and its predicate do not
+        change when approve() replaces the current entry, even for the same hash.
+        """
+        if success:
+            try:
+                success = predicate_satisfied(entry.runbook.success_predicate, value, run_verifier)
+            except Exception:
+                success = False
+        with self._lock:
+            if success:
+                entry.successes += 1
+            else:
+                entry.failures += 1
+
+    def _check_execution(
+        self,
+        runbook_id: object,
+        cited_hash: object,
+        *,
+        tool_name: str,
+        paths: Sequence[str],
+        principal: Principal,
+        blast_radius: int,
+        signals: StopSignals | None = None,
+        consume: bool = True,
+        merge_capable: bool = False,
+    ) -> _Approved:
+        """Retain the exact entry checked while spending the execution slot."""
         if not isinstance(runbook_id, str) or not isinstance(cited_hash, str):
             raise RunbookDenied("T1 execution requires runbook_id and runbook_hash")
         with self._lock:
@@ -606,7 +657,7 @@ class RunbookRegistry:
                 )
             if consume:
                 window.append(now)
-        return runbook
+        return entry
 
     def _check_scope(
         self, runbook: Runbook, tool_name: str, paths: Iterable[str], principal: Principal
