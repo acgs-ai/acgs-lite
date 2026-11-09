@@ -382,6 +382,9 @@ def _dispatcher(
     calls: list[str],
     **kwargs: Any,
 ) -> GovernedToolDispatcher:
+    # Trusted host by default: the HUMAN breaker exemption is what most of
+    # these tests check. Pass trust_host_identity=False for the default mode.
+    kwargs.setdefault("trust_host_identity", True)
     d = GovernedToolDispatcher(
         pdp,
         permissions=RepositoryPermissions(
@@ -397,8 +400,6 @@ def _dispatcher(
         tool_tiers={"read": ActionTier.T0, "write": ActionTier.T1},
         read_only_tools=frozenset({"read"}),
         breaker=breaker,
-        # Trusted host: the HUMAN breaker exemption is what these tests check.
-        trust_host_identity=True,
         **kwargs,
     )
 
@@ -437,6 +438,26 @@ class TestDispatcherIntegration:
         breaker.reset(ALICE, "loop-a")
         d.dispatch(AGENT, "write", {"path": "workspace/f"}, trigger_id="loop-a")
         assert calls[-1] == "write:workspace/f"
+
+    @pytest.mark.parametrize("system_id", ["sys-a", None])
+    def test_agent_relabelled_human_keeps_its_open_trigger(
+        self, pdp: PolicyDecisionPoint, system_id: str | None
+    ) -> None:
+        # Default mode (no attestation, no opt-in): bindings are keyed by id,
+        # so a tripped agent claiming HUMAN cannot keep T0 reads.
+        impostor = Principal("agent-1", PrincipalKind.HUMAN, system_id=system_id)
+        calls: list[str] = []
+        breaker, rec, _ = _setup(BreakerPolicy(max_rollbacks=1, cohort_suspension=False))
+        d = _dispatcher(pdp, breaker, calls, trust_host_identity=False)
+        d.dispatch(impostor, "read", {"path": "workspace/a.txt"})
+        rec.record_rollback("loop-a", "c1", agent=AGENT)
+        with pytest.raises(ToolDenied, match="loop-a bound to this principal is not closed"):
+            d.dispatch(impostor, "read", {"path": "workspace/a.txt"})
+        d.dispatch(ALICE, "read", {"path": "workspace/b.txt"})  # unbound human
+        assert calls == ["read:workspace/a.txt", "read:workspace/b.txt"]
+        trusted = _dispatcher(pdp, breaker, calls)  # trusted host: HUMAN exempt
+        trusted.dispatch(impostor, "read", {"path": "workspace/c.txt"})
+        assert calls[-1] == "read:workspace/c.txt"
 
     def test_h1_agent_cannot_switch_to_an_unbound_trigger(self, pdp: PolicyDecisionPoint) -> None:
         calls: list[str] = []

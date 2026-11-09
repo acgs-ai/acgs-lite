@@ -58,8 +58,9 @@ def _dispatcher(
             "merge_pr": ActionTier.T1,
             "push": ActionTier.T1,
             "read": ActionTier.T0,
+            "read1": ActionTier.T1,
         },
-        read_only_tools=frozenset({"read"}),
+        read_only_tools=frozenset({"read", "read1"}),
         **kwargs,
     )
 
@@ -78,6 +79,7 @@ def _dispatcher(
     d.register("edit", edit, path_params={"path"}, merge_capable=False)
     d.register("quick_edit", edit, path_params={"path"}, merge_capable=False)
     d.register("read", edit, path_params={"path"}, merge_capable=False)
+    d.register("read1", edit, path_params={"path"}, merge_capable=False)
     d.register("merge_pr", merge_pr, opaque_params={"pr"}, merge_capable=True)
     d.register(
         "push",
@@ -290,3 +292,89 @@ class TestAttestedHumanUnaffected:
                 require_credential=True,
                 trust_host_identity=True,
             )
+
+
+def _seed_workspace(pdp: PolicyDecisionPoint) -> None:
+    import os
+
+    root = pdp.registry.repo_root
+    assert root is not None
+    os.makedirs(os.path.join(root, "workspace", "deploy"), exist_ok=True)
+    with open(os.path.join(root, "workspace", ".env"), "w", encoding="utf-8") as fh:
+        fh.write("API_KEY=leak")
+    with open(os.path.join(root, "workspace", "deploy", "credentials.json"), "w") as fh:
+        fh.write("{}")
+
+
+class TestDirectoryReadGuard:
+    """An unattested HUMAN gets the non-human directory-read guard."""
+
+    @pytest.mark.parametrize("target", ["workspace", "workspace/deploy"])
+    def test_unattested_directory_read_denied(
+        self, gated_pdp: PolicyDecisionPoint, target: str
+    ) -> None:
+        _seed_workspace(gated_pdp)
+        calls: list[str] = []
+        d = _dispatcher(gated_pdp, calls)
+        with pytest.raises(ToolDenied, match="directory-like read target"):
+            d.dispatch(ALICE, "read", {"path": target})
+        with pytest.raises(ToolDenied, match="directory-like read target"):
+            asyncio.run(d.adispatch(ALICE, "read", {"path": target}))
+        assert calls == []
+
+    def test_trusted_host_directory_read_allowed(self, gated_pdp: PolicyDecisionPoint) -> None:
+        _seed_workspace(gated_pdp)
+        calls: list[str] = []
+        d = _dispatcher(gated_pdp, calls, trust_host_identity=True)
+        d.dispatch(ALICE, "read", {"path": "workspace"})
+        asyncio.run(d.adispatch(ALICE, "read", {"path": "workspace"}))
+        assert calls == ["workspace", "workspace"]
+
+    def test_attested_directory_read_allowed(self, gated_pdp: PolicyDecisionPoint) -> None:
+        pytest.importorskip("cryptography")
+        _seed_workspace(gated_pdp)
+        issuer, session = TestAttestedHumanUnaffected._attested(gated_pdp)
+        token = issuer.issue_for_human(session, scopes=["tool:read"]).token
+        calls: list[str] = []
+        d = _dispatcher(gated_pdp, calls, credential_issuer=issuer, require_credential=True)
+        d.dispatch(ALICE, "read", {"path": "workspace"}, credential=token)
+        assert calls == ["workspace"]
+
+
+class TestRelabelledAgentStaysGoverned:
+    """Autonomy and budget state is keyed by id: an agent claiming HUMAN on
+    a dispatcher without attestation keeps its demotion and budget."""
+
+    IMPOSTOR = Principal("agent-1", PrincipalKind.HUMAN, system_id="sys-a")
+    AGENT = Principal("agent-1", PrincipalKind.AGENT, system_id="sys-a")
+
+    def test_demoted_agent_relabelled_human_is_p0_only(
+        self, gated_pdp: PolicyDecisionPoint
+    ) -> None:
+        from acgs_lite.control_plane.autonomy import AutonomyController, ErrorBudget
+
+        autonomy = AutonomyController(ErrorBudget(window_s=60, max_failures=3))
+        autonomy.demote(self.AGENT, "test demotion")
+        calls: list[str] = []
+        d = _dispatcher(gated_pdp, calls, autonomy=autonomy)
+        with pytest.raises(ToolDenied, match="P0_ONLY"):
+            d.dispatch(self.IMPOSTOR, "read1", {"path": "workspace/a.txt"})
+        d.dispatch(self.IMPOSTOR, "read", {"path": "workspace/a.txt"})  # T0 read stays
+        d.dispatch(ALICE, "read1", {"path": "workspace/b.txt"})  # undemoted human
+        trusted = _dispatcher(gated_pdp, calls, autonomy=autonomy, trust_host_identity=True)
+        trusted.dispatch(self.IMPOSTOR, "read1", {"path": "workspace/c.txt"})
+        assert calls == ["workspace/a.txt", "workspace/b.txt", "workspace/c.txt"]
+
+    def test_exhausted_agent_relabelled_human_denied(self, gated_pdp: PolicyDecisionPoint) -> None:
+        from acgs_lite.control_plane.budgets import BudgetLedger, BudgetLimits
+
+        budgets = BudgetLedger()
+        budgets.start_run(self.AGENT, BudgetLimits(iterations=1))
+        calls: list[str] = []
+        d = _dispatcher(gated_pdp, calls, budgets=budgets)
+        d.dispatch(self.IMPOSTOR, "read", {"path": "workspace/a.txt"})
+        with pytest.raises(ToolDenied, match="budget exhausted"):
+            d.dispatch(self.IMPOSTOR, "read", {"path": "workspace/a.txt"})
+        # A human the host never budgeted is not denied for lacking a run.
+        d.dispatch(ALICE, "read", {"path": "workspace/b.txt"})
+        assert calls == ["workspace/a.txt", "workspace/b.txt"]

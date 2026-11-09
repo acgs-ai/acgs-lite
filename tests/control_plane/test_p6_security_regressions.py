@@ -445,9 +445,12 @@ ALLOWLIST: dict[str, str] = {
     "dispatcher.py:GovernedToolDispatcher._ownership_check": "attested dispatcher principal",
     "dispatcher.py:GovernedToolDispatcher._breaker_check": "attested dispatcher principal",
     "dispatcher.py:GovernedToolDispatcher._harness_checks": "attested dispatcher principal",
-    "dispatcher.py:GovernedToolDispatcher._stop_signals": "attested dispatcher principal",
+    "dispatcher.py:GovernedToolDispatcher._trusted_human": "the single trusted-HUMAN notion: "
+    "HUMAN kind counts only when attested or the host opted in (trust_host_identity)",
+    "dispatcher.py:GovernedToolDispatcher._governed_view": "narrows only: an untrusted HUMAN "
+    "is evaluated as a non-human by the autonomy controller",
     "dispatcher.py:GovernedToolDispatcher._unattested_human_check": "denies an unattested "
-    "HUMAN at T2+/core unless the host opted in (trust_host_identity)",
+    "HUMAN anything but read-only, non-core calls below T2",
     "iam.py:RepositoryPermissions.__init__": "validates WriteGrant config, not a caller",
     "iam.py:RepositoryPermissions.can_write": "called with the attested dispatcher principal",
     "identity.py:HumanAuthenticator._human": "the identity layer itself",
@@ -512,8 +515,6 @@ ALLOWLIST: dict[str, str] = {
     "admission; grants nothing",
     "change_ownership.py:ChangeOwnershipRegistry.__init__": "construction: validates the "
     "configured admin (the facade passes the directory admin)",
-    "dispatcher.py:GovernedToolDispatcher._autonomy_check": "harness admission over the "
-    "attested dispatcher principal (as in _authorize)",
     "iam.py:RepositoryPermissions.has_unrestricted_write": "IAM grant lookup (grant kind == "
     "principal kind); narrows shell access",
     "incident.py:IncidentMutationLock.heartbeat": "liveness only: matches the recorded "
