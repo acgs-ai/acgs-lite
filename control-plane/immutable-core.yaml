@@ -24,6 +24,8 @@ categories:
   - config/sandbox*/**
   - sandbox/**
   policy:
+  - '**/constitution*.json'
+  - '**/constitution*.toml'
   - '**/constitution*.yaml'
   - '**/constitution*.yml'
   - policies/**
@@ -31,6 +33,11 @@ categories:
   tool_allowlist:
   - '**/tool-allowlist*'
   - '**/tool_allowlist*'
+  memory_write_policy:
+  - '**/memory-write-policy*'
+  - '**/memory_write_policy*'
+  - memory-policy/**
+  - memory_policy/**
   credentials:
   - '**/.env*'
   - credentials/**

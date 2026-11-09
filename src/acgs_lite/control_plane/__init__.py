@@ -3,7 +3,15 @@
 Phase 1: immutable core. Phase 2: signed, hash-chained receipts for every
 decision and promotion, backed by independently validated external runs
 (:mod:`.evidence`, :mod:`.receipts`, :mod:`.receipt_ledger`,
-:mod:`.receipt_verify`, :mod:`.promotion`).
+:mod:`.receipt_verify`, :mod:`.promotion`). Phase 3: separation of duties
+and harness-enforced limits -- signed single-use approvals bound to an action
+hash with requester/author/sibling exclusion (:mod:`.approvals`,
+:mod:`.action_hash`), harness-issued short-TTL credentials
+(:mod:`.credentials`), an independent kill switch (:mod:`.killswitch`),
+resource budgets (:mod:`.budgets`), automatic autonomy demotion
+(:mod:`.autonomy`) and a human-only change class (:mod:`.change_class`)
+whose file writes go only through :class:`CoreChangeWriter`
+(:mod:`.core_write`).
 
 Mutating agents must never be able to write to the things that judge them.
 The immutable core is protected twice, by independent code paths:
@@ -23,13 +31,46 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
+from acgs_lite.control_plane.action_hash import action_hash
+
 if TYPE_CHECKING:
+    from acgs_lite.control_plane.approvals import (
+        DEFAULT_QUORUM_POLICIES,
+        ApprovalAuthority,
+        ApprovalGate,
+        ApprovalRegistrationRejected,
+        QuorumPolicy,
+        QuorumResult,
+        SignedApproval,
+    )
+    from acgs_lite.control_plane.autonomy import (
+        AutonomyController,
+        AutonomyLevel,
+        AutonomyRestoreRejected,
+        ErrorBudget,
+        FailureKind,
+    )
+    from acgs_lite.control_plane.budgets import (
+        BudgetChargeRefused,
+        BudgetExhausted,
+        BudgetLedger,
+        BudgetLimits,
+        BudgetState,
+    )
+    from acgs_lite.control_plane.change_class import ChangeClass, classify_change
     from acgs_lite.control_plane.context import (
         READ_ONLY_ACTIONS,
         WRITE_VERBS,
         DecisionContext,
         DecisionRequest,
         is_write_action,
+    )
+    from acgs_lite.control_plane.core_write import CoreChangeWriter, CoreWriteRejected
+    from acgs_lite.control_plane.credentials import (
+        CredentialInvalid,
+        CredentialIssuanceRefused,
+        CredentialIssuer,
+        ScopedCredential,
     )
     from acgs_lite.control_plane.dispatcher import GovernedToolDispatcher, ToolDenied, ToolResult
     from acgs_lite.control_plane.evidence import (
@@ -58,6 +99,7 @@ if TYPE_CHECKING:
         normalize_path,
     )
     from acgs_lite.control_plane.invariants import CONSTITUTION_INVARIANTS
+    from acgs_lite.control_plane.killswitch import KillSwitch, KillSwitchOperationRejected
     from acgs_lite.control_plane.pdp import (
         Decision,
         PolicyDecisionPoint,
@@ -95,11 +137,37 @@ if TYPE_CHECKING:
 
 # Keep independent receipt verification importable without the issuer.
 _LAZY_EXPORTS = {
+    "action_hash": "acgs_lite.control_plane.action_hash",
+    "DEFAULT_QUORUM_POLICIES": "acgs_lite.control_plane.approvals",
+    "ApprovalAuthority": "acgs_lite.control_plane.approvals",
+    "ApprovalGate": "acgs_lite.control_plane.approvals",
+    "ApprovalRegistrationRejected": "acgs_lite.control_plane.approvals",
+    "QuorumPolicy": "acgs_lite.control_plane.approvals",
+    "QuorumResult": "acgs_lite.control_plane.approvals",
+    "SignedApproval": "acgs_lite.control_plane.approvals",
+    "AutonomyController": "acgs_lite.control_plane.autonomy",
+    "AutonomyLevel": "acgs_lite.control_plane.autonomy",
+    "AutonomyRestoreRejected": "acgs_lite.control_plane.autonomy",
+    "ErrorBudget": "acgs_lite.control_plane.autonomy",
+    "FailureKind": "acgs_lite.control_plane.autonomy",
+    "BudgetChargeRefused": "acgs_lite.control_plane.budgets",
+    "BudgetExhausted": "acgs_lite.control_plane.budgets",
+    "BudgetLedger": "acgs_lite.control_plane.budgets",
+    "BudgetLimits": "acgs_lite.control_plane.budgets",
+    "BudgetState": "acgs_lite.control_plane.budgets",
+    "ChangeClass": "acgs_lite.control_plane.change_class",
+    "classify_change": "acgs_lite.control_plane.change_class",
     "READ_ONLY_ACTIONS": "acgs_lite.control_plane.context",
     "WRITE_VERBS": "acgs_lite.control_plane.context",
     "DecisionContext": "acgs_lite.control_plane.context",
     "DecisionRequest": "acgs_lite.control_plane.context",
     "is_write_action": "acgs_lite.control_plane.context",
+    "CoreChangeWriter": "acgs_lite.control_plane.core_write",
+    "CoreWriteRejected": "acgs_lite.control_plane.core_write",
+    "CredentialInvalid": "acgs_lite.control_plane.credentials",
+    "CredentialIssuanceRefused": "acgs_lite.control_plane.credentials",
+    "CredentialIssuer": "acgs_lite.control_plane.credentials",
+    "ScopedCredential": "acgs_lite.control_plane.credentials",
     "GovernedToolDispatcher": "acgs_lite.control_plane.dispatcher",
     "ToolDenied": "acgs_lite.control_plane.dispatcher",
     "ToolResult": "acgs_lite.control_plane.dispatcher",
@@ -123,6 +191,8 @@ _LAZY_EXPORTS = {
     "ImmutableCoreRegistry": "acgs_lite.control_plane.immutable_core",
     "normalize_path": "acgs_lite.control_plane.immutable_core",
     "CONSTITUTION_INVARIANTS": "acgs_lite.control_plane.invariants",
+    "KillSwitch": "acgs_lite.control_plane.killswitch",
+    "KillSwitchOperationRejected": "acgs_lite.control_plane.killswitch",
     "Decision": "acgs_lite.control_plane.pdp",
     "PolicyDecisionPoint": "acgs_lite.control_plane.pdp",
     "PolicyEffect": "acgs_lite.control_plane.pdp",
@@ -171,22 +241,42 @@ __all__ = [
     "CONSTITUTION_INVARIANTS",
     "DEFAULT_EVIDENCE_POLICY",
     "DEFAULT_IMMUTABLE_CORE",
+    "DEFAULT_QUORUM_POLICIES",
     "DEFAULT_RECEIPT_STORE_PATH",
     "GENESIS_RECEIPT_HASH",
     "READ_ONLY_ACTIONS",
     "WRITE_VERBS",
     "ActionTier",
+    "ApprovalAuthority",
+    "ApprovalGate",
+    "ApprovalRegistrationRejected",
     "ApproverRef",
+    "AutonomyController",
+    "AutonomyLevel",
+    "AutonomyRestoreRejected",
+    "BudgetChargeRefused",
+    "BudgetExhausted",
+    "BudgetLedger",
+    "BudgetLimits",
+    "BudgetState",
+    "ChangeClass",
     "CompositeRunVerifier",
     "ControlPlaneReceipt",
+    "CoreChangeWriter",
+    "CoreWriteRejected",
     "CoreCategory",
+    "CredentialInvalid",
+    "CredentialIssuanceRefused",
+    "CredentialIssuer",
     "Decision",
     "DecisionContext",
     "DecisionRequest",
+    "ErrorBudget",
     "EvidencePolicy",
     "EvidenceSource",
     "ExternalRunRef",
     "ExternalRunVerifier",
+    "FailureKind",
     "GitHubActionsRunVerifier",
     "GovernedToolDispatcher",
     "IAMGrantRejected",
@@ -194,6 +284,8 @@ __all__ = [
     "ImmutableCoreRegistry",
     "InMemoryReceiptStore",
     "JSONLReceiptStore",
+    "KillSwitch",
+    "KillSwitchOperationRejected",
     "PolicyDecisionPoint",
     "PolicyEffect",
     "PolicyParseError",
@@ -203,9 +295,11 @@ __all__ = [
     "PrincipalKind",
     "PromotionGate",
     "PromotionRejected",
-    "ReceiptEmissionError",
+    "QuorumPolicy",
+    "QuorumResult",
     "ReceiptCapabilityError",
     "ReceiptConflict",
+    "ReceiptEmissionError",
     "ReceiptKind",
     "ReceiptLedger",
     "ReceiptStore",
@@ -214,11 +308,15 @@ __all__ = [
     "RepositoryPermissions",
     "RunRegistrationRejected",
     "RunValidation",
+    "ScopedCredential",
+    "SignedApproval",
     "SignedControlPlaneReceipt",
     "ToolDenied",
     "ToolResult",
     "TrustedRunRegistry",
     "WriteGrant",
+    "action_hash",
+    "classify_change",
     "is_write_action",
     "normalize_path",
     "render_codeowners",

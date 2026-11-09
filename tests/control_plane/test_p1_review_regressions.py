@@ -57,6 +57,12 @@ class _Sink:
         self.calls: list[Any] = []
 
 
+@pytest.fixture()
+def pdp(gated_pdp: PolicyDecisionPoint) -> PolicyDecisionPoint:
+    # The shell tool is T2, which needs an ApprovalGate on the PDP (Phase 3).
+    return gated_pdp
+
+
 def _dispatcher(pdp: PolicyDecisionPoint) -> tuple[GovernedToolDispatcher, _Sink]:
     sink = _Sink()
     d = GovernedToolDispatcher(
@@ -163,9 +169,14 @@ class TestShellNeedsUnrestrictedGrant:
         assert sink.calls == []
         assert "unrestricted" in excinfo.value.decision.reason
 
-    def test_unrestricted_human_shell_allowed(self, pdp: PolicyDecisionPoint) -> None:
+    def test_unrestricted_human_shell_allowed(
+        self, pdp: PolicyDecisionPoint, approver_factory: Any
+    ) -> None:
+        pytest.importorskip("cryptography")
         dispatcher, sink = _dispatcher(pdp)
-        dispatcher.dispatch(HUMAN, "shell", {"command": "ls -la", "cwd": "workspace"})
+        args = {"command": "ls -la", "cwd": "workspace"}
+        approval = approver_factory("bob")(dispatcher.action_hash_for(HUMAN, "shell", args))
+        dispatcher.dispatch(HUMAN, "shell", args, approvals=[approval])
         assert sink.calls == [("shell", "ls -la", "workspace")]
 
     def test_has_unrestricted_write_matches_id_and_kind(self) -> None:

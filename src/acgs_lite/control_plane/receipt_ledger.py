@@ -374,6 +374,7 @@ class ReceiptLedger:
         *,
         capability: object,
         origin: str = ORIGIN_PDP,
+        approvals_verified: bool = False,
     ) -> SignedControlPlaneReceipt:
         """PDP-only. External runs come from ``request.attributes["external_runs"]``
         (also bound by ``inputs_digest``); malformed refs fail an allow and are
@@ -396,7 +397,15 @@ class ReceiptLedger:
                 if decision.allowed:
                     raise ReceiptEmissionError("malformed external_runs on an allow") from exc
                 logger.warning("dropping malformed external_runs on a deny receipt")
-        return self._append(ReceiptKind.POLICY_DECISION, decision, request, runs, None, origin)
+        return self._append(
+            ReceiptKind.POLICY_DECISION,
+            decision,
+            request,
+            runs,
+            None,
+            origin,
+            approvals_verified=approvals_verified,
+        )
 
     def append_promotion(
         self,
@@ -436,6 +445,8 @@ class ReceiptLedger:
         external_runs: Sequence[ExternalRunRef],
         candidate_digest: str | None,
         origin: str,
+        *,
+        approvals_verified: bool = False,
     ) -> SignedControlPlaneReceipt:
         if not isinstance(decision, pdp.Decision):
             raise ReceiptEmissionError("decision must be a Decision")
@@ -471,6 +482,30 @@ class ReceiptLedger:
             approvers, external_runs = (), ()
             if principal is not None and len(principal.system_id or "") > MAX_FIELD_CHARS:
                 principal = None
+        # Phase 3: a PDP with an ApprovalGate replaces approvers by the ones
+        # its signed approvals attest, aligned one-to-one with ``approvals``.
+        # Only the capability-bound PDP may attest verification; request fields
+        # and matching principal IDs alone are not proof of a signed approval.
+        raw_approvals = getattr(request, "approvals", ())
+        if (
+            approvals_verified is True
+            and approvers
+            and isinstance(raw_approvals, tuple)
+            and len(raw_approvals) == len(approvers)
+            and all(
+                str(getattr(approval, "approver_id", "")).casefold() == ref.principal_id.casefold()
+                for ref, approval in zip(approvers, raw_approvals, strict=True)
+            )
+        ):
+            approvers = tuple(
+                ApproverRef(
+                    ref.principal_id,
+                    ref.kind,
+                    getattr(approval, "approval_id", None),
+                    getattr(approval, "action_hash", None),
+                )
+                for ref, approval in zip(approvers, raw_approvals, strict=True)
+            )
         attributes = getattr(request, "attributes", None)
         claims_success = (
             kind is ReceiptKind.PROMOTION

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -31,6 +32,7 @@ from acgs_lite.control_plane import (
 
 pytest.importorskip("cryptography")
 
+from acgs_lite.control_plane.killswitch import KillSwitch  # noqa: E402
 from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner  # noqa: E402
 
 pytestmark = [pytest.mark.unit, pytest.mark.constitutional]
@@ -87,6 +89,42 @@ def _kw(signer: Ed25519ReceiptSigner, runs: TrustedRunRegistry) -> dict[str, Any
 
 
 class TestPromotionGate:
+    @pytest.mark.parametrize("unreadable", [False, True])
+    def test_halt_during_decision_blocks_promotion_append(
+        self,
+        constitution: Constitution,
+        permit_all: PolicySet,
+        ledger: ReceiptLedger,
+        runs: TrustedRunRegistry,
+        tmp_path: Path,
+        unreadable: bool,
+    ) -> None:
+        state = {"on": False}
+
+        def probe(_path: Path) -> bool:
+            if state["on"] and unreadable:
+                raise OSError("state unavailable")
+            return state["on"]
+
+        def halt(decision: Any) -> None:
+            if decision.allowed:
+                state["on"] = True
+
+        switch = KillSwitch("sys-a", signal_dir=tmp_path / "halt", probe=probe)
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, receipt_ledger=ledger, kill_switch=switch, listeners=[halt]
+        ) as point:
+            gate = PromotionGate(ledger, runs, pdp=point)
+            with pytest.raises(PromotionRejected, match="kill switch"):
+                gate.promote(
+                    ALICE,
+                    "candidate",
+                    candidate_digest=CANDIDATE,
+                    evidence=[CI_RUN],
+                    approvers=[BOB],
+                )
+        assert all(item.receipt.kind is not ReceiptKind.PROMOTION for item in ledger.receipts())
+
     def test_verified_ci_evidence_emits_verifiable_receipt(
         self,
         gate: PromotionGate,

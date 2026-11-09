@@ -82,10 +82,24 @@ class ReceiptKind(StrEnum):
     PROMOTION = "promotion"
 
 
+_APPROVER_KEYS = frozenset({"principal_id", "kind"})
+_APPROVAL_KEYS = frozenset({"approval_id", "action_hash"})
+
+
 @dataclass(frozen=True)
 class ApproverRef:
+    """An approver cited by a receipt.
+
+    Phase 3: when the approver was attested by a signed approval, the receipt
+    also names that ``approval_id`` and the ``action_hash`` it was bound to.
+    Both are omitted from the payload when absent, so Phase 2 receipts keep
+    their hashes.
+    """
+
     principal_id: str
     kind: str
+    approval_id: str | None = None
+    action_hash: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.principal_id, str) or not self.principal_id:
@@ -94,15 +108,37 @@ class ApproverRef:
             raise ValueError("approver kind must be a non-empty string")
         if len(self.principal_id) > MAX_FIELD_CHARS or len(self.kind) > MAX_FIELD_CHARS:
             raise ValueError(f"approver fields exceed {MAX_FIELD_CHARS} characters")
+        if (self.approval_id is None) != (self.action_hash is None):
+            raise ValueError("approval_id and action_hash must be given together")
+        if self.approval_id is not None and (
+            not isinstance(self.approval_id, str) or not self.approval_id
+        ):
+            raise ValueError("approver approval_id must be a non-empty string")
+        if self.action_hash is not None and (
+            not isinstance(self.action_hash, str) or not _HASH.fullmatch(self.action_hash)
+        ):
+            raise ValueError("approver action_hash must be 'sha256:<64 hex>'")
 
     def to_dict(self) -> dict[str, str]:
-        return {"principal_id": self.principal_id, "kind": self.kind}
+        out = {"principal_id": self.principal_id, "kind": self.kind}
+        if self.approval_id is not None and self.action_hash is not None:
+            out["approval_id"] = self.approval_id
+            out["action_hash"] = self.action_hash
+        return out
 
     @classmethod
     def from_dict(cls, data: object) -> ApproverRef:
-        if not isinstance(data, Mapping) or set(data) != {"principal_id", "kind"}:
+        if not isinstance(data, Mapping) or set(data) not in (
+            _APPROVER_KEYS,
+            _APPROVER_KEYS | _APPROVAL_KEYS,
+        ):
             raise ValueError("malformed approver")
-        return cls(data["principal_id"], data["kind"])
+        return cls(
+            data["principal_id"],
+            data["kind"],
+            data.get("approval_id"),
+            data.get("action_hash"),
+        )
 
 
 _FIELDS = (

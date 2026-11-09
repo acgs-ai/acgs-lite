@@ -22,6 +22,7 @@ import warnings
 from collections.abc import Sequence
 
 from acgs_lite.control_plane import receipt_ledger as _ledger_module
+from acgs_lite.control_plane.approvals import SignedApproval
 from acgs_lite.control_plane.context import DecisionRequest
 from acgs_lite.control_plane.evidence import (
     DEFAULT_EVIDENCE_POLICY,
@@ -111,7 +112,14 @@ class PromotionGate:
         candidate_digest: str,
         evidence: Sequence[ExternalRunRef],
         approvers: Sequence[Principal] = (),
+        approvals: Sequence[SignedApproval] = (),
     ) -> SignedControlPlaneReceipt:
+        """Promote *candidate_id*.
+
+        With an ApprovalGate on the PDP, approvers come only from signed
+        ``approvals`` (bound to the promotion's action hash and consumed by
+        the PDP); host-asserted ``approvers=`` are refused.
+        """
         if not isinstance(principal, Principal):
             raise PromotionRejected("principal must be a Principal")
         if not isinstance(candidate_id, str) or not candidate_id.strip():
@@ -122,6 +130,11 @@ class PromotionGate:
         if not all(isinstance(ref, ExternalRunRef) for ref in refs):
             raise PromotionRejected("evidence must be ExternalRunRef objects")
         approver_tuple = tuple(approvers)
+        approval_tuple = tuple(approvals)
+        if approver_tuple and self._pdp.approval_gate is not None:
+            raise PromotionRejected(
+                "host-asserted approvers are not accepted with an ApprovalGate; pass approvals="
+            )
         if not all(isinstance(a, Principal) for a in approver_tuple):
             raise PromotionRejected("approvers must be Principal objects")
         if any(a.canonical_id == principal.canonical_id for a in approver_tuple):
@@ -134,7 +147,7 @@ class PromotionGate:
             raise PromotionRejected("; ".join(problems))
         with self._lock:
             return self._decide_and_record(
-                principal, candidate_id, candidate_digest, refs, approver_tuple
+                principal, candidate_id, candidate_digest, refs, approver_tuple, approval_tuple
             )
 
     def __repr__(self) -> str:
@@ -170,6 +183,7 @@ class PromotionGate:
         candidate_digest: str,
         refs: tuple[ExternalRunRef, ...],
         approver_tuple: tuple[Principal, ...],
+        approval_tuple: tuple[SignedApproval, ...] = (),
     ) -> SignedControlPlaneReceipt:
         reused = self._reused_evidence(candidate_id, refs)
         if reused:
@@ -184,11 +198,21 @@ class PromotionGate:
                 "candidate_digest": candidate_digest,
                 "external_runs": [ref.to_dict() for ref in refs],
             },
+            approvals=approval_tuple,
         )
-        decision = self._pdp.decide(request)
-        if not decision.allowed:
+        decision, decided = self._pdp._decide_attested(request)
+        if not decision.allowed or decided is None:
             raise PromotionRejected(f"PDP denied promotion: {decision.reason}", decision)
+        switch = self._pdp.kill_switch
+        if switch is not None:
+            try:
+                engaged = bool(switch.is_engaged())
+            except Exception:
+                engaged = True
+            if engaged:
+                raise PromotionRejected("kill switch engaged; promotion not performed", decision)
         try:
-            return self._append_promotion(decision, request)
+            # The receipt cites the gate-attested approvers, not host input.
+            return self._append_promotion(decision, decided)
         except ReceiptEmissionError as exc:
             raise PromotionRejected(f"promotion receipt could not be emitted: {exc}") from exc

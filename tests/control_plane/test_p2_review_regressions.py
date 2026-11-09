@@ -80,6 +80,18 @@ assert not blocked.intersection(sys.modules)
     assert result.returncode == 0, result.stderr
 
 
+def test_action_hash_export_stays_callable_after_submodule_import() -> None:
+    code = """
+import acgs_lite.control_plane.action_hash
+from acgs_lite.control_plane import action_hash
+assert callable(action_hash)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.fixture()
 def signer() -> Ed25519ReceiptSigner:
     return Ed25519ReceiptSigner.from_seed(b"\x02" * 32, key_id="harness-2")
