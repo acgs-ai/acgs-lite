@@ -736,7 +736,9 @@ class TestChain:
         def write(path: str, content: str) -> None:
             calls.append(path)
 
-        dispatcher.register("write", write, path_params={"path"}, opaque_params={"content"})
+        dispatcher.register(
+            "write", write, path_params={"path"}, opaque_params={"content"}, merge_capable=False
+        )
         with pytest.raises(ToolDenied) as excinfo:
             dispatcher.dispatch(agent, "write", {"path": "audit/receipts.jsonl", "content": "{}"})
         assert calls == []

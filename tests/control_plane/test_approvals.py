@@ -82,7 +82,9 @@ def _dispatcher(pdp: PolicyDecisionPoint) -> tuple[GovernedToolDispatcher, Calls
     )
     dispatcher = GovernedToolDispatcher(pdp, permissions=permissions, tool_tiers=TIERS)
     for name in TIERS:
-        dispatcher.register(name, calls.tool, path_params={"path"}, opaque_params={"content"})
+        dispatcher.register(
+            name, calls.tool, path_params={"path"}, opaque_params={"content"}, merge_capable=False
+        )
     return dispatcher, calls
 
 

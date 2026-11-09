@@ -90,10 +90,18 @@ def _dispatcher(
         read_only_tools=frozenset({"read_file", "unlisted_reader"}),
     )
     dispatcher.register(
-        "write_file", recorder.write_file, path_params={"path"}, opaque_params={"content"}
+        "write_file",
+        recorder.write_file,
+        path_params={"path"},
+        opaque_params={"content"},
+        merge_capable=False,
     )
     dispatcher.register(
-        "write_many", recorder.write_many, path_params={"paths"}, opaque_params={"meta"}
+        "write_many",
+        recorder.write_many,
+        path_params={"paths"},
+        opaque_params={"meta"},
+        merge_capable=False,
     )
     return dispatcher, recorder
 
@@ -143,7 +151,7 @@ class TestCoreBoundaryViaDispatcher:
         def read_file(path: str) -> str:
             return f"read {path}"
 
-        dispatcher.register("read_file", read_file, path_params={"path"})
+        dispatcher.register("read_file", read_file, path_params={"path"}, merge_capable=False)
         result = dispatcher.dispatch(agent, "read_file", {"path": ".github/workflows/ci.yml"})
         assert result.value == "read .github/workflows/ci.yml"
         assert [d.action for d in result.decisions] == ["tool.call", "file.read"]
@@ -162,7 +170,9 @@ class TestCoreBoundaryViaDispatcher:
         def unlisted_reader(path: str) -> None:
             called.append(path)
 
-        dispatcher.register("unlisted_reader", unlisted_reader, path_params={"path"})
+        dispatcher.register(
+            "unlisted_reader", unlisted_reader, path_params={"path"}, merge_capable=False
+        )
         assert dispatcher.tier_for("unlisted_reader") is ActionTier.T2
         assert not dispatcher.is_read_only("unlisted_reader")
         with pytest.raises(ToolDenied):
@@ -182,7 +192,7 @@ class TestCoreBoundaryViaDispatcher:
         def rm(path: str) -> None:
             ran.append(True)
 
-        dispatcher.register("rm", rm, path_params={"path"})
+        dispatcher.register("rm", rm, path_params={"path"}, merge_capable=False)
         with pytest.raises(ToolDenied) as excinfo:
             dispatcher.dispatch(human, "rm", {"path": "workspace/db"})
         assert "INV-T3-TWO-PERSON" in excinfo.value.decision.determining_policies
@@ -266,26 +276,28 @@ class TestCoreBoundaryViaDispatcher:
             return None
 
         with pytest.raises(ValueError):
-            dispatcher.register("write_file", one, path_params={"path"})
+            dispatcher.register("write_file", one, path_params={"path"}, merge_capable=False)
         with pytest.raises(ValueError):
-            dispatcher.register("", one, path_params={"path"})
+            dispatcher.register("", one, path_params={"path"}, merge_capable=False)
         with pytest.raises(TypeError):
-            dispatcher.register("x", "not callable")  # type: ignore[arg-type]
+            dispatcher.register("x", "not callable", merge_capable=False)  # type: ignore[arg-type]
         for bad in (varkw, varargs):
             with pytest.raises(ValueError):
-                dispatcher.register("bad", bad)
+                dispatcher.register("bad", bad, merge_capable=False)
         with pytest.raises(ValueError):
-            dispatcher.register("bad", posonly, path_params={"path"})
+            dispatcher.register("bad", posonly, path_params={"path"}, merge_capable=False)
         with pytest.raises(ValueError):
-            dispatcher.register("bad", one)  # unclassified parameter
+            dispatcher.register("bad", one, merge_capable=False)  # unclassified parameter
         with pytest.raises(ValueError):
-            dispatcher.register("bad", one, path_params={"path", "ghost"})
+            dispatcher.register("bad", one, path_params={"path", "ghost"}, merge_capable=False)
         with pytest.raises(ValueError):
-            dispatcher.register("bad", one, path_params={"path"}, opaque_params={"path"})
+            dispatcher.register(
+                "bad", one, path_params={"path"}, opaque_params={"path"}, merge_capable=False
+            )
         with pytest.raises(ValueError):
-            dispatcher.register("bad", one, path_params="path")
+            dispatcher.register("bad", one, path_params="path", merge_capable=False)
         with pytest.raises(ValueError):
-            dispatcher.register("bad", one, path_params={""})
+            dispatcher.register("bad", one, path_params={""}, merge_capable=False)
 
     def test_t2_t3_tools_require_an_approval_gate(
         self, constitution: Constitution, permit_all: PolicySet
@@ -301,7 +313,9 @@ class TestCoreBoundaryViaDispatcher:
                 return None
 
             with pytest.raises(ValueError, match="ApprovalGate"):
-                low.register("unlisted", unlisted, path_params={"path"})  # default tier T2
+                low.register(
+                    "unlisted", unlisted, path_params={"path"}, merge_capable=False
+                )  # default tier T2
 
     def test_constructor_requires_matching_permissions(self, pdp: PolicyDecisionPoint) -> None:
         with pytest.raises(TypeError):
@@ -325,7 +339,7 @@ class TestCoreBoundaryViaDispatcher:
         async def async_tool(path: str) -> str:
             return path
 
-        dispatcher.register("async_tool", async_tool, path_params={"path"})
+        dispatcher.register("async_tool", async_tool, path_params={"path"}, merge_capable=False)
         with pytest.raises(TypeError):
             dispatcher.dispatch(agent, "async_tool", {"path": "workspace/x.py"})
 
@@ -339,7 +353,7 @@ class TestAsyncDispatch:
         async def async_tool(path: str) -> str:
             return f"async {path}"
 
-        dispatcher.register("async_tool", async_tool, path_params={"path"})
+        dispatcher.register("async_tool", async_tool, path_params={"path"}, merge_capable=False)
         result = await dispatcher.adispatch(agent, "async_tool", {"path": "workspace/x.py"})
         assert result.value == "async workspace/x.py"
         sync_result = await dispatcher.adispatch(agent, "write_file", {"path": "workspace/y.py"})
@@ -354,7 +368,7 @@ class TestAsyncDispatch:
         async def async_writer(path: str) -> None:
             ran.append(True)
 
-        dispatcher.register("async_writer", async_writer, path_params={"path"})
+        dispatcher.register("async_writer", async_writer, path_params={"path"}, merge_capable=False)
         with pytest.raises(ToolDenied):
             await dispatcher.adispatch(agent, "async_writer", {"path": "evaluator/x.py"})
         assert ran == []

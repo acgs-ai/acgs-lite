@@ -14,7 +14,14 @@ whose file writes go only through :class:`CoreChangeWriter`
 (:mod:`.core_write`). Phase 4: oversight telemetry -- override rate,
 approval latency, verifier precision/recall and post-merge rework, segmented
 agent vs human (:mod:`.telemetry`, :mod:`.telemetry_api`) -- feeding the
-error budget, plus a per-trigger circuit breaker (:mod:`.breaker`).
+error budget, plus a per-trigger circuit breaker (:mod:`.breaker`). Phase 5:
+tiers computed from irreversibility and blast radius (:mod:`.tier_policy`),
+machine-readable runbooks gating T1 (:mod:`.runbook`), explicit roles
+(:mod:`.roles`), single writer per change (:mod:`.change_ownership`), a
+deterministic evaluator outside mutation scope (:mod:`.evaluator`), an
+independent artifact-anchored verifier (:mod:`.verifier`), the incident
+mutation lock (:mod:`.incident`) and one wiring constructor
+(:mod:`.facade`); :mod:`.demo_loop` is the self-improvement demo.
 
 Mutating agents must never be able to write to the things that judge them.
 The immutable core is protected twice, by independent code paths:
@@ -68,6 +75,7 @@ if TYPE_CHECKING:
         BudgetState,
     )
     from acgs_lite.control_plane.change_class import ChangeClass, classify_change
+    from acgs_lite.control_plane.change_ownership import ChangeOwnershipRegistry, OwnershipDenied
     from acgs_lite.control_plane.context import (
         READ_ONLY_ACTIONS,
         WRITE_VERBS,
@@ -83,6 +91,11 @@ if TYPE_CHECKING:
         ScopedCredential,
     )
     from acgs_lite.control_plane.dispatcher import GovernedToolDispatcher, ToolDenied, ToolResult
+    from acgs_lite.control_plane.evaluator import (
+        DeterministicEvaluator,
+        EvaluationResult,
+        EvaluatorService,
+    )
     from acgs_lite.control_plane.evidence import (
         DEFAULT_EVIDENCE_POLICY,
         CompositeRunVerifier,
@@ -95,11 +108,30 @@ if TYPE_CHECKING:
         RunValidation,
         TrustedRunRegistry,
     )
+    from acgs_lite.control_plane.facade import (
+        ControlPlane,
+        ControlPlaneConfig,
+        ControlPlaneConfigError,
+        build_control_plane,
+    )
     from acgs_lite.control_plane.iam import (
         IAMGrantRejected,
         RepositoryPermissions,
         WriteGrant,
         render_codeowners,
+    )
+    from acgs_lite.control_plane.identity import (
+        ADMIN_SCOPE,
+        AdminAttestationFailed,
+        AdminAttestor,
+        HumanAuthenticationFailed,
+        HumanAuthenticator,
+        HumanChallenge,
+        IdentityDirectoryError,
+        IdentityEntry,
+        IdentityProvider,
+        StaticIdentityDirectory,
+        VerifiedHumanSession,
     )
     from acgs_lite.control_plane.immutable_core import (
         DEFAULT_IMMUTABLE_CORE,
@@ -108,6 +140,7 @@ if TYPE_CHECKING:
         ImmutableCoreRegistry,
         normalize_path,
     )
+    from acgs_lite.control_plane.incident import IncidentLockError, IncidentMutationLock
     from acgs_lite.control_plane.invariants import CONSTITUTION_INVARIANTS
     from acgs_lite.control_plane.killswitch import KillSwitch, KillSwitchOperationRejected
     from acgs_lite.control_plane.pdp import (
@@ -143,6 +176,19 @@ if TYPE_CHECKING:
         ReceiptKind,
         SignedControlPlaneReceipt,
     )
+    from acgs_lite.control_plane.roles import Role, RoleAssignments, RoleConflict
+    from acgs_lite.control_plane.runbook import (
+        Runbook,
+        RunbookDenied,
+        RunbookRegistry,
+        RunbookRejected,
+        runbook_hash,
+        runbook_json_schema,
+    )
+    from acgs_lite.control_plane.service import (
+        ControlPlaneService,
+        ControlPlaneServiceError,
+    )
     from acgs_lite.control_plane.telemetry import (
         AgentTelemetryRejected,
         InMemoryTelemetryStore,
@@ -153,7 +199,20 @@ if TYPE_CHECKING:
         TelemetryRecorder,
         TelemetryStore,
     )
+    from acgs_lite.control_plane.tier_policy import (
+        ActionProfile,
+        PostHocReviewItem,
+        ReviewQueue,
+        classify_tier,
+    )
     from acgs_lite.control_plane.tiers import ActionTier
+    from acgs_lite.control_plane.verifier import (
+        IndependentVerifier,
+        ReplayVerifier,
+        VerifierPolicy,
+        VerifierRejected,
+        VerifierVerdict,
+    )
 
 # Keep independent receipt verification importable without the issuer.
 _LAZY_EXPORTS = {
@@ -182,6 +241,8 @@ _LAZY_EXPORTS = {
     "BudgetState": "acgs_lite.control_plane.budgets",
     "ChangeClass": "acgs_lite.control_plane.change_class",
     "classify_change": "acgs_lite.control_plane.change_class",
+    "ChangeOwnershipRegistry": "acgs_lite.control_plane.change_ownership",
+    "OwnershipDenied": "acgs_lite.control_plane.change_ownership",
     "READ_ONLY_ACTIONS": "acgs_lite.control_plane.context",
     "WRITE_VERBS": "acgs_lite.control_plane.context",
     "DecisionContext": "acgs_lite.control_plane.context",
@@ -196,6 +257,9 @@ _LAZY_EXPORTS = {
     "GovernedToolDispatcher": "acgs_lite.control_plane.dispatcher",
     "ToolDenied": "acgs_lite.control_plane.dispatcher",
     "ToolResult": "acgs_lite.control_plane.dispatcher",
+    "DeterministicEvaluator": "acgs_lite.control_plane.evaluator",
+    "EvaluationResult": "acgs_lite.control_plane.evaluator",
+    "EvaluatorService": "acgs_lite.control_plane.evaluator",
     "DEFAULT_EVIDENCE_POLICY": "acgs_lite.control_plane.evidence",
     "CompositeRunVerifier": "acgs_lite.control_plane.evidence",
     "EvidencePolicy": "acgs_lite.control_plane.evidence",
@@ -206,15 +270,32 @@ _LAZY_EXPORTS = {
     "RunRegistrationRejected": "acgs_lite.control_plane.evidence",
     "RunValidation": "acgs_lite.control_plane.evidence",
     "TrustedRunRegistry": "acgs_lite.control_plane.evidence",
+    "ControlPlane": "acgs_lite.control_plane.facade",
+    "ControlPlaneConfig": "acgs_lite.control_plane.facade",
+    "ControlPlaneConfigError": "acgs_lite.control_plane.facade",
+    "build_control_plane": "acgs_lite.control_plane.facade",
     "IAMGrantRejected": "acgs_lite.control_plane.iam",
     "RepositoryPermissions": "acgs_lite.control_plane.iam",
     "WriteGrant": "acgs_lite.control_plane.iam",
     "render_codeowners": "acgs_lite.control_plane.iam",
+    "ADMIN_SCOPE": "acgs_lite.control_plane.identity",
+    "AdminAttestationFailed": "acgs_lite.control_plane.identity",
+    "AdminAttestor": "acgs_lite.control_plane.identity",
+    "HumanAuthenticationFailed": "acgs_lite.control_plane.identity",
+    "HumanAuthenticator": "acgs_lite.control_plane.identity",
+    "HumanChallenge": "acgs_lite.control_plane.identity",
+    "IdentityDirectoryError": "acgs_lite.control_plane.identity",
+    "IdentityEntry": "acgs_lite.control_plane.identity",
+    "IdentityProvider": "acgs_lite.control_plane.identity",
+    "StaticIdentityDirectory": "acgs_lite.control_plane.identity",
+    "VerifiedHumanSession": "acgs_lite.control_plane.identity",
     "DEFAULT_IMMUTABLE_CORE": "acgs_lite.control_plane.immutable_core",
     "CoreCategory": "acgs_lite.control_plane.immutable_core",
     "ImmutableCoreError": "acgs_lite.control_plane.immutable_core",
     "ImmutableCoreRegistry": "acgs_lite.control_plane.immutable_core",
     "normalize_path": "acgs_lite.control_plane.immutable_core",
+    "IncidentLockError": "acgs_lite.control_plane.incident",
+    "IncidentMutationLock": "acgs_lite.control_plane.incident",
     "CONSTITUTION_INVARIANTS": "acgs_lite.control_plane.invariants",
     "KillSwitch": "acgs_lite.control_plane.killswitch",
     "KillSwitchOperationRejected": "acgs_lite.control_plane.killswitch",
@@ -245,6 +326,17 @@ _LAZY_EXPORTS = {
     "ControlPlaneReceipt": "acgs_lite.control_plane.receipts",
     "ReceiptKind": "acgs_lite.control_plane.receipts",
     "SignedControlPlaneReceipt": "acgs_lite.control_plane.receipts",
+    "Role": "acgs_lite.control_plane.roles",
+    "RoleAssignments": "acgs_lite.control_plane.roles",
+    "RoleConflict": "acgs_lite.control_plane.roles",
+    "Runbook": "acgs_lite.control_plane.runbook",
+    "RunbookDenied": "acgs_lite.control_plane.runbook",
+    "RunbookRegistry": "acgs_lite.control_plane.runbook",
+    "RunbookRejected": "acgs_lite.control_plane.runbook",
+    "runbook_hash": "acgs_lite.control_plane.runbook",
+    "runbook_json_schema": "acgs_lite.control_plane.runbook",
+    "ControlPlaneService": "acgs_lite.control_plane.service",
+    "ControlPlaneServiceError": "acgs_lite.control_plane.service",
     "AgentTelemetryRejected": "acgs_lite.control_plane.telemetry",
     "InMemoryTelemetryStore": "acgs_lite.control_plane.telemetry",
     "JSONLTelemetryStore": "acgs_lite.control_plane.telemetry",
@@ -253,7 +345,16 @@ _LAZY_EXPORTS = {
     "TelemetryAutonomyBridge": "acgs_lite.control_plane.telemetry",
     "TelemetryRecorder": "acgs_lite.control_plane.telemetry",
     "TelemetryStore": "acgs_lite.control_plane.telemetry",
+    "ActionProfile": "acgs_lite.control_plane.tier_policy",
+    "PostHocReviewItem": "acgs_lite.control_plane.tier_policy",
+    "ReviewQueue": "acgs_lite.control_plane.tier_policy",
+    "classify_tier": "acgs_lite.control_plane.tier_policy",
     "ActionTier": "acgs_lite.control_plane.tiers",
+    "IndependentVerifier": "acgs_lite.control_plane.verifier",
+    "ReplayVerifier": "acgs_lite.control_plane.verifier",
+    "VerifierPolicy": "acgs_lite.control_plane.verifier",
+    "VerifierRejected": "acgs_lite.control_plane.verifier",
+    "VerifierVerdict": "acgs_lite.control_plane.verifier",
 }
 
 
@@ -271,15 +372,11 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
-    "CONSTITUTION_INVARIANTS",
-    "DEFAULT_EVIDENCE_POLICY",
-    "DEFAULT_IMMUTABLE_CORE",
-    "DEFAULT_QUORUM_POLICIES",
-    "DEFAULT_RECEIPT_STORE_PATH",
-    "GENESIS_RECEIPT_HASH",
-    "READ_ONLY_ACTIONS",
-    "WRITE_VERBS",
+    "ActionProfile",
     "ActionTier",
+    "ADMIN_SCOPE",
+    "AdminAttestationFailed",
+    "AdminAttestor",
     "AgentTelemetryRejected",
     "ApprovalAuthority",
     "ApprovalGate",
@@ -297,48 +394,75 @@ __all__ = [
     "BudgetLedger",
     "BudgetLimits",
     "BudgetState",
+    "CONSTITUTION_INVARIANTS",
     "ChangeClass",
+    "ChangeOwnershipRegistry",
     "CompositeRunVerifier",
+    "ControlPlane",
+    "ControlPlaneConfig",
+    "ControlPlaneConfigError",
     "ControlPlaneReceipt",
+    "ControlPlaneService",
+    "ControlPlaneServiceError",
+    "CoreCategory",
     "CoreChangeWriter",
     "CoreWriteRejected",
-    "CoreCategory",
     "CredentialInvalid",
     "CredentialIssuanceRefused",
     "CredentialIssuer",
+    "DEFAULT_EVIDENCE_POLICY",
+    "DEFAULT_IMMUTABLE_CORE",
+    "DEFAULT_QUORUM_POLICIES",
+    "DEFAULT_RECEIPT_STORE_PATH",
     "Decision",
     "DecisionContext",
     "DecisionRequest",
+    "DeterministicEvaluator",
     "ErrorBudget",
+    "EvaluationResult",
+    "EvaluatorService",
     "EvidencePolicy",
     "EvidenceSource",
     "ExternalRunRef",
     "ExternalRunVerifier",
     "FailureKind",
+    "GENESIS_RECEIPT_HASH",
     "GitHubActionsRunVerifier",
     "GovernedToolDispatcher",
+    "HumanAuthenticationFailed",
+    "HumanAuthenticator",
+    "HumanChallenge",
     "IAMGrantRejected",
+    "IdentityDirectoryError",
+    "IdentityEntry",
+    "IdentityProvider",
     "ImmutableCoreError",
     "ImmutableCoreRegistry",
     "InMemoryReceiptStore",
     "InMemoryTelemetryStore",
+    "IncidentLockError",
+    "IncidentMutationLock",
+    "IndependentVerifier",
     "JSONLReceiptStore",
     "JSONLTelemetryStore",
     "KillSwitch",
     "KillSwitchOperationRejected",
     "OversightEvent",
     "OversightMetrics",
+    "OwnershipDenied",
     "PolicyDecisionPoint",
     "PolicyEffect",
     "PolicyParseError",
     "PolicySet",
     "PolicyStatement",
+    "PostHocReviewItem",
     "Principal",
     "PrincipalKind",
     "PromotionGate",
     "PromotionRejected",
     "QuorumPolicy",
     "QuorumResult",
+    "READ_ONLY_ACTIONS",
     "ReceiptCapabilityError",
     "ReceiptConflict",
     "ReceiptEmissionError",
@@ -347,12 +471,22 @@ __all__ = [
     "ReceiptStore",
     "ReceiptStoreCorrupted",
     "ReceiptVerification",
+    "ReplayVerifier",
     "RepositoryPermissions",
+    "ReviewQueue",
+    "Role",
+    "RoleAssignments",
+    "RoleConflict",
     "RunRegistrationRejected",
     "RunValidation",
+    "Runbook",
+    "RunbookDenied",
+    "RunbookRegistry",
+    "RunbookRejected",
     "ScopedCredential",
     "SignedApproval",
     "SignedControlPlaneReceipt",
+    "StaticIdentityDirectory",
     "TelemetryAutonomyBridge",
     "TelemetryRecorder",
     "TelemetryStore",
@@ -360,12 +494,21 @@ __all__ = [
     "ToolResult",
     "TriggerCircuitBreaker",
     "TrustedRunRegistry",
+    "VerifiedHumanSession",
+    "VerifierPolicy",
+    "VerifierRejected",
+    "VerifierVerdict",
+    "WRITE_VERBS",
     "WriteGrant",
     "action_hash",
+    "build_control_plane",
     "classify_change",
+    "classify_tier",
     "is_write_action",
     "normalize_path",
     "render_codeowners",
+    "runbook_hash",
+    "runbook_json_schema",
     "verify_chain",
     "verify_receipt",
 ]

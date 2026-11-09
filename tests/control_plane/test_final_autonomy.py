@@ -57,7 +57,10 @@ async def test_final_admission_rechecks_autonomy_without_recharging(
         autonomy=autonomy,
     )
     dispatcher.register(
-        "write", awrite if mode == "async_coroutine" else write, path_params={"path"}
+        "write",
+        awrite if mode == "async_coroutine" else write,
+        path_params={"path"},
+        merge_capable=False,
     )
     original = dispatcher._authorize
 
@@ -108,7 +111,7 @@ async def test_coroutine_body_rechecks_demotion_after_worker(
         tool_tiers={"write": ActionTier.T1},
         autonomy=autonomy,
     )
-    dispatcher.register("write", write, path_params={"path"})
+    dispatcher.register("write", write, path_params={"path"}, merge_capable=False)
     original = asyncio.to_thread
 
     async def demote_after_worker(fn: Any, *args: Any, **kwargs: Any) -> Any:

@@ -55,7 +55,10 @@ from acgs_lite.legitimacy.signing import SIGNATURE_ALGORITHM, ReceiptSigner, ver
 
 if TYPE_CHECKING:
     import acgs_lite.control_plane.action_hash as action_hash_module
+    import acgs_lite.control_plane.identity as identity_types
     import acgs_lite.control_plane.telemetry as telemetry_types
+
+    AdminAttestor: TypeAlias = "identity_types.AdminAttestor"
 
     OversightEvent: TypeAlias = "telemetry_types.OversightEvent"
     TelemetryRecorder: TypeAlias = "telemetry_types.TelemetryRecorder"
@@ -241,11 +244,14 @@ class ApprovalAuthority:
     the admin. The agent process must never hold a reference to this object.
     """
 
-    # TODO(control-plane-gap): the admin Principal itself is host-asserted;
-    # binding admin actions to an authenticated session (or a signed admin
-    # key) is a later phase.
+    # Phase 6a: with *admin_attestor* (the facade always wires one) every
+    # admin call must also carry ``admin_credential=``, a verified HUMAN
+    # credential of the directory admin; without it the admin is host-asserted.
 
-    def __init__(self) -> None:
+    def __init__(self, *, admin_attestor: AdminAttestor | None = None) -> None:
+        from acgs_lite.control_plane.identity import checked_attestor
+
+        self._attestor = checked_attestor(admin_attestor)
         self._lock = threading.Lock()
         self._keys: dict[str, _ApproverKey] = {}
         self._key_owner: dict[str, str] = {}
@@ -258,10 +264,21 @@ class ApprovalAuthority:
         public_key_hex: str,
         *,
         key_id: str | None = None,
+        admin_credential: str | None = None,
     ) -> str:
         """Register *approver*'s Ed25519 public key; returns its key id."""
         _require_human(admin, "admin")
+        self._attest(admin, admin_credential)
         _require_human(approver, "approver")
+        if self._attestor is not None:
+            # Phase 6a: the approver must be exactly its directory entry.
+            entry = self._attestor.identity.lookup(approver.id)
+            if entry is None or entry.principal() != Principal(
+                entry.id, approver.kind, approver.system_id, approver.roles
+            ):
+                raise ApprovalRegistrationRejected(
+                    "approver must match its identity directory entry (kind, system_id, roles)"
+                )
         if admin.canonical_id == approver.canonical_id:
             raise ApprovalRegistrationRejected("an admin cannot register their own approver key")
         if not isinstance(public_key_hex, str) or not _PUBLIC_KEY.fullmatch(public_key_hex):
@@ -285,8 +302,15 @@ class ApprovalAuthority:
             self._key_owner[public_key_hex] = approver.canonical_id
         return kid
 
-    def revoke_approver(self, admin: Principal, key_id: str) -> bool:
+    def _attest(self, admin: Principal, credential: str | None) -> None:
+        if self._attestor is not None:
+            self._attestor.require(admin, credential, error=ApprovalRegistrationRejected)
+
+    def revoke_approver(
+        self, admin: Principal, key_id: str, *, admin_credential: str | None = None
+    ) -> bool:
         _require_human(admin, "admin")
+        self._attest(admin, admin_credential)
         with self._lock:
             entry = self._keys.pop(key_id, None)
             if entry is None:
@@ -295,13 +319,16 @@ class ApprovalAuthority:
                 self._key_owner.pop(entry.public_key_hex, None)
             return True
 
-    def register_system_member(self, admin: Principal, member: Principal) -> None:
+    def register_system_member(
+        self, admin: Principal, member: Principal, *, admin_credential: str | None = None
+    ) -> None:
         """Record *member* (an agent or service) as part of its ``system_id``.
 
         Members of a system never count as approvers for any agent of that
         system (sibling exclusion), even under a different principal kind.
         """
         _require_human(admin, "admin")
+        self._attest(admin, admin_credential)
         if not isinstance(member, Principal) or member.system_id is None:
             raise ApprovalRegistrationRejected("member must be a Principal with a system_id")
         if member.kind is PrincipalKind.HUMAN:

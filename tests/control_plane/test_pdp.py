@@ -170,6 +170,8 @@ class TestInvariants:
             "INV-APPROVAL-QUORUM",
             "INV-AGENT-REQUESTED-BY",
             "INV-HUMAN-ONLY-CHANGE-CLASS",
+            "INV-AGENT-NO-MERGE",
+            "INV-TIER-FLOOR",
         ]
         assert all(s.effect is PolicyEffect.FORBID for s in CONSTITUTION_INVARIANTS)
 

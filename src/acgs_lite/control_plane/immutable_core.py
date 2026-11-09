@@ -570,6 +570,9 @@ DEFAULT_IMMUTABLE_CORE = ImmutableCoreRegistry(
         CoreCategory.POLICY: (
             "policies/**",
             "policy/**",
+            # Phase 5: runbooks pre-authorise T1 actions, so they are policy
+            # (POLICY precedes CONTROL_PLANE, so this wins over control-plane/**).
+            "control-plane/runbooks/**",
             "**/constitution*.yaml",
             "**/constitution*.yml",
             "**/constitution*.json",

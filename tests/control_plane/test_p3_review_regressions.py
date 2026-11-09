@@ -64,7 +64,7 @@ def test_credentialed_t2_call_cannot_supply_an_unbound_requester(
             credential_issuer=issuer,
             require_credential=True,
         )
-        dispatcher.register("edit", lambda: calls.append("ran"))
+        dispatcher.register("edit", lambda: calls.append("ran"), merge_capable=False)
         digest = dispatcher.action_hash_for(agent, "edit", {}, requested_by="decoy")
         approval = approver_factory("bob")(digest)
         with pytest.raises(ToolDenied, match="not bound to an original requester"):
@@ -240,7 +240,9 @@ class TestDispatcherChecksBothSwitches:
                 tool_tiers={"write": ActionTier.T1},
                 kill_switch=dispatcher_switch,
             )
-            d.register("write", lambda path: calls.append(path), path_params={"path"})
+            d.register(
+                "write", lambda path: calls.append(path), path_params={"path"}, merge_capable=False
+            )
             with pytest.raises(ToolDenied, match="kill switch"):
                 d.dispatch(ALICE, "write", {"path": "workspace/a.py"})
         assert calls == []

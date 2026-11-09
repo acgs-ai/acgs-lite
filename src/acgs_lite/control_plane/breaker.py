@@ -50,11 +50,15 @@ import time
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from acgs_lite._compat import StrEnum
 from acgs_lite.audit import AuditEntry, AuditLog
 from acgs_lite.control_plane.autonomy import AutonomyController
 from acgs_lite.control_plane.principal import Principal, PrincipalKind
+
+if TYPE_CHECKING:
+    from acgs_lite.control_plane.identity import AdminAttestor
 from acgs_lite.control_plane.telemetry import (
     OversightEvent,
     Rollback,
@@ -105,10 +109,14 @@ class TriggerRegistry:
     """Harness-side map trigger_id -> principals / system cohorts allowed to
     act under it. The agent process must never hold a reference to it."""
 
-    # TODO(control-plane-gap): the admin Principal is host-asserted and the
-    # bindings (and system_id pins, which outlive unbind) live in memory.
+    # TODO(control-plane-gap): the bindings (and system_id pins, which
+    # outlive unbind) live in memory. Phase 6a: with *admin_attestor* every
+    # bind/unbind must carry a verified HUMAN admin ``admin_credential=``.
 
-    def __init__(self) -> None:
+    def __init__(self, *, admin_attestor: AdminAttestor | None = None) -> None:
+        from acgs_lite.control_plane.identity import checked_attestor
+
+        self._attestor = checked_attestor(admin_attestor)
         self._lock = threading.Lock()
         self._principals: dict[str, dict[str, Principal]] = {}
         self._systems: dict[str, set[str]] = {}
@@ -124,8 +132,10 @@ class TriggerRegistry:
         *,
         principals: Iterable[Principal] = (),
         system_ids: Iterable[str] = (),
+        admin_credential: str | None = None,
     ) -> None:
         _require_human(admin)
+        self._attest(admin, admin_credential)
         if not valid_trigger_id(trigger_id):
             raise TriggerBindingRejected("invalid trigger_id")
         members = tuple(principals)
@@ -153,8 +163,15 @@ class TriggerRegistry:
                 bound[member.canonical_id] = member
             self._systems.setdefault(trigger_id, set()).update(systems)
 
-    def unbind(self, admin: Principal, trigger_id: str) -> None:
+    def _attest(self, admin: Principal, credential: str | None) -> None:
+        if self._attestor is not None:
+            self._attestor.require(admin, credential, error=TriggerBindingRejected)
+
+    def unbind(
+        self, admin: Principal, trigger_id: str, *, admin_credential: str | None = None
+    ) -> None:
         _require_human(admin)
+        self._attest(admin, admin_credential)
         with self._lock:
             self._principals.pop(trigger_id, None)
             self._systems.pop(trigger_id, None)
@@ -312,7 +329,11 @@ class TriggerCircuitBreaker:
         audit_log: AuditLog | None = None,
         durable_audit: bool = True,
         clock: Callable[[], float] = time.time,
+        admin_attestor: AdminAttestor | None = None,
     ) -> None:
+        from acgs_lite.control_plane.identity import checked_attestor
+
+        self._attestor = checked_attestor(admin_attestor)
         policy = BreakerPolicy() if policy is None else policy
         if not isinstance(policy, BreakerPolicy):
             raise TypeError("policy must be a BreakerPolicy")
@@ -551,7 +572,9 @@ class TriggerCircuitBreaker:
             return True
         return False
 
-    def reset(self, admin: Principal, trigger_id: str) -> None:
+    def reset(
+        self, admin: Principal, trigger_id: str, *, admin_credential: str | None = None
+    ) -> None:
         """Close the breaker and clear its windows. HUMAN only.
 
         It does not restore demoted agents; use
@@ -559,6 +582,8 @@ class TriggerCircuitBreaker:
         """
         if not isinstance(admin, Principal) or admin.kind is not PrincipalKind.HUMAN:
             raise BreakerResetRejected("only a HUMAN may reset a trigger circuit breaker")
+        if self._attestor is not None:
+            self._attestor.require(admin, admin_credential, error=BreakerResetRejected)
         if not valid_trigger_id(trigger_id):
             raise ValueError("invalid trigger_id")
         with self._lock:

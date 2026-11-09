@@ -29,6 +29,7 @@ import secrets
 import stat
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from acgs_lite.control_plane.approvals import SignedApproval
 from acgs_lite.control_plane.context import DecisionRequest
@@ -36,6 +37,9 @@ from acgs_lite.control_plane.immutable_core import CoreCategory
 from acgs_lite.control_plane.pdp import Decision, PolicyDecisionPoint
 from acgs_lite.control_plane.principal import Principal
 from acgs_lite.control_plane.tiers import ActionTier
+
+if TYPE_CHECKING:
+    from acgs_lite.control_plane.incident import IncidentMutationLock
 
 __all__ = ["CONTENT_DIGEST_SOURCE", "CoreChangeWriter", "CoreWriteRejected"]
 
@@ -58,9 +62,22 @@ def content_digest(content: bytes) -> str:
 class CoreChangeWriter:
     """Harness-owned writer for immutable-core files (one per PDP)."""
 
-    def __init__(self, pdp: PolicyDecisionPoint, *, tier: ActionTier = ActionTier.T2) -> None:
+    def __init__(
+        self,
+        pdp: PolicyDecisionPoint,
+        *,
+        tier: ActionTier = ActionTier.T2,
+        incident_lock: IncidentMutationLock | None = None,
+    ) -> None:
         if not isinstance(pdp, PolicyDecisionPoint):
             raise TypeError("pdp must be a PolicyDecisionPoint")
+        if incident_lock is not None:
+            from acgs_lite.control_plane.incident import IncidentMutationLock
+
+            if type(incident_lock) is not IncidentMutationLock:
+                raise TypeError("incident_lock must be an IncidentMutationLock")
+        # Phase 5: during an incident only the lock holder may change the core.
+        self._incident_lock = incident_lock
         root = pdp.registry.repo_root
         if root is None:
             raise ValueError("CoreChangeWriter needs a registry with repo_root")
@@ -149,45 +166,70 @@ class CoreChangeWriter:
         root = os.path.realpath(self._root)
         if not probe.startswith(root + os.sep) or (self._root / normalized).is_symlink():
             raise CoreWriteRejected(f"path {path!r} escapes the root or is a symlink")
+        if self._incident_lock is not None:
+            denial = self._incident_lock.write_denial(principal)
+            if denial is not None:
+                raise CoreWriteRejected(f"incident: {denial}")
         decision = self._decide(request)
         if not decision.allowed:
             raise CoreWriteRejected(f"core change denied: {decision.reason}", decision)
         self._require_not_halted(decision)
+        # Hold the incident lock from the re-check through os.replace, so a
+        # declare/transfer cannot land between the check and the commit.
+        guard = (
+            self._incident_lock._locked()
+            if self._incident_lock is not None
+            else contextlib.nullcontext()
+        )
+        from acgs_lite.control_plane.incident import IncidentLockError
+
         try:
-            dir_fd = _open_parent(root, parents)
-        except OSError as exc:
-            raise CoreWriteRejected(
-                f"core write failed: parent of {path!r} is not a plain directory "
-                f"({type(exc).__name__})",
-                decision,
-            ) from exc
-        try:
-            mode = _target_mode(dir_fd, name, self._pdp.registry.categories(normalized))
-            tmp = f".core-write-{secrets.token_hex(8)}"
-            fd = os.open(
-                tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600, dir_fd=dir_fd
-            )
-            try:
-                with os.fdopen(fd, "wb") as handle:
-                    handle.write(content)
-                    handle.flush()
-                    os.fchmod(handle.fileno(), mode)
-                    os.fsync(handle.fileno())
-                # Last moment before the change becomes visible.
-                self._require_not_halted(decision)
-                os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
-            except BaseException:
-                with contextlib.suppress(FileNotFoundError):
-                    os.unlink(tmp, dir_fd=dir_fd)
-                raise
-            os.fsync(dir_fd)
-        except OSError as exc:
-            # TODO(control-plane-gap): the allow is already receipted and the
-            # approvals consumed; a failed write leaves no partial file but is
-            # not itself receipted.
-            raise CoreWriteRejected(f"core write failed: {type(exc).__name__}", decision) from exc
-        finally:
-            os.close(dir_fd)
+            with guard:
+                if self._incident_lock is not None:
+                    # Re-check: the decision's listeners may have declared an
+                    # incident or moved the holder.
+                    denial = self._incident_lock.write_denial(principal)
+                    if denial is not None:
+                        raise CoreWriteRejected(f"incident: {denial}", decision)
+                try:
+                    dir_fd = _open_parent(root, parents)
+                except OSError as exc:
+                    raise CoreWriteRejected(
+                        f"core write failed: parent of {path!r} is not a plain directory "
+                        f"({type(exc).__name__})",
+                        decision,
+                    ) from exc
+                try:
+                    mode = _target_mode(dir_fd, name, self._pdp.registry.categories(normalized))
+                    tmp = f".core-write-{secrets.token_hex(8)}"
+                    fd = os.open(
+                        tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600, dir_fd=dir_fd
+                    )
+                    try:
+                        with os.fdopen(fd, "wb") as handle:
+                            handle.write(content)
+                            handle.flush()
+                            os.fchmod(handle.fileno(), mode)
+                            os.fsync(handle.fileno())
+                        # Last moment before the change becomes visible.
+                        self._require_not_halted(decision)
+                        os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+                    except BaseException:
+                        with contextlib.suppress(FileNotFoundError):
+                            os.unlink(tmp, dir_fd=dir_fd)
+                        raise
+                    os.fsync(dir_fd)
+                except OSError as exc:
+                    # TODO(control-plane-gap): the allow is already receipted and the
+                    # approvals consumed; a failed write leaves no partial file but is
+                    # not itself receipted.
+                    raise CoreWriteRejected(
+                        f"core write failed: {type(exc).__name__}", decision
+                    ) from exc
+                finally:
+                    os.close(dir_fd)
+        except IncidentLockError as exc:
+            raise CoreWriteRejected(f"incident lock unavailable: {exc}", decision) from exc
         return decision
 
     def _require_not_halted(self, decision: Decision) -> None:
