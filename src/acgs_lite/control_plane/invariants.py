@@ -29,13 +29,13 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+import acgs_lite.control_plane.change_ownership as ownership_module
 from acgs_lite.control_plane.action_hash import approval_subject
 from acgs_lite.control_plane.change_class import (
     CORE_HUMAN_ONLY_CATEGORIES,
     ChangeClass,
     classify_category,
 )
-from acgs_lite.control_plane.change_ownership import AGENT_NO_MERGE_ACTIONS
 from acgs_lite.control_plane.context import DecisionContext, DecisionRequest, is_write_action
 from acgs_lite.control_plane.immutable_core import CoreCategory, ImmutableCoreRegistry
 from acgs_lite.control_plane.policy import PolicyEffect, PolicyStatement
@@ -272,7 +272,7 @@ def _merge_by_non_human(ctx: DecisionContext) -> bool:
     flagged = request.attributes.get("merge_capable") is True or (
         isinstance(tool_call, Mapping) and tool_call.get("merge_capable") is True
     )
-    return flagged or bool(names & AGENT_NO_MERGE_ACTIONS)
+    return flagged or bool(names & ownership_module.AGENT_NO_MERGE_ACTIONS)
 
 
 _PROFILE_KEYS = frozenset(

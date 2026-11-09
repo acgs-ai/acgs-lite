@@ -39,6 +39,7 @@ from acgs_lite.control_plane.principal import Principal, PrincipalKind
 from acgs_lite.control_plane.tiers import ActionTier
 
 if TYPE_CHECKING:
+    from acgs_lite.control_plane.identity import AdminAttestor
     from acgs_lite.control_plane.runbook import Runbook
 
 __all__ = [
@@ -194,6 +195,9 @@ class ReviewQueue:
 
     sla_s: float = DEFAULT_REVIEW_SLA_S
     clock: Callable[[], float] = time.time
+    admin_attestor: AdminAttestor | None = None
+    """Phase 6a: when set, :meth:`resolve` needs the reviewer's verified
+    single-use HUMAN ``admin_credential=`` (any directory human)."""
     _items: dict[str, PostHocReviewItem] = field(default_factory=dict, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
@@ -219,11 +223,25 @@ class ReviewQueue:
             self._items[item.item_id] = item
         return item
 
+    def __post_init__(self) -> None:
+        from acgs_lite.control_plane.identity import checked_attestor
+
+        checked_attestor(self.admin_attestor)
+
     def resolve(
-        self, reviewer: Principal, item_id: str, outcome: ReviewOutcome | str
+        self,
+        reviewer: Principal,
+        item_id: str,
+        outcome: ReviewOutcome | str,
+        *,
+        admin_credential: str | None = None,
     ) -> PostHocReviewItem:
         if not isinstance(reviewer, Principal) or reviewer.kind is not PrincipalKind.HUMAN:
             raise PermissionError("only a HUMAN reviewer may resolve post-hoc review items")
+        if self.admin_attestor is not None:
+            self.admin_attestor.require(
+                reviewer, admin_credential, admin_only=False, error=PermissionError
+            )
         verdict = ReviewOutcome(outcome)
         with self._lock:
             item = self._items.get(item_id)

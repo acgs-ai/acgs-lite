@@ -36,7 +36,9 @@ the agent: the :class:`~.killswitch.KillSwitch` (engaged or unreadable ->
 deny everything, T0 included); an optional short-TTL scoped credential
 (``require_credential=True``: a token from the harness's
 :class:`~.credentials.CredentialIssuer` whose principal matches and whose
-scopes include ``tool:<name>``); resource budgets (one iteration charged per
+scopes include ``tool:<name>``; Phase 6a: with a directory-backed issuer the
+credential is verified first, its signed kind and system_id must equal the
+passed principal's, and they are the ones every later check sees); resource budgets (one iteration charged per
 dispatch; exhausted -> deny, or with an autonomy controller -> demotion); and
 the :class:`~.autonomy.AutonomyController` level (P0_ONLY -> read-only T0
 tools only, SUSPENDED -> nothing). T2/T3 tools need an
@@ -153,6 +155,7 @@ __all__ = [
     "GovernedToolDispatcher",
     "ToolDenied",
     "backup_subject_digest",
+    "opaque_ref",
     "ToolResult",
 ]
 
@@ -177,6 +180,12 @@ _SCALARS = (bool, int, float, type(None))
 _SHELL_SPLIT = re.compile(r"[\s;&|<>()`'\"=$,{}]+")
 
 
+def opaque_ref(decision: Decision) -> str:
+    """The reference an agent may see for a denial (a decision-id prefix);
+    the reason itself goes only to the audit log and the receipt."""
+    return decision.decision_id[:12]
+
+
 class ToolDenied(Exception):
     """Raised instead of invoking a tool. ``decision`` is the first denial."""
 
@@ -184,6 +193,11 @@ class ToolDenied(Exception):
         super().__init__(decision.reason)
         self.decision = decision
         self.decisions = decisions or (decision,)
+
+    @property
+    def ref(self) -> str:
+        """:func:`opaque_ref` of the first denial (safe to show the agent)."""
+        return opaque_ref(self.decision)
 
 
 @dataclass(frozen=True)
@@ -445,6 +459,11 @@ class GovernedToolDispatcher:
         self._kill_switch = kill_switch if kill_switch is not None else pdp.kill_switch
         self._credentials = credential_issuer
         self._require_credential = bool(require_credential)
+        self._attests_identity = (
+            self._require_credential
+            and credential_issuer is not None
+            and credential_issuer.identity is not None
+        )
         self._budgets = budgets
         self._autonomy = autonomy
         self._breaker = breaker
@@ -676,6 +695,7 @@ class GovernedToolDispatcher:
         reason: str,
         *,
         telemetry: bool = True,
+        credential_id: str | None = None,
         group_id: str | None = None,
     ) -> ToolDenied:
         decision = self._pdp._record_denial(
@@ -686,6 +706,7 @@ class GovernedToolDispatcher:
             error="dispatch_denied",
             telemetry=telemetry,
             principal_kind=principal.kind if isinstance(principal, Principal) else None,
+            credential_id=credential_id,
             group_id=group_id,
         )
         return ToolDenied(decision)
@@ -1059,8 +1080,9 @@ class GovernedToolDispatcher:
             raise _Denied(f"change ownership: {exc}") from exc
 
     def _verify_credential(
-        self, principal: Principal, tool_name: str, credential: object
+        self, principal: Principal, tool_name: str | None, credential: object
     ) -> ScopedCredential | None:
+        """``tool_name=None`` verifies identity only (no scope check)."""
         if not self._require_credential:
             return None
         issuer = self._credentials
@@ -1068,10 +1090,17 @@ class GovernedToolDispatcher:
             raise _Denied("no credential issuer")
         try:
             return issuer.verify(
-                credential, required_scope=f"tool:{tool_name}", principal=principal
+                credential,
+                required_scope=None if tool_name is None else f"tool:{tool_name}",
+                principal=principal,
             )
         except CredentialInvalid as exc:
             raise _Denied(f"credential rejected: {exc}") from exc
+
+    def is_async(self, tool_name: str) -> bool:
+        """True if *tool_name* is a registered coroutine function."""
+        spec = self._tools.get(tool_name)
+        return spec is not None and inspect.iscoroutinefunction(spec.fn)
 
     @staticmethod
     def _resolve_requested_by(
@@ -1095,6 +1124,8 @@ class GovernedToolDispatcher:
             and principal.kind is PrincipalKind.AGENT
             and tier >= APPROVAL_GATE_MIN_TIER
         ):
+            # A credentialed agent's requester must come from the issuing
+            # session; a caller-supplied value could name an approver.
             raise _Denied("credential is not bound to an original requester (on_behalf_of)")
         if principal.kind is PrincipalKind.AGENT and tier >= APPROVAL_GATE_MIN_TIER:
             # Without credentials this is a trusted-host API: the host must
@@ -1173,6 +1204,7 @@ class GovernedToolDispatcher:
         session: ScopedCredential | None,
         group_id: str | None,
         admission: _BreakerAdmission | None = None,
+        credential_id: str | None = None,
     ) -> _BreakerAdmission | None:
         """Re-admit after the PDP: a failure observed meanwhile may have
         tripped the breaker, suspended the cohort or demoted the agent. Only
@@ -1183,13 +1215,16 @@ class GovernedToolDispatcher:
                 principal, trigger_id, session, consume=True, admission=admission
             )
         except _Denied as exc:
-            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
+            raise self._pre_denial(
+                principal, tool_name, str(exc), group_id=group_id, credential_id=credential_id
+            ) from exc
         except Exception as exc:
             raise self._pre_denial(
                 principal,
                 tool_name,
                 f"harness check failed: {type(exc).__name__}",
                 group_id=group_id,
+                credential_id=credential_id,
             ) from exc
 
     def _harness_checks(
@@ -1280,6 +1315,36 @@ class GovernedToolDispatcher:
     ) -> _Authorized:
         if self._kill_switch_engaged():
             raise self._pre_denial(principal, tool_name, "kill switch engaged", telemetry=consume)
+        attested: ScopedCredential | None = None
+        # Phase 6b: the verified credential's id, recorded on every receipt.
+        cid: str | None = None
+        if self._attests_identity:
+            # Phase 6a: with a directory-backed issuer the credential's
+            # identity is verified first and its signed kind/system_id drive
+            # every later check; a host label that disagrees is denied, never
+            # trusted. The tool scope is still checked at its usual place.
+            try:
+                attested = self._verify_credential(principal, None, credential)
+            except _Denied as exc:
+                raise self._pre_denial(principal, tool_name, str(exc), telemetry=consume) from exc
+            except Exception as exc:
+                raise self._pre_denial(
+                    principal,
+                    tool_name,
+                    f"harness check failed: {type(exc).__name__}",
+                    telemetry=consume,
+                ) from exc
+            if attested is None:  # pragma: no cover - require_credential is set
+                raise self._pre_denial(principal, tool_name, "no attested credential")
+            identity = self._credentials.identity if self._credentials is not None else None
+            entry = None if identity is None else identity.lookup(attested.principal_id)
+            if entry is None or entry.kind is not attested.kind:
+                raise self._pre_denial(
+                    principal, tool_name, "credential principal is not in the identity directory"
+                )
+            # The whole principal (id, kind, system_id, roles) is the directory's.
+            principal = entry.principal()
+            cid = attested.credential_id
         try:
             spec, args, declared, core_leaves = self._check(principal, tool_name, arguments)
             approver_tuple = tuple(approvers)
@@ -1294,24 +1359,31 @@ class GovernedToolDispatcher:
             digest = arguments_digest(args)
         except _Denied as exc:
             self._record_denial_failure(principal)
-            raise self._pre_denial(principal, tool_name, str(exc), telemetry=consume) from exc
+            raise self._pre_denial(
+                principal, tool_name, str(exc), telemetry=consume, credential_id=cid
+            ) from exc
         except (TypeError, ValueError) as exc:
             self._record_denial_failure(principal)
             raise self._pre_denial(
-                principal, tool_name, f"invalid call: {exc}", telemetry=consume
+                principal, tool_name, f"invalid call: {exc}", telemetry=consume, credential_id=cid
             ) from exc
         paths = list(dict.fromkeys([*declared, *core_leaves]))
         try:
             session = self._verify_credential(principal, tool_name, credential)
         except _Denied as exc:
-            raise self._pre_denial(principal, tool_name, str(exc), telemetry=consume) from exc
+            raise self._pre_denial(
+                principal, tool_name, str(exc), telemetry=consume, credential_id=cid
+            ) from exc
         except Exception as exc:
             raise self._pre_denial(
                 principal,
                 tool_name,
                 f"harness check failed: {type(exc).__name__}",
                 telemetry=consume,
+                credential_id=cid,
             ) from exc
+        if session is not None:
+            cid = session.credential_id
         try:
             plan = self._plan(
                 principal,
@@ -1335,25 +1407,31 @@ class GovernedToolDispatcher:
             )
         except _Denied as exc:
             self._record_denial_failure(principal)
-            raise self._pre_denial(principal, tool_name, str(exc), telemetry=consume) from exc
+            raise self._pre_denial(
+                principal, tool_name, str(exc), telemetry=consume, credential_id=cid
+            ) from exc
         except Exception as exc:
             raise self._pre_denial(
                 principal,
                 tool_name,
                 f"tier planning failed: {type(exc).__name__}",
                 telemetry=consume,
+                credential_id=cid,
             ) from exc
         try:
             requested_by = self._resolve_requested_by(principal, plan.tier, requested_by, session)
             self._harness_checks(principal, spec, plan.tier, trigger_id, session, consume)
         except _Denied as exc:
-            raise self._pre_denial(principal, tool_name, str(exc), telemetry=consume) from exc
+            raise self._pre_denial(
+                principal, tool_name, str(exc), telemetry=consume, credential_id=cid
+            ) from exc
         except Exception as exc:
             raise self._pre_denial(
                 principal,
                 tool_name,
                 f"harness check failed: {type(exc).__name__}",
                 telemetry=consume,
+                credential_id=cid,
             ) from exc
 
         tool_call = _tool_call_attributes(
@@ -1373,6 +1451,7 @@ class GovernedToolDispatcher:
                 approvers=approver_tuple,
                 attributes=dict(tool_call),
                 approvals=approval_tuple,
+                credential_id=cid,
             )
         ]
         path_action = "file.read" if spec.read_only else "file.write"
@@ -1385,6 +1464,7 @@ class GovernedToolDispatcher:
                 approvers=approver_tuple,
                 attributes={"via_tool": tool_name, "tool_call": dict(tool_call)},
                 approvals=approval_tuple,
+                credential_id=cid,
             )
             for path in paths
         )
@@ -1402,6 +1482,7 @@ class GovernedToolDispatcher:
                         tool_name,
                         f"repository permissions deny write to {path!r}",
                         telemetry=consume,
+                        credential_id=cid,
                     )
         # The PDP is the single consumption point for approvals.
         decisions = self._pdp._decide_tool_call(requests, consume=consume)
@@ -1414,7 +1495,9 @@ class GovernedToolDispatcher:
             self._ownership_check(principal, spec, args, paths, change_id)
         except _Denied as exc:
             self._record_denial_failure(principal)
-            raise self._pre_denial(principal, tool_name, str(exc), telemetry=consume) from exc
+            raise self._pre_denial(
+                principal, tool_name, str(exc), telemetry=consume, credential_id=cid
+            ) from exc
         if not spec.read_only:
             for path in paths:
                 if not self._permissions.can_write(principal, path):
@@ -1424,6 +1507,7 @@ class GovernedToolDispatcher:
                         tool_name,
                         f"repository permissions deny write to {path!r}",
                         telemetry=consume,
+                        credential_id=cid,
                     )
         runbook_entry = None
         if consume and plan.runbook_id is not None and self._runbooks is not None:
@@ -1442,10 +1526,14 @@ class GovernedToolDispatcher:
                 )
             except RunbookDenied as exc:
                 self._record_denial_failure(principal)
-                raise self._pre_denial(principal, tool_name, f"runbook rejected: {exc}") from exc
+                raise self._pre_denial(
+                    principal, tool_name, f"runbook rejected: {exc}", credential_id=cid
+                ) from exc
         if consume and plan.backup_ref is not None and not self._consume_backup(plan.backup_ref):
             self._record_denial_failure(principal)
-            raise self._pre_denial(principal, tool_name, "backup run already consumed")
+            raise self._pre_denial(
+                principal, tool_name, "backup run already consumed", credential_id=cid
+            )
         admission = None
         if consume:
             read_t0 = spec.read_only and plan.tier == ActionTier.T0
@@ -1456,6 +1544,7 @@ class GovernedToolDispatcher:
                 trigger_id,
                 session,
                 decisions[0].decision_id if decisions else None,
+                credential_id=cid,
             )
         return _Authorized(
             spec, args, decisions, plan, admission, change_id, tuple(paths), runbook_entry
@@ -1515,6 +1604,7 @@ class GovernedToolDispatcher:
                         tool_name,
                         f"change ownership: {exc}",
                         group_id=auth.decisions[0].decision_id if auth.decisions else None,
+                        credential_id=auth.decisions[0].credential_id if auth.decisions else None,
                     ) from exc
             lock = self._incident_lock
             if lock is not None and not (auth.spec.read_only and auth.plan.tier == ActionTier.T0):
@@ -1526,6 +1616,7 @@ class GovernedToolDispatcher:
                         tool_name,
                         str(exc),
                         group_id=auth.decisions[0].decision_id if auth.decisions else None,
+                        credential_id=auth.decisions[0].credential_id if auth.decisions else None,
                     ) from exc
             yield
 
@@ -1535,31 +1626,73 @@ class GovernedToolDispatcher:
         """Closes the authorise-then-invoke window (TOCTOU), sync and async:
         the kill switch, and for writes the incident mutation lock."""
         group_id = auth.decisions[0].decision_id if auth is not None and auth.decisions else None
+        credential_id = (
+            auth.decisions[0].credential_id if auth is not None and auth.decisions else None
+        )
         if self._kill_switch_engaged():
-            raise self._pre_denial(principal, tool_name, "kill switch engaged", group_id=group_id)
+            raise self._pre_denial(
+                principal,
+                tool_name,
+                "kill switch engaged",
+                group_id=group_id,
+                credential_id=credential_id,
+            )
         lock = self._incident_lock
         if lock is not None and auth is not None:
             if not (auth.spec.read_only and auth.plan.tier == ActionTier.T0):
                 denial = lock.write_denial(principal)
                 if denial is not None:
-                    raise self._pre_denial(principal, tool_name, denial, group_id=group_id)
+                    raise self._pre_denial(
+                        principal, tool_name, denial, group_id=group_id, credential_id=credential_id
+                    )
 
-    def _recheck_autonomy(
-        self, principal: Principal, tool_name: str, read_t0: bool, *, group_id: str | None
+    def _recheck_execution(
+        self,
+        principal: Principal,
+        tool_name: str,
+        auth: _Authorized,
+        credential: object,
+        trigger_id: str | None,
     ) -> None:
+        self._recheck_kill_switch(principal, tool_name, auth)
+        group_id = auth.decisions[0].decision_id if auth.decisions else None
+        credential_id = auth.decisions[0].credential_id if auth.decisions else None
         try:
-            self._autonomy_check(principal, read_t0, admitted=True)
+            session = self._verify_credential(principal, tool_name, credential)
         except _Denied as exc:
-            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
+            raise self._pre_denial(
+                principal, tool_name, str(exc), group_id=group_id, credential_id=credential_id
+            ) from exc
+        self._final_admission(
+            principal,
+            tool_name,
+            auth.spec.read_only and auth.plan.tier == ActionTier.T0,
+            auth.admission.trigger_id if auth.admission is not None else trigger_id,
+            session,
+            group_id,
+            admission=auth.admission,
+            credential_id=credential_id,
+        )
 
-    def _recheck_credential(
-        self, principal: Principal, tool_name: str, credential: object, *, group_id: str | None
+    def _run_on_authorized(
+        self,
+        principal: Principal,
+        tool_name: str,
+        auth: _Authorized,
+        hook: Callable[[tuple[Decision, ...]], None] | None,
     ) -> None:
-        """Revalidate after PDP/listener work, immediately before invocation."""
+        if hook is None:
+            return
         try:
-            self._verify_credential(principal, tool_name, credential)
-        except _Denied as exc:
-            raise self._pre_denial(principal, tool_name, str(exc), group_id=group_id) from exc
+            hook(auth.decisions)
+        except Exception as exc:
+            credential_id = auth.decisions[0].credential_id if auth.decisions else None
+            raise self._pre_denial(
+                principal,
+                tool_name,
+                f"pre-execution hook failed: {type(exc).__name__}",
+                credential_id=credential_id,
+            ) from exc
 
     def authorize_without_consuming(
         self,
@@ -1621,6 +1754,7 @@ class GovernedToolDispatcher:
         backup_run: ExternalRunRef | None = None,
         change_id: str | None = None,
         tier: ActionTier | None = None,
+        on_authorized: Callable[[tuple[Decision, ...]], None] | None = None,
     ) -> ToolResult:
         """Authorise then invoke a synchronous tool with the authorised snapshot.
 
@@ -1635,7 +1769,9 @@ class GovernedToolDispatcher:
         a T1 call, ``backup_run`` proves the backup of a non-human T3 call,
         ``change_id`` names the change the writer owns, and ``tier`` (a
         caller's claim) is refused when lower than the computed tier and
-        otherwise ignored.
+        otherwise ignored. Phase 6b: ``on_authorized`` (harness code, e.g. the
+        socket service's intent record) runs after authorisation and before
+        the tool; if it raises, the call is denied and the tool never runs.
         Without ``require_credential``, the trusted host must authenticate
         ``principal`` and ``requested_by``; never forward agent-supplied identity
         labels. With credentials, AGENT T2+ calls require a requester-bound token.
@@ -1659,20 +1795,11 @@ class GovernedToolDispatcher:
         )
         if inspect.iscoroutinefunction(auth.spec.fn):
             raise TypeError(f"tool {tool_name!r} is async; use adispatch()")
+        # The hook first, then the TOCTOU recheck, so a halt engaged while the
+        # hook ran (e.g. a slow durable intent write) still stops the tool.
+        self._run_on_authorized(principal, tool_name, auth, on_authorized)
         with self._execution_lease(principal, tool_name, auth):
-            self._recheck_credential(
-                principal,
-                tool_name,
-                credential,
-                group_id=auth.decisions[0].decision_id if auth.decisions else None,
-            )
-            self._recheck_kill_switch(principal, tool_name, auth)
-            self._recheck_autonomy(
-                principal,
-                tool_name,
-                auth.spec.read_only and auth.plan.tier == ActionTier.T0,
-                group_id=auth.decisions[0].decision_id if auth.decisions else None,
-            )
+            self._recheck_execution(principal, tool_name, auth, credential, trigger_id)
             try:
                 value = auth.spec.fn(**auth.args)
             except BaseException:
@@ -1698,6 +1825,7 @@ class GovernedToolDispatcher:
         backup_run: ExternalRunRef | None = None,
         change_id: str | None = None,
         tier: ActionTier | None = None,
+        on_authorized: Callable[[tuple[Decision, ...]], None] | None = None,
     ) -> ToolResult:
         """Authorise (off the event loop) then invoke a sync or async tool."""
         approver_tuple = tuple(approvers)
@@ -1721,20 +1849,9 @@ class GovernedToolDispatcher:
                 change_id=change_id,
                 tier=tier,
             )
+            self._run_on_authorized(principal, tool_name, auth, on_authorized)
             with self._execution_lease(principal, tool_name, auth):
-                self._recheck_credential(
-                    principal,
-                    tool_name,
-                    credential,
-                    group_id=auth.decisions[0].decision_id if auth.decisions else None,
-                )
-                self._recheck_kill_switch(principal, tool_name, auth)
-                self._recheck_autonomy(
-                    principal,
-                    tool_name,
-                    auth.spec.read_only and auth.plan.tier == ActionTier.T0,
-                    group_id=auth.decisions[0].decision_id if auth.decisions else None,
-                )
+                self._recheck_execution(principal, tool_name, auth, credential, trigger_id)
                 try:
                     value = auth.spec.fn(**auth.args)
                 except BaseException:
@@ -1750,29 +1867,7 @@ class GovernedToolDispatcher:
         if inspect.isawaitable(value):
             try:
                 with self._execution_lease(principal, tool_name, auth):
-                    try:
-                        self._recheck_kill_switch(principal, tool_name, auth)
-                        session = self._verify_credential(principal, tool_name, credential)
-                        self._final_admission(
-                            principal,
-                            tool_name,
-                            auth.spec.read_only and auth.plan.tier == ActionTier.T0,
-                            auth.admission.trigger_id if auth.admission is not None else trigger_id,
-                            session,
-                            auth.decisions[0].decision_id if auth.decisions else None,
-                            admission=auth.admission,
-                        )
-                    except BaseException as exc:
-                        if inspect.iscoroutine(value):
-                            value.close()
-                        if isinstance(exc, _Denied):
-                            raise self._pre_denial(
-                                principal,
-                                tool_name,
-                                str(exc),
-                                group_id=auth.decisions[0].decision_id if auth.decisions else None,
-                            ) from exc
-                        raise
+                    self._recheck_execution(principal, tool_name, auth, credential, trigger_id)
                     try:
                         value = await value
                     except BaseException:

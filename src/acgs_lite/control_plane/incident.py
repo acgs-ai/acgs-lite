@@ -54,6 +54,7 @@ from acgs_lite.control_plane.tiers import ActionTier
 if TYPE_CHECKING:
     from acgs_lite.control_plane.approvals import SignedApproval
     from acgs_lite.control_plane.context import DecisionRequest
+    from acgs_lite.control_plane.identity import AdminAttestor
     from acgs_lite.control_plane.pdp import PolicyDecisionPoint
 
 from acgs_lite.control_plane.roles import (
@@ -152,7 +153,13 @@ class IncidentMutationLock:
         roles: RoleAssignments | None = None,
         stale_after_s: float = DEFAULT_STALE_AFTER_S,
         pdp: PolicyDecisionPoint | None = None,
+        admin_attestor: AdminAttestor | None = None,
     ) -> None:
+        """With *admin_attestor* every commander operation needs the
+        commander's verified single-use HUMAN ``admin_credential=``."""
+        from acgs_lite.control_plane.identity import checked_attestor
+
+        self._attestor = checked_attestor(admin_attestor)
         if roles is not None and type(roles) is not RoleAssignments:
             raise TypeError("roles must be a RoleAssignments")
         if pdp is not None:
@@ -405,9 +412,16 @@ class IncidentMutationLock:
             "declared_at": state.declared_at,
         }
 
-    def _require_commander(self, commander: Principal) -> IncidentState:
+    def _attest(self, commander: Principal, credential: str | None) -> None:
+        if self._attestor is not None:
+            self._attestor.require(commander, credential, admin_only=False, error=IncidentLockError)
+
+    def _require_commander(
+        self, commander: Principal, credential: str | None = None
+    ) -> IncidentState:
         if not isinstance(commander, Principal) or commander.kind is not PrincipalKind.HUMAN:
             raise IncidentLockError("only a HUMAN incident commander may do this")
+        self._attest(commander, credential)
         try:
             state = self.state()
         except (OSError, ValueError) as exc:
@@ -420,9 +434,12 @@ class IncidentMutationLock:
 
     # -- commander API ---------------------------------------------------
 
-    def declare_incident(self, commander: Principal, incident_id: str) -> IncidentState:
+    def declare_incident(
+        self, commander: Principal, incident_id: str, *, admin_credential: str | None = None
+    ) -> IncidentState:
         if not isinstance(commander, Principal) or commander.kind is not PrincipalKind.HUMAN:
             raise IncidentLockError("only a HUMAN may declare an incident")
+        self._attest(commander, admin_credential)
         if self._roles is not None and not self._roles.has_capability(
             commander, CAP_INCIDENT_COMMANDER
         ):
@@ -447,7 +464,14 @@ class IncidentMutationLock:
             self._log("declare", commander, incident_id=incident_id)
             return state
 
-    def acquire(self, principal: Principal, incident_id: str, *, commander: Principal) -> LockToken:
+    def acquire(
+        self,
+        principal: Principal,
+        incident_id: str,
+        *,
+        commander: Principal,
+        admin_credential: str | None = None,
+    ) -> LockToken:
         """Designate *principal* as the single holder (commander-approved).
 
         A second acquire while the lock is held is refused; use
@@ -456,7 +480,7 @@ class IncidentMutationLock:
         if not isinstance(principal, Principal):
             raise IncidentLockError("holder must be a Principal")
         with self._transition():
-            state = self._require_commander(commander)
+            state = self._require_commander(commander, admin_credential)
             if state.incident_id != incident_id:
                 raise IncidentLockError("incident id mismatch")
             if state.holder_id is not None:
@@ -465,26 +489,28 @@ class IncidentMutationLock:
             self._log("acquire", commander, holder=_principal_dict(principal))
         return LockToken(incident_id, principal.canonical_id, principal.kind.value)
 
-    def transfer(self, commander: Principal, new_holder: Principal) -> LockToken:
+    def transfer(
+        self, commander: Principal, new_holder: Principal, *, admin_credential: str | None = None
+    ) -> LockToken:
         if not isinstance(new_holder, Principal):
             raise IncidentLockError("holder must be a Principal")
         with self._transition():
-            state = self._require_commander(commander)
+            state = self._require_commander(commander, admin_credential)
             self._write(self._payload(state, new_holder))
             self._log("transfer", commander, holder=_principal_dict(new_holder))
         return LockToken(state.incident_id, new_holder.canonical_id, new_holder.kind.value)
 
-    def release(self, commander: Principal) -> None:
+    def release(self, commander: Principal, *, admin_credential: str | None = None) -> None:
         """Release the holder; the incident stays declared (nobody may write)."""
         with self._transition():
-            state = self._require_commander(commander)
+            state = self._require_commander(commander, admin_credential)
             self._write(self._payload(state, None))
             self._log("release", commander)
 
-    def resolve(self, commander: Principal) -> None:
+    def resolve(self, commander: Principal, *, admin_credential: str | None = None) -> None:
         """End the incident."""
         with self._transition():
-            state = self._require_commander(commander)
+            state = self._require_commander(commander, admin_credential)
             self._decide(commander, RESOLVE_ACTION, state.incident_id)
             self._write(self._payload(state, None, status="resolved"))
             self._ledger_open = False
@@ -555,12 +581,18 @@ class IncidentMutationLock:
         )
 
     def take_over(
-        self, admin: Principal, reason: str, *, approvals: Sequence[SignedApproval] = ()
+        self,
+        admin: Principal,
+        reason: str,
+        *,
+        approvals: Sequence[SignedApproval] = (),
+        admin_credential: str | None = None,
     ) -> IncidentState:
         """Break glass: a human holding ``incident_admin`` takes command of a
         stale incident (no commander/holder activity for ``stale_after_s``),
         with a signed approval from a *second* incident_admin; receipted and
         logged. The holder is released."""
+        self._attest(admin, admin_credential)
         if self._roles is None or self._pdp is None:
             raise IncidentLockError("break-glass takeover needs role assignments and a PDP")
         if not self._roles.has_capability(admin, CAP_INCIDENT_ADMIN):

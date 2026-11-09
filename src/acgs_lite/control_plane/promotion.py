@@ -43,6 +43,7 @@ from acgs_lite.control_plane.receipts import SignedControlPlaneReceipt, promotio
 from acgs_lite.control_plane.tiers import ActionTier
 
 if TYPE_CHECKING:
+    from acgs_lite.control_plane.identity import AdminAttestor
     from acgs_lite.control_plane.incident import IncidentMutationLock
     from acgs_lite.control_plane.roles import RoleAssignments
 
@@ -78,7 +79,13 @@ class PromotionGate:
         tier: ActionTier = DEFAULT_PROMOTION_TIER,
         roles: RoleAssignments | None = None,
         incident_lock: IncidentMutationLock | None = None,
+        admin_attestor: AdminAttestor | None = None,
     ) -> None:
+        """With *admin_attestor* :meth:`promote` needs the requester's
+        verified single-use HUMAN ``admin_credential=``."""
+        from acgs_lite.control_plane.identity import checked_attestor
+
+        self._attestor = checked_attestor(admin_attestor)
         if roles is not None:
             from acgs_lite.control_plane.roles import RoleAssignments
 
@@ -137,6 +144,7 @@ class PromotionGate:
         evidence: Sequence[ExternalRunRef],
         approvers: Sequence[Principal] = (),
         approvals: Sequence[SignedApproval] = (),
+        admin_credential: str | None = None,
     ) -> SignedControlPlaneReceipt:
         """Promote *candidate_id*.
 
@@ -146,6 +154,10 @@ class PromotionGate:
         """
         if not isinstance(principal, Principal):
             raise PromotionRejected("principal must be a Principal")
+        if self._attestor is not None:
+            self._attestor.require(
+                principal, admin_credential, admin_only=False, error=PromotionRejected
+            )
         if not isinstance(candidate_id, str) or not candidate_id.strip():
             raise PromotionRejected("candidate_id must be a non-empty string")
         if not isinstance(candidate_digest, str) or not _DIGEST.fullmatch(candidate_digest):

@@ -27,10 +27,16 @@ import os
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, TypeAlias
 
 from acgs_lite.circuit_breaker import GovernanceCircuitBreaker
 from acgs_lite.control_plane.immutable_core import ImmutableCoreRegistry
 from acgs_lite.control_plane.principal import Principal, PrincipalKind
+
+if TYPE_CHECKING:
+    import acgs_lite.control_plane.identity as identity_types
+
+    AdminAttestor: TypeAlias = "identity_types.AdminAttestor"
 
 __all__ = [
     "DEFAULT_HALT_DIR",
@@ -70,7 +76,15 @@ class KillSwitch:
         signal_dir: Path | str = DEFAULT_HALT_DIR,
         probe: Callable[[Path], bool] = _stat_probe,
         registry: ImmutableCoreRegistry | None = None,
+        admin_attestor: AdminAttestor | None = None,
     ) -> None:
+        """With *admin_attestor* (the facade wires one) engage and release
+        need ``admin_credential=``: for engage a HUMAN operator's verified
+        single-use credential (or a SERVICE credential with scope
+        ``halt:engage``), for release the directory admin's."""
+        from acgs_lite.control_plane.identity import checked_attestor
+
+        self._attestor = checked_attestor(admin_attestor)
         if not isinstance(system_id, str) or not system_id.strip():
             raise ValueError("system_id must be a non-empty string")
         directory = Path(signal_dir)
@@ -107,10 +121,31 @@ class KillSwitch:
         except OSError:
             return "halted (reason unavailable)"
 
-    def engage(self, operator: Principal, reason: str) -> None:
+    def engage(
+        self, operator: Principal, reason: str, *, admin_credential: str | None = None
+    ) -> None:
         """Halt every governed call. HUMAN or SERVICE operators only."""
         if not isinstance(operator, Principal) or operator.kind is PrincipalKind.AGENT:
             raise KillSwitchOperationRejected("only a HUMAN or SERVICE operator may engage")
+        if self._attestor is not None:
+            from acgs_lite.control_plane.identity import KILL_SWITCH_ENGAGE_SCOPE
+
+            if operator.kind is PrincipalKind.HUMAN:
+                self._attestor.require(
+                    operator,
+                    admin_credential,
+                    admin_only=False,
+                    error=KillSwitchOperationRejected,
+                )
+            else:
+                self._attestor.require(
+                    operator,
+                    admin_credential,
+                    admin_only=False,
+                    error=KillSwitchOperationRejected,
+                    scope=KILL_SWITCH_ENGAGE_SCOPE,
+                    kinds=frozenset({PrincipalKind.SERVICE}),
+                )
         text = reason if isinstance(reason, str) and reason.strip() else "halted"
         with self._lock:
             self._engaged = True
@@ -124,10 +159,13 @@ class KillSwitch:
             # The in-process flag still halts this process (fail closed).
             logger.error("kill switch signal file was not written: %s", self.signal_path)
 
-    def release(self, operator: Principal) -> None:
+    def release(self, operator: Principal, *, admin_credential: str | None = None) -> None:
         """Resume. HUMAN only; stays engaged if the signal file survives."""
         if not isinstance(operator, Principal) or operator.kind is not PrincipalKind.HUMAN:
             raise KillSwitchOperationRejected("only a HUMAN operator may release")
+        if self._attestor is not None:
+            # Releasing a halt is riskier than engaging one: the admin only.
+            self._attestor.require(operator, admin_credential, error=KillSwitchOperationRejected)
         self._breaker.reset()
         try:
             still_there = self._probe(self.signal_path)

@@ -50,8 +50,10 @@ REQUIRED_ATTACKS = {
     "self_asserted_role_runbook_approval",
     "merge_via_runbook",
     "non_admin_capability_grant",
+    "impersonate_human",
 }
 FINAL_ATTACKS = {
+    "impersonate_human",
     "evaluator_oracle_flood",
     "non_admin_capability_grant",
     "self_asserted_role_runbook_approval",
@@ -146,6 +148,9 @@ def test_denials_name_the_guard(tmp_path: Path) -> None:
     assert "trigger_id" in reasons["use_another_trigger"]
     assert "outside worktree" in reasons["write_outside_worktree"]
     assert "human-only" in reasons["call_shell_tool"]
+    assert "another principal kind" in reasons["impersonate_human"]
+    assert "admin attestation" in reasons["self_asserted_role_runbook_approval"]
+    assert "only the configured admin" in reasons["non_admin_capability_grant"]
 
 
 def test_agent_handle_has_no_evaluator(tmp_path: Path) -> None:
@@ -229,14 +234,23 @@ def test_promotion_requires_capability_and_respects_incident(tmp_path: Path) -> 
             "memory": "x",
         }
         result, ref = env.cp.evaluator_service.evaluate(candidate)
-        env.cp.roles.revoke_capability(ADMIN, CAP_PROMOTION_APPROVE, APPROVER)
+        # Admin credentials are single use: one fresh credential per call.
+        env.cp.roles.revoke_capability(
+            ADMIN, CAP_PROMOTION_APPROVE, APPROVER, admin_credential=env.admin_credential
+        )
         note = loop._promote("cand-a", result.candidate_digest, ref)
         assert "promotion.approve capability" in note
-        env.cp.roles.grant_capability(ADMIN, CAP_PROMOTION_APPROVE, APPROVER)
-        env.cp.roles.grant_capability(ADMIN, CAP_INCIDENT_COMMANDER, REQUESTER)
-        env.cp.incident_lock.declare_incident(REQUESTER, "inc-1")
+        env.cp.roles.grant_capability(
+            ADMIN, CAP_PROMOTION_APPROVE, APPROVER, admin_credential=env.admin_credential
+        )
+        env.cp.roles.grant_capability(
+            ADMIN, CAP_INCIDENT_COMMANDER, REQUESTER, admin_credential=env.admin_credential
+        )
+        env.cp.incident_lock.declare_incident(
+            REQUESTER, "inc-1", admin_credential=env.requester_credential
+        )
         assert "incident" in loop._promote("cand-a", result.candidate_digest, ref)
-        env.cp.incident_lock.resolve(REQUESTER)
+        env.cp.incident_lock.resolve(REQUESTER, admin_credential=env.requester_credential)
         assert loop._promote("cand-a", result.candidate_digest, ref) == "promoted"
         assert env.cp.verify_receipts().valid
     finally:

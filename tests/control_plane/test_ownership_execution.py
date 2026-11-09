@@ -26,7 +26,7 @@ B = Principal("writer-b", PrincipalKind.AGENT)
 ROOT = "workspace/owned"
 
 
-def setup(pdp, fn):
+def setup(pdp, fn, **options):
     owners = ChangeOwnershipRegistry(pdp.registry, admin=ADMIN)
     owners.assign(ADMIN, "c1", A, ROOT)
     d = GovernedToolDispatcher(
@@ -36,6 +36,7 @@ def setup(pdp, fn):
         ),
         tool_tiers={"write": ActionTier.T1},
         ownership=owners,
+        **options,
     )
     d.register("write", fn, path_params={"path"}, merge_capable=False)
     return d, owners
@@ -210,3 +211,38 @@ def test_tool_failure_releases_ownership_lease(pdp):
     with pytest.raises(RuntimeError, match="tool failed"):
         d.dispatch(A, "write", {"path": ROOT + "/a.txt"}, change_id="c1")
     assert owners.release(ADMIN, "c1")
+
+
+def test_callback_reassignment_denial_preserves_credential(pdp):
+    from acgs_lite.control_plane.credentials import CredentialIssuer
+
+    issuer = CredentialIssuer()
+    credential = issuer.issue(A, scopes={"tool:write"})
+    calls = []
+
+    def write(path):
+        calls.append(path)
+
+    d, owners = setup(
+        pdp,
+        write,
+        credential_issuer=issuer,
+        require_credential=True,
+    )
+
+    def reassign(decisions):
+        assert owners.release(ADMIN, "c1")
+        owners.assign(ADMIN, "c1", B, ROOT)
+
+    with pytest.raises(ToolDenied, match="change ownership") as denied:
+        d.dispatch(
+            A,
+            "write",
+            {"path": ROOT + "/a.txt"},
+            change_id="c1",
+            credential=credential.token,
+            on_authorized=reassign,
+        )
+    assert calls == []
+    assert denied.value.decision.credential_id == credential.credential_id
+    assert owners.get("c1").writer == B
