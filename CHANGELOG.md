@@ -367,6 +367,27 @@ This is a semver-major change (4.0.0): the production profile of the stable
   of a signal file owned by another uid. Ownership checks are skipped where
   `os.getuid` is unavailable (Windows). `acgs halt` uses the `trip()` result.
   Regression tests: `tests/test_circuit_breaker_signal_failures.py`.
+- A governed value now denies with `GovernancePayloadError`
+  (`rule_id="GOVERNANCE-PAYLOAD-UNEVALUABLE"`) when it has more than 256 distinct
+  non-empty text leaves and keys (`_MAX_RAW_LEAVES` in `acgs_lite.serialization`).
+  Each distinct leaf is validated, and audited, on its own after the value's JSON
+  payload, so a single 900-key dict used to cost 901 engine calls and 901 audit
+  entries per governed value. At or below the cap every leaf is still evaluated.
+  Applies to `GovernedAgent.run`/`arun` input, kwargs and output and to
+  `GovernedCallable` arguments, defaults and return values. Audit stays one entry
+  per evaluated payload, so each denial still records the exact payload that
+  matched. Regression tests: `tests/test_governed_raw_leaf_cap.py`.
+- The halt signal dir itself now trusts the same uid set as its ancestors and the
+  signal entries (this user, root and `ACGS_HALT_TRUSTED_UIDS`); it previously
+  accepted only this user and root, which contradicted the "one trusted set"
+  wording above. An ancestor owner can already rename or replace the signal dir,
+  so the stricter dir check added no protection. A uid listed in
+  `ACGS_HALT_TRUSTED_UIDS` is trusted to create halts and to lift them (it may own
+  a halt file, and as a dir or ancestor owner can delete or replace one); list
+  only uids that may operate the kill switch. An invalid value still fails closed
+  (the breaker counts as tripped). This supersedes the 3.0.2 note that the opt-in
+  "never applies to the signal dir itself". Regression tests:
+  `tests/test_halt_signal_dir.py`.
 
 ### Added
 

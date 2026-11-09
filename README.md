@@ -826,6 +826,10 @@ acgs serve --port 8080
 # both can read it (acgs halt creates new dirs as 0700, and an agent that cannot
 # read the dir treats itself as halted until access is fixed):
 #   sudo install -d -o root -g acgs -m 0750 /var/run/acgs
+# Trusted owners of the signal dir, its ancestors and halt files are this user
+# and root. ACGS_HALT_TRUSTED_UIDS (comma-separated, e.g. 65534 inside a
+# user-namespace sandbox) adds uids; every listed uid can both create AND lift
+# halts, so list only uids you trust to operate the kill switch.
 export ACGS_HALT_SIGNAL_DIR=/var/run/acgs
 acgs halt --system-id agent-01 --reason "anomalous behaviour detected"
 acgs breaker-status --system-id agent-01   # exit 1 while halted

@@ -900,11 +900,25 @@ def test_halt_during_validation_settles_without_execution(
     monkeypatch: pytest.MonkeyPatch, asynchronous: bool, tmp_path: Any
 ) -> None:
     import asyncio
+    import os
 
-    from acgs_lite.circuit_breaker import GovernanceCircuitBreaker, GovernanceHaltError
+    from acgs_lite.circuit_breaker import (
+        HALT_TRUSTED_UIDS_ENV,
+        GovernanceCircuitBreaker,
+        GovernanceHaltError,
+    )
     from acgs_lite.legitimacy.ledger import AttemptStatus
 
+    # Trust only the uids that own tmp_path's ancestors here (e.g. 65534 for /
+    # in a user-namespace sandbox), as tests/test_halt_signal_dir.py does; the
+    # breaker must start untripped so the halt observed below is the mid-call one.
+    monkeypatch.delenv(HALT_TRUSTED_UIDS_ENV, raising=False)
+    if hasattr(os, "getuid"):
+        foreign = {os.lstat(p).st_uid for p in tmp_path.parents} - {os.getuid(), 0}
+        if foreign:
+            monkeypatch.setenv(HALT_TRUSTED_UIDS_ENV, ",".join(map(str, sorted(foreign))))
     breaker = GovernanceCircuitBreaker("callable-validation-review", signal_dir=tmp_path)
+    assert not breaker.is_tripped
     guard = _guard(circuit_breaker=breaker)
     calls: list[str] = []
 
