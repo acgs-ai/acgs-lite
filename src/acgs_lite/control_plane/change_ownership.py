@@ -24,13 +24,15 @@ import re
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 from acgs_lite.control_plane.immutable_core import ImmutableCoreRegistry
 from acgs_lite.control_plane.principal import Principal, PrincipalKind
 
 if TYPE_CHECKING:
-    from acgs_lite.control_plane.identity import AdminAttestor
+    import acgs_lite.control_plane.identity as identity_types
+
+    AdminAttestor: TypeAlias = "identity_types.AdminAttestor"
 
 __all__ = [
     "AGENT_NO_MERGE_ACTIONS",

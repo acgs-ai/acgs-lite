@@ -29,18 +29,18 @@ import time
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from acgs_lite.control_plane.immutable_core import DEFAULT_IMMUTABLE_CORE, ImmutableCoreRegistry
 from acgs_lite.control_plane.invariants import ACTION_NAMESPACE_CATEGORIES
 from acgs_lite.control_plane.principal import Principal, PrincipalKind, canonical_principal_id
 
 if TYPE_CHECKING:
-    from acgs_lite.control_plane.identity import (
-        HumanAuthenticator,
-        IdentityProvider,
-        VerifiedHumanSession,
-    )
+    import acgs_lite.control_plane.identity as identity_types
+
+    HumanAuthenticator: TypeAlias = "identity_types.HumanAuthenticator"
+    IdentityProvider: TypeAlias = "identity_types.IdentityProvider"
+    VerifiedHumanSession: TypeAlias = "identity_types.VerifiedHumanSession"
 
 __all__ = [
     "ADMIN_SCOPE",
