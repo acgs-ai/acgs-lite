@@ -6,22 +6,48 @@
 /evals/** @acgs-ai/governance-humans
 /evaluator/** @acgs-ai/governance-humans
 /src/acgs_lite/evals/** @acgs-ai/governance-humans
+# evaluator: module shadows (package dirs, extensions, pyc)
+/__pycache__/evals.* @acgs-ai/governance-humans
+/__pycache__/evaluator.* @acgs-ai/governance-humans
+/evals.* @acgs-ai/governance-humans
+/evaluator.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/evals.* @acgs-ai/governance-humans
+/src/acgs_lite/evals.* @acgs-ai/governance-humans
 
 # test_suite
 /eval-suites/** @acgs-ai/governance-humans
 /eval_suites/** @acgs-ai/governance-humans
 /test_suites/** @acgs-ai/governance-humans
+# test_suite: module shadows (package dirs, extensions, pyc)
+/__pycache__/eval-suites.* @acgs-ai/governance-humans
+/__pycache__/eval_suites.* @acgs-ai/governance-humans
+/__pycache__/test_suites.* @acgs-ai/governance-humans
+/eval-suites.* @acgs-ai/governance-humans
+/eval_suites.* @acgs-ai/governance-humans
+/test_suites.* @acgs-ai/governance-humans
 
 # heldout_data
 /data/held_out/** @acgs-ai/governance-humans
 /data/heldout/** @acgs-ai/governance-humans
 /held_out/** @acgs-ai/governance-humans
 /heldout/** @acgs-ai/governance-humans
+# heldout_data: module shadows (package dirs, extensions, pyc)
+/__pycache__/held_out.* @acgs-ai/governance-humans
+/__pycache__/heldout.* @acgs-ai/governance-humans
+/data/__pycache__/held_out.* @acgs-ai/governance-humans
+/data/__pycache__/heldout.* @acgs-ai/governance-humans
+/data/held_out.* @acgs-ai/governance-humans
+/data/heldout.* @acgs-ai/governance-humans
+/held_out.* @acgs-ai/governance-humans
+/heldout.* @acgs-ai/governance-humans
 
 # sandbox_config
 /config/sandbox* @acgs-ai/governance-humans
 /config/sandbox*/** @acgs-ai/governance-humans
 /sandbox/** @acgs-ai/governance-humans
+# sandbox_config: module shadows (package dirs, extensions, pyc)
+/__pycache__/sandbox.* @acgs-ai/governance-humans
+/sandbox.* @acgs-ai/governance-humans
 
 # policy
 **/constitution*.json @acgs-ai/governance-humans
@@ -31,6 +57,11 @@
 /control-plane/runbooks/** @acgs-ai/governance-humans
 /policies/** @acgs-ai/governance-humans
 /policy/** @acgs-ai/governance-humans
+# policy: module shadows (package dirs, extensions, pyc)
+/__pycache__/policies.* @acgs-ai/governance-humans
+/__pycache__/policy.* @acgs-ai/governance-humans
+/policies.* @acgs-ai/governance-humans
+/policy.* @acgs-ai/governance-humans
 
 # tool_allowlist
 **/tool-allowlist* @acgs-ai/governance-humans
@@ -46,27 +77,45 @@
 **/.env* @acgs-ai/governance-humans
 /credentials/** @acgs-ai/governance-humans
 /secrets/** @acgs-ai/governance-humans
+# credentials: module shadows (package dirs, extensions, pyc)
+/__pycache__/credentials.* @acgs-ai/governance-humans
+/__pycache__/secrets.* @acgs-ai/governance-humans
+/credentials.* @acgs-ai/governance-humans
+/secrets.* @acgs-ai/governance-humans
 
 # promotion_gate
 /promotion/** @acgs-ai/governance-humans
+# promotion_gate: module shadows (package dirs, extensions, pyc)
+/__pycache__/promotion.* @acgs-ai/governance-humans
+/promotion.* @acgs-ai/governance-humans
 
 # audit_log
 /audit/** @acgs-ai/governance-humans
 /audit_logs/** @acgs-ai/governance-humans
+# audit_log: module shadows (package dirs, extensions, pyc)
+/__pycache__/audit.* @acgs-ai/governance-humans
+/__pycache__/audit_logs.* @acgs-ai/governance-humans
+/audit.* @acgs-ai/governance-humans
+/audit_logs.* @acgs-ai/governance-humans
 
 # iam
 /.github/CODEOWNERS @acgs-ai/governance-humans
 /CODEOWNERS @acgs-ai/governance-humans
 /docs/CODEOWNERS @acgs-ai/governance-humans
 /iam/** @acgs-ai/governance-humans
+# iam: module shadows (package dirs, extensions, pyc)
+/__pycache__/iam.* @acgs-ai/governance-humans
+/iam.* @acgs-ai/governance-humans
 
 # ci_rules
 /.github/** @acgs-ai/governance-humans
 /.gitlab-ci.yml @acgs-ai/governance-humans
+/.mypy.ini @acgs-ai/governance-humans
 /.pre-commit-config.yaml @acgs-ai/governance-humans
 /.pytest.ini @acgs-ai/governance-humans
 /.pytest.toml @acgs-ai/governance-humans
 /Makefile @acgs-ai/governance-humans
+/mypy.ini @acgs-ai/governance-humans
 /pytest.ini @acgs-ai/governance-humans
 /pytest.toml @acgs-ai/governance-humans
 /requirements-test-optional.txt @acgs-ai/governance-humans
@@ -89,6 +138,10 @@
 /tests/red_team/** @acgs-ai/governance-humans
 /tox.ini @acgs-ai/governance-humans
 # ci_rules: module shadows (package dirs, extensions, pyc)
+/.github.* @acgs-ai/governance-humans
+/__pycache__/.github.* @acgs-ai/governance-humans
+/__pycache__/scripts.* @acgs-ai/governance-humans
+/scripts.* @acgs-ai/governance-humans
 /scripts/__pycache__/check_critical_coverage.* @acgs-ai/governance-humans
 /scripts/__pycache__/check_links.* @acgs-ai/governance-humans
 /scripts/__pycache__/check_release_coherence.* @acgs-ai/governance-humans
@@ -109,6 +162,8 @@
 /scripts/run_governance_regression/** @acgs-ai/governance-humans
 /tests/__init__.* @acgs-ai/governance-humans
 /tests/__pycache__/__init__.* @acgs-ai/governance-humans
+/tests/__pycache__/red_team.* @acgs-ai/governance-humans
+/tests/red_team.* @acgs-ai/governance-humans
 
 # control_plane
 /.cargo/** @acgs-ai/governance-humans
@@ -159,6 +214,12 @@
 /tests/control_plane/** @acgs-ai/governance-humans
 /uv.lock @acgs-ai/governance-humans
 # control_plane: module shadows (package dirs, extensions, pyc)
+/.cargo.* @acgs-ai/governance-humans
+/__pycache__/.cargo.* @acgs-ai/governance-humans
+/__pycache__/control-plane.* @acgs-ai/governance-humans
+/__pycache__/rust.* @acgs-ai/governance-humans
+/control-plane.* @acgs-ai/governance-humans
+/rust.* @acgs-ai/governance-humans
 /scripts/__pycache__/check_immutable_core_diff.* @acgs-ai/governance-humans
 /scripts/__pycache__/render_codeowners.* @acgs-ai/governance-humans
 /scripts/check_immutable_core_diff.* @acgs-ai/governance-humans
@@ -169,16 +230,27 @@
 /src/acgs_lite/__pycache__/__init__.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/_compat.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/_meta.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/agents.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/arckit.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/audit.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/cdp.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/circuit_breaker.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/cli.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/commands.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/constitution.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/constrained_output.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/control_plane.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/engine.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/errors.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/events.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/fail_closed.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/formal.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/governed.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/lean_verify.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/legitimacy.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/licensing.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/maci.* @acgs-ai/governance-humans
+/src/acgs_lite/__pycache__/policygen.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/production.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/provenance.* @acgs-ai/governance-humans
 /src/acgs_lite/__pycache__/provider_capabilities.* @acgs-ai/governance-humans
@@ -190,20 +262,28 @@
 /src/acgs_lite/_compat/** @acgs-ai/governance-humans
 /src/acgs_lite/_meta.* @acgs-ai/governance-humans
 /src/acgs_lite/_meta/** @acgs-ai/governance-humans
+/src/acgs_lite/agents.* @acgs-ai/governance-humans
+/src/acgs_lite/arckit.* @acgs-ai/governance-humans
 /src/acgs_lite/audit.* @acgs-ai/governance-humans
 /src/acgs_lite/audit/** @acgs-ai/governance-humans
+/src/acgs_lite/cdp.* @acgs-ai/governance-humans
 /src/acgs_lite/circuit_breaker.* @acgs-ai/governance-humans
 /src/acgs_lite/circuit_breaker/** @acgs-ai/governance-humans
 /src/acgs_lite/cli.* @acgs-ai/governance-humans
 /src/acgs_lite/cli/** @acgs-ai/governance-humans
+/src/acgs_lite/commands.* @acgs-ai/governance-humans
+/src/acgs_lite/constitution.* @acgs-ai/governance-humans
 /src/acgs_lite/constrained_output.* @acgs-ai/governance-humans
 /src/acgs_lite/constrained_output/** @acgs-ai/governance-humans
+/src/acgs_lite/control_plane.* @acgs-ai/governance-humans
+/src/acgs_lite/engine.* @acgs-ai/governance-humans
 /src/acgs_lite/errors.* @acgs-ai/governance-humans
 /src/acgs_lite/errors/** @acgs-ai/governance-humans
 /src/acgs_lite/events.* @acgs-ai/governance-humans
 /src/acgs_lite/events/** @acgs-ai/governance-humans
 /src/acgs_lite/fail_closed.* @acgs-ai/governance-humans
 /src/acgs_lite/fail_closed/** @acgs-ai/governance-humans
+/src/acgs_lite/formal.* @acgs-ai/governance-humans
 /src/acgs_lite/governed.* @acgs-ai/governance-humans
 /src/acgs_lite/governed/** @acgs-ai/governance-humans
 /src/acgs_lite/integrations/__init__.* @acgs-ai/governance-humans
@@ -213,13 +293,16 @@
 /src/acgs_lite/integrations/control_plane_mcp/** @acgs-ai/governance-humans
 /src/acgs_lite/lean_verify.* @acgs-ai/governance-humans
 /src/acgs_lite/lean_verify/** @acgs-ai/governance-humans
+/src/acgs_lite/legitimacy.* @acgs-ai/governance-humans
 /src/acgs_lite/licensing.* @acgs-ai/governance-humans
 /src/acgs_lite/licensing/** @acgs-ai/governance-humans
+/src/acgs_lite/maci.* @acgs-ai/governance-humans
 /src/acgs_lite/observability/__init__.* @acgs-ai/governance-humans
 /src/acgs_lite/observability/__pycache__/__init__.* @acgs-ai/governance-humans
 /src/acgs_lite/observability/__pycache__/session_observer.* @acgs-ai/governance-humans
 /src/acgs_lite/observability/session_observer.* @acgs-ai/governance-humans
 /src/acgs_lite/observability/session_observer/** @acgs-ai/governance-humans
+/src/acgs_lite/policygen.* @acgs-ai/governance-humans
 /src/acgs_lite/production.* @acgs-ai/governance-humans
 /src/acgs_lite/production/** @acgs-ai/governance-humans
 /src/acgs_lite/provenance.* @acgs-ai/governance-humans
@@ -235,8 +318,10 @@
 /src/acgs_lite/z3_verify.* @acgs-ai/governance-humans
 /src/acgs_lite/z3_verify/** @acgs-ai/governance-humans
 /tests/__pycache__/conftest.* @acgs-ai/governance-humans
+/tests/__pycache__/control_plane.* @acgs-ai/governance-humans
 /tests/conftest.* @acgs-ai/governance-humans
 /tests/conftest/** @acgs-ai/governance-humans
+/tests/control_plane.* @acgs-ai/governance-humans
 
 # control_plane: import-path shadows (src/*.py, site hooks, .pth)
 /*.py @acgs-ai/governance-humans
