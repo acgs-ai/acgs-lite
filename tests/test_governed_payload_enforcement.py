@@ -433,6 +433,7 @@ def test_enforcement_payload_helper_counts_every_value() -> None:
         "x",
         "7",
         '{"k": 1}',
+        "k",
     ]
     with pytest.raises(GovernancePayloadError):
         governance_payloads_for_enforcement("x" * 11, max_chars=10)

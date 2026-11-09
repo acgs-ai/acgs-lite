@@ -176,8 +176,13 @@ def test_keyword_and_positional_object_deny_alike() -> None:
     )
     positional = governance_payloads_for_enforcement({"body": "rm forbiddenword"})
     keyword = governance_payloads_for_enforcement({"email": {"body": "rm forbiddenword"}})
-    assert positional == ['{"body": "rm forbiddenword"}']
-    assert keyword == ['{"email": {"body": "rm forbiddenword"}}']
+    assert positional == ['{"body": "rm forbiddenword"}', "body", "rm forbiddenword"]
+    assert keyword == [
+        '{"email": {"body": "rm forbiddenword"}}',
+        "email",
+        "body",
+        "rm forbiddenword",
+    ]
 
 
 def test_disguised_and_repr_false_objects_deny_instead_of_using_repr() -> None:
@@ -243,7 +248,12 @@ def test_cyclic_payload_is_denied() -> None:
 
 def test_shared_reference_is_not_a_cycle() -> None:
     shared = {"k": "v"}
-    assert governance_payloads_for_enforcement([shared, shared]) == ['[{"k": "v"}, {"k": "v"}]']
+    # Raw leaves are deduplicated, so a shared reference adds each text once.
+    assert governance_payloads_for_enforcement([shared, shared]) == [
+        '[{"k": "v"}, {"k": "v"}]',
+        "k",
+        "v",
+    ]
 
 
 def test_excessive_nesting_is_denied() -> None:
@@ -351,7 +361,9 @@ def test_well_known_values_converted_by_the_caller_are_projected() -> None:
         "color": Color.BAD.value,
         "raw": b"utf8",
     }
-    assert governance_payloads_for_enforcement(value) == [
+    payloads = governance_payloads_for_enforcement(value)
+    assert "forbiddenword" in payloads[1:]
+    assert payloads[:1] == [
         '{"amount": "1.50", "color": "forbiddenword", "day": "2026-01-02", '
         '"id": "00000000-0000-0000-0000-000000000001", "path": "/srv/data", '
         '"raw": "utf8", "ts": "2026-01-02T03:04:05+00:00"}'
