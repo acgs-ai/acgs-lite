@@ -25,6 +25,7 @@ from acgs_lite.circuit_breaker import (
     HALT_TRUSTED_UIDS_ENV,
     GovernanceCircuitBreaker,
     _signal_dir_problem,
+    _signal_entry_problem,
     _signal_entry_state,
 )
 
@@ -51,12 +52,7 @@ def _make_breaker(args: argparse.Namespace) -> GovernanceCircuitBreaker | None:
 
 
 def _is_regular_signal_file(path: Path) -> bool:
-    try:
-        entry = os.lstat(path)
-    except OSError:
-        return False
-    getuid = getattr(os, "getuid", None)
-    return stat.S_ISREG(entry.st_mode) and (getuid is None or entry.st_uid in (getuid(), 0))
+    return _signal_entry_problem(path) is None
 
 
 def _print_signal_dir(breaker: GovernanceCircuitBreaker) -> None:
@@ -232,10 +228,9 @@ def cmd_halt(args: argparse.Namespace) -> int:
         )
         return 2
 
-    breaker.trip(reason=reason)
-    # trip() sets the in-process event even when the file write fails, so the
-    # cross-process signal must be verified on disk before reporting success.
-    if not _is_regular_signal_file(breaker.signal_path):
+    # trip() halts this process even when the file write fails; its result
+    # confirms the cross-process signal on disk before reporting success.
+    if not breaker.trip(reason=reason):
         print(
             f"error: failed to write halt signal file {breaker.signal_path}. "
             f"System '{system_id}' was NOT halted for other processes.",
