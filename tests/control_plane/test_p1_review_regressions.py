@@ -671,6 +671,18 @@ class TestFinalReviewBoundaries:
             "tests/red_team/governance_fail_closed_cases.py",
             "Makefile",
             "requirements-test-optional.txt",
+            "rust/pyo3/src/lib.rs",
+            "rust/core/src/validator.rs",
+            "rust/core/Cargo.toml",
+            "rust/pyo3/Cargo.toml",
+            "rust/pyo3/pyproject.toml",
+            "rust/Cargo.toml",
+            "rust/Cargo.lock",
+            "rust/core/build.rs",
+            "rust/.cargo/config.toml",
+            ".cargo/config.toml",
+            "rust-toolchain",
+            "rust-toolchain.toml",
         ],
     )
     def test_real_grader_and_gate_files_are_core(self, pdp: PolicyDecisionPoint, path: str) -> None:

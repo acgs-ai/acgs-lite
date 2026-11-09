@@ -620,6 +620,12 @@ DEFAULT_IMMUTABLE_CORE = ImmutableCoreRegistry(
             "src/acgs_lite/maci/**",
             "src/acgs_lite/policygen/**",
             "src/acgs_lite/integrations/__init__.py",
+            # The Python engine imports the native companion built by CI.
+            # Protect its whole Cargo workspace and repository build overrides.
+            "rust/**",
+            ".cargo/**",
+            "rust-toolchain",
+            "rust-toolchain.toml",
             "pyproject.toml",
             "uv.lock",
             "tests/conftest.py",
