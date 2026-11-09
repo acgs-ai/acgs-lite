@@ -237,25 +237,33 @@ def module_shadow_patterns(pattern: str) -> tuple[str, ...]:
     of them run in place of the protected module, so they are core too.
     A literal package glob ``dir/name/**`` also protects sibling module and
     extension aliases, which can be imported when the package is absent.
+    Ancestor module/extension aliases are protected too: a namespace package
+    can be replaced before Python reaches the protected leaf or initializer.
     Other wildcard patterns return ``()``.
     """
+    shadows: list[str] = []
     if pattern.endswith("/**"):
-        package = pattern[:-3]
-        if not package or literal_prefix(package) != package.lower():
+        ancestor = pattern[:-3]
+        if not ancestor or literal_prefix(ancestor) != ancestor.lower():
             return ()
-        directory, stem = posixpath.split(package)
-        prefix = directory + "/" if directory else ""
-        return (f"{prefix}{stem}.*", f"{prefix}__pycache__/{stem}.*")
-    if literal_prefix(pattern) != pattern.lower() or not pattern.lower().endswith(".py"):
-        return ()
-    directory, base = posixpath.split(pattern)
-    stem = base[: -len(".py")]
-    if not stem:
-        return ()
-    prefix = directory + "/" if directory else ""
-    shadows = [f"{prefix}{stem}.*", f"{prefix}__pycache__/{stem}.*"]
-    if stem != "__init__":
-        shadows.append(f"{prefix}{stem}/**")
+    else:
+        if literal_prefix(pattern) != pattern.lower() or not pattern.lower().endswith(".py"):
+            return ()
+        ancestor, base = posixpath.split(pattern)
+        stem = base[: -len(".py")]
+        if not stem:
+            return ()
+        prefix = ancestor + "/" if ancestor else ""
+        shadows.extend((f"{prefix}{stem}.*", f"{prefix}__pycache__/{stem}.*"))
+        if stem != "__init__":
+            shadows.append(f"{prefix}{stem}/**")
+    # Importing a protected leaf first imports its ancestors. A sibling
+    # module can replace a namespace package even while its directory exists.
+    while ancestor:
+        parent, name = posixpath.split(ancestor)
+        prefix = parent + "/" if parent else ""
+        shadows.extend((f"{prefix}{name}.*", f"{prefix}__pycache__/{name}.*"))
+        ancestor = parent
     return tuple(shadows)
 
 
