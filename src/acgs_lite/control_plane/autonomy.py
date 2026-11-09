@@ -235,7 +235,20 @@ class AutonomyController:
             logger.error("autonomy level unavailable: %s", type(exc).__name__)
             return AutonomyLevel.SUSPENDED
 
-    def _level(self, principal: Principal) -> AutonomyLevel:
+    def admitted_level(self, principal: Principal) -> AutonomyLevel:
+        """Recheck restrictions for a call whose resource admission already passed.
+
+        Do not re-evaluate budget exhaustion: admission may have charged the
+        final permitted iteration. Sticky error/cohort demotion and the kill
+        switch still apply, and any unavailable state suspends execution.
+        """
+        try:
+            return self._level(principal, check_budgets=False)
+        except Exception as exc:
+            logger.error("autonomy level unavailable: %s", type(exc).__name__)
+            return AutonomyLevel.SUSPENDED
+
+    def _level(self, principal: Principal, *, check_budgets: bool = True) -> AutonomyLevel:
         if self._kill_switch is not None and self._kill_switch.is_engaged():
             return AutonomyLevel.SUSPENDED
         if not self._governed(principal):
@@ -243,7 +256,7 @@ class AutonomyController:
         if self.is_demoted(principal):
             return AutonomyLevel.P0_ONLY
         budgets = self._budgets
-        if budgets is not None and budgets.has_run(principal):
+        if check_budgets and budgets is not None and budgets.has_run(principal):
             state = budgets.state(principal)
             if state.is_exhausted:
                 self.demote(principal, "resource budget exhausted: " + ", ".join(state.exhausted))

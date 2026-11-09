@@ -743,6 +743,17 @@ class GovernedToolDispatcher:
         if self._kill_switch_engaged():
             raise self._pre_denial(principal, tool_name, "kill switch engaged")
 
+    def _recheck_autonomy(self, principal: Principal, tool_name: str, spec: _ToolSpec) -> None:
+        if principal.kind is PrincipalKind.HUMAN or self._autonomy is None:
+            return
+        level = self._autonomy.admitted_level(principal)
+        if level is AutonomyLevel.SUSPENDED:
+            raise self._pre_denial(principal, tool_name, "autonomy suspended")
+        if level is AutonomyLevel.P0_ONLY and not (spec.read_only and spec.tier == ActionTier.T0):
+            raise self._pre_denial(
+                principal, tool_name, "autonomy demoted to P0_ONLY: read-only T0 tools only"
+            )
+
     def _recheck_credential(self, principal: Principal, tool_name: str, credential: object) -> None:
         """Revalidate after PDP/listener work, immediately before invocation."""
         try:
@@ -818,6 +829,7 @@ class GovernedToolDispatcher:
             raise TypeError(f"tool {tool_name!r} is async; use adispatch()")
         self._recheck_credential(principal, tool_name, credential)
         self._recheck_kill_switch(principal, tool_name)
+        self._recheck_autonomy(principal, tool_name, spec)
         return ToolResult(tool_name, spec.fn(**args), decisions)
 
     async def adispatch(
@@ -836,7 +848,7 @@ class GovernedToolDispatcher:
         approver_tuple = tuple(approvers)
         approval_tuple = tuple(approvals)
 
-        def invoke() -> tuple[Any, tuple[Decision, ...]]:
+        def invoke() -> tuple[Any, tuple[Decision, ...], _ToolSpec]:
             spec, args, decisions = self._authorize(
                 principal,
                 tool_name,
@@ -850,13 +862,15 @@ class GovernedToolDispatcher:
             )
             self._recheck_credential(principal, tool_name, credential)
             self._recheck_kill_switch(principal, tool_name)
-            return spec.fn(**args), decisions
+            self._recheck_autonomy(principal, tool_name, spec)
+            return spec.fn(**args), decisions, spec
 
-        value, decisions = await asyncio.to_thread(invoke)
+        value, decisions, spec = await asyncio.to_thread(invoke)
         if inspect.isawaitable(value):
             try:
                 self._recheck_kill_switch(principal, tool_name)
                 self._verify_credential(principal, tool_name, credential)
+                self._recheck_autonomy(principal, tool_name, spec)
             except BaseException as exc:
                 if inspect.iscoroutine(value):
                     value.close()
