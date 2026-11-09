@@ -67,9 +67,12 @@ _DEFAULT_SIGNAL_DIR = Path(tempfile.gettempdir())
 
 HALT_SIGNAL_DIR_ENV = "ACGS_HALT_SIGNAL_DIR"
 
-# Opt-in: comma-separated extra uids trusted to own signal dir *ancestors*
-# (e.g. the overflow uid 65534 that stands in for root inside a user
-# namespace). Never applies to the signal dir itself. Default: none.
+# Opt-in: comma-separated extra uids trusted like this user and root (e.g. the
+# overflow uid 65534 that stands in for root inside a user namespace). One set
+# governs the signal dir, its ancestors and the halt signal entries, so a listed
+# uid is trusted to create halts AND to lift them: it may own a signal entry, and
+# as an owner of the signal dir or an ancestor it can delete, rename or replace
+# entries. Only list uids you trust to operate the kill-switch. Default: none.
 HALT_TRUSTED_UIDS_ENV = "ACGS_HALT_TRUSTED_UIDS"
 
 SignalDirSource = Literal["explicit", "env", "tempdir"]
@@ -102,8 +105,11 @@ def _resolve_signal_dir(signal_dir: Path | None) -> tuple[Path, SignalDirSource]
 def _signal_dir_problem(path: Path) -> str | None:
     """Return why ``path`` is not a trustworthy signal dir, or None if it is.
 
-    Trusted means: a real directory (not a symlink), owned by the current
-    user or root, and not group/world-writable unless the sticky bit is set.
+    Trusted means: a real directory (not a symlink), owned by a trusted uid
+    (the current user, root or ``ACGS_HALT_TRUSTED_UIDS``), and not
+    group/world-writable unless the sticky bit is set; its ancestors must pass
+    the same rules. The dir uses the ancestors' uid set: an ancestor owner can
+    already rename or replace the dir, so a stricter dir check adds nothing.
     """
     try:
         st = os.lstat(path)
@@ -118,8 +124,14 @@ def _signal_dir_problem(path: Path) -> str | None:
     getuid = getattr(os, "getuid", None)
     if getuid is not None:
         uid = getuid()
-        if st.st_uid not in (uid, 0):
-            return f"signal dir {path} is owned by uid {st.st_uid}, not {uid} or root"
+        try:
+            trusted = _trusted_uids(uid)
+        except ValueError:
+            return (
+                f"invalid {HALT_TRUSTED_UIDS_ENV} value: {os.environ.get(HALT_TRUSTED_UIDS_ENV)!r}"
+            )
+        if st.st_uid not in trusted:
+            return f"signal dir {path} is owned by uid {st.st_uid}, not a trusted uid"
         if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH) and not st.st_mode & stat.S_ISVTX:
             return f"signal dir {path} is group/world-writable without the sticky bit"
         return _signal_dir_ancestors_problem(path, uid)
@@ -127,7 +139,11 @@ def _signal_dir_problem(path: Path) -> str | None:
 
 
 def _trusted_uids(uid: int) -> set[int]:
-    """Our uid, root and the ``ACGS_HALT_TRUSTED_UIDS`` opt-ins; ValueError if invalid."""
+    """Our uid, root and the ``ACGS_HALT_TRUSTED_UIDS`` opt-ins; ValueError if invalid.
+
+    Every listed uid is trusted to create and to lift halts (see
+    ``HALT_TRUSTED_UIDS_ENV``).
+    """
     extra = os.environ.get(HALT_TRUSTED_UIDS_ENV, "")
     return {uid, 0, *(int(v) for v in extra.split(",") if v.strip())}
 
@@ -194,8 +210,8 @@ def _signal_entry_state(path: Path) -> tuple[bool, str | None]:
 def _entry_owner_problem(owner_uid: int) -> str | None:
     """Return why a signal entry owned by ``owner_uid`` is untrusted, or None.
 
-    Trusts the same uids as the signal dir ancestor check (our uid, root and
-    ``ACGS_HALT_TRUSTED_UIDS``). Skipped where ``os.getuid`` is unavailable.
+    Trusts the same uids as the signal dir and ancestor checks (our uid, root
+    and ``ACGS_HALT_TRUSTED_UIDS``). Skipped where ``os.getuid`` is unavailable.
     """
     getuid = getattr(os, "getuid", None)
     if getuid is None:
@@ -363,7 +379,7 @@ class GovernanceCircuitBreaker:
 
         This process is always halted, even when the cross-process signal fails.
         A failure to publish a trusted signal file (write error, or an existing
-        entry that is not a regular file owned by this user or root) is logged
+        entry that is not a regular file owned by a trusted uid) is logged
         at CRITICAL and reported by the return value rather than raised, so a
         caller relying on the in-process halt is never interrupted.
 

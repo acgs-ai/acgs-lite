@@ -21,6 +21,7 @@ from acgs_lite.circuit_breaker import (
     GovernanceHaltError,
     WebhookNotificationChannel,
     _signal_dir_ancestors_problem,
+    _signal_dir_problem,
 )
 from acgs_lite.constitution import Constitution, Rule, Severity
 from acgs_lite.governed import GovernedAgent, GovernedCallable
@@ -754,6 +755,52 @@ def test_trusted_uids_env_opt_in_allows_ancestor(
     signal_dir = shared / "mine"
     assert _run_cli(["halt", "--system-id", "sys-optin", "--signal-dir", str(signal_dir)]) == 0
     assert (signal_dir / "acgs-halt-sys-optin").is_file()
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership required")
+def test_foreign_owned_signal_dir_untrusted_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    signal_dir = tmp_path / "mine"
+    signal_dir.mkdir(mode=0o700)
+    _fake_owner(monkeypatch, signal_dir, _FOREIGN_UID)
+
+    problem = _signal_dir_problem(signal_dir)
+
+    assert problem == f"signal dir {signal_dir} is owned by uid {_FOREIGN_UID}, not a trusted uid"
+    assert GovernanceCircuitBreaker("sys-dir-foreign", signal_dir=signal_dir).is_tripped
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership required")
+def test_trusted_uids_env_applies_to_signal_dir_itself(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # One uid set for the dir, its ancestors and the entries: an ancestor owner
+    # can already rename or replace the dir, so the dir is not held stricter.
+    existing = os.environ.get(HALT_TRUSTED_UIDS_ENV, "")
+    monkeypatch.setenv(HALT_TRUSTED_UIDS_ENV, ",".join(filter(None, [existing, str(_FOREIGN_UID)])))
+    signal_dir = tmp_path / "mine"
+    signal_dir.mkdir(mode=0o700)
+    _fake_owner(monkeypatch, signal_dir, _FOREIGN_UID)
+
+    assert _signal_dir_problem(signal_dir) is None
+    breaker = GovernanceCircuitBreaker("sys-dir-optin", signal_dir=signal_dir)
+    assert not breaker.is_tripped
+    assert breaker.trip("opt-in dir") is True
+    assert breaker.reset() is True
+    assert not GovernanceCircuitBreaker("sys-dir-optin", signal_dir=signal_dir).is_tripped
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership required")
+def test_invalid_trusted_uids_env_fails_signal_dir_check_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(HALT_TRUSTED_UIDS_ENV, "root")
+
+    problem = _signal_dir_problem(tmp_path)
+
+    assert problem is not None and f"invalid {HALT_TRUSTED_UIDS_ENV} value" in problem
+    assert GovernanceCircuitBreaker("sys-dir-badenv", signal_dir=tmp_path).is_tripped
 
 
 @pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership required")
