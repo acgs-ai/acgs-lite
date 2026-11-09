@@ -263,12 +263,15 @@ class TestHigh2TrustedComputingBase:
             "acgs_lite.control_plane.credentials",
             "acgs_lite.control_plane.killswitch",
             "acgs_lite.integrations.control_plane_mcp",
+            "acgs_lite.cli",
+            "tests.red_team.governance_fail_closed_cases",
         ]
         code = (
             "import importlib, json, sys\n"
             f"for m in {roots!r}: importlib.import_module(m)\n"
             "print(json.dumps(sorted({getattr(v, '__file__', None) or '' for k, v in "
-            "sys.modules.items() if k == 'acgs_lite' or k.startswith('acgs_lite.')})))\n"
+            "sys.modules.items() if k == 'acgs_lite' or k.startswith('acgs_lite.') "
+            "or k == 'tests' or k.startswith('tests.red_team')})))\n"
         )
         env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
         completed = subprocess.run(

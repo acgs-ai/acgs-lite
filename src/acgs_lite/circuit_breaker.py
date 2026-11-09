@@ -126,6 +126,12 @@ def _signal_dir_problem(path: Path) -> str | None:
     return None
 
 
+def _trusted_uids(uid: int) -> set[int]:
+    """Our uid, root and the ``ACGS_HALT_TRUSTED_UIDS`` opt-ins; ValueError if invalid."""
+    extra = os.environ.get(HALT_TRUSTED_UIDS_ENV, "")
+    return {uid, 0, *(int(v) for v in extra.split(",") if v.strip())}
+
+
 def _signal_dir_ancestors_problem(path: Path, uid: int) -> str | None:
     """Check that no other user can rename or replace an ancestor of ``path``.
 
@@ -134,10 +140,9 @@ def _signal_dir_ancestors_problem(path: Path, uid: int) -> str | None:
     group/world-writable without the sticky bit.
     """
     try:
-        extra = os.environ.get(HALT_TRUSTED_UIDS_ENV, "")
-        trusted = {uid, 0, *(int(v) for v in extra.split(",") if v.strip())}
+        trusted = _trusted_uids(uid)
     except ValueError:
-        return f"invalid {HALT_TRUSTED_UIDS_ENV} value: {extra!r}"
+        return f"invalid {HALT_TRUSTED_UIDS_ENV} value: {os.environ.get(HALT_TRUSTED_UIDS_ENV)!r}"
     try:
         resolved = Path(os.path.realpath(path, strict=True))
         pending = [*path.parents, *resolved.parents]
@@ -184,6 +189,42 @@ def _signal_entry_state(path: Path) -> tuple[bool, str | None]:
     except OSError as exc:
         return True, f"halt signal unreadable: {exc}"
     return True, None
+
+
+def _entry_owner_problem(owner_uid: int) -> str | None:
+    """Return why a signal entry owned by ``owner_uid`` is untrusted, or None.
+
+    Trusts the same uids as the signal dir ancestor check (our uid, root and
+    ``ACGS_HALT_TRUSTED_UIDS``). Skipped where ``os.getuid`` is unavailable.
+    """
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:
+        return None
+    try:
+        trusted = _trusted_uids(getuid())
+    except ValueError:
+        return f"invalid {HALT_TRUSTED_UIDS_ENV} value: {os.environ.get(HALT_TRUSTED_UIDS_ENV)!r}"
+    if owner_uid not in trusted:
+        return f"owned by uid {owner_uid}, not a trusted uid"
+    return None
+
+
+def _signal_entry_problem(path: Path) -> str | None:
+    """Return why ``path`` is not a trusted halt signal file, or None if it is.
+
+    Trusted means: a regular file (not followed through a symlink) owned by a
+    trusted uid (see :func:`_entry_owner_problem`).
+    """
+    try:
+        entry = os.lstat(path)
+    except OSError as exc:
+        return f"cannot inspect halt signal {path}: {exc}"
+    if not stat.S_ISREG(entry.st_mode):
+        return f"halt signal {path} is not a regular file"
+    owner_problem = _entry_owner_problem(entry.st_uid)
+    if owner_problem:
+        return f"halt signal {path} is {owner_problem}"
+    return None
 
 
 def _validate_system_id(system_id: str) -> None:
@@ -317,19 +358,63 @@ class GovernanceCircuitBreaker:
     def _signal_path(self) -> Path:
         return self.signal_path
 
-    def trip(self, reason: str = "") -> None:
+    def trip(self, reason: str = "") -> bool:
         """Trip the circuit breaker, halting all governed operations.
+
+        This process is always halted, even when the cross-process signal fails.
+        A failure to publish a trusted signal file (write error, or an existing
+        entry that is not a regular file owned by this user or root) is logged
+        at CRITICAL and reported by the return value rather than raised, so a
+        caller relying on the in-process halt is never interrupted.
 
         Args:
             reason: Human-readable reason for the halt.
+
+        Returns:
+            True if the cross-process signal file is confirmed on disk; False if
+            only this process is halted.
         """
         with self._lock:
             self._reason = reason
             self._tripped_at = time.time()
             self._event.set()
 
-        # Atomic file write for cross-process signaling: unique temp file in the
-        # signal dir (O_EXCL, never follows a planted symlink), fsync, replace.
+        published = self._publish_signal(reason)
+
+        event = HaltEvent(
+            system_id=self.system_id,
+            reason=reason,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            signal_path=str(self.signal_path),
+        )
+        for channel in self._notification_channels:
+            try:
+                channel.notify(event)
+            except Exception as exc:
+                logger.warning("halt notification channel failed: %s", exc, exc_info=True)
+        return published
+
+    def _publish_signal(self, reason: str) -> bool:
+        """Atomically write the cross-process signal file; False (CRITICAL) on failure."""
+        # A signal in an untrusted dir can be removed by another user, so it is
+        # never a durable halt; this process stays halted in memory.
+        problem = self._untrusted_dir()
+        if problem:
+            problem = f"untrusted halt signal dir: {problem}"
+        else:
+            present, entry_error = _signal_entry_state(self.signal_path)
+            problem = entry_error or (_signal_entry_problem(self.signal_path) if present else None)
+        if problem:
+            # A planted entry may be removed by its owner at any time, so it is
+            # not a durable halt, and it is never overwritten or trusted.
+            logger.critical(
+                "failed to write halt signal file: %s; system=%s is halted in this process only",
+                problem,
+                self.system_id,
+            )
+            return False
+        # Unique temp file in the signal dir (O_EXCL, never follows a planted
+        # symlink), fsync, replace.
         try:
             # Fixed short prefix: embedding system_id could exceed NAME_MAX for
             # IDs whose final signal filename still fits.
@@ -346,39 +431,64 @@ class GovernanceCircuitBreaker:
                 if not replaced:
                     with contextlib.suppress(OSError):
                         os.unlink(tmp_name)
-            logger.warning(
-                "circuit breaker tripped: system=%s reason=%s",
-                self.system_id,
-                reason,
-            )
         except Exception as exc:
-            logger.error("failed to write halt signal file: %s", exc, exc_info=True)
+            logger.critical(
+                "failed to write halt signal file: %s; system=%s is halted in this process only",
+                exc,
+                self.system_id,
+                exc_info=True,
+            )
+            return False
+        problem = _signal_entry_problem(self.signal_path)
+        if problem:
+            logger.critical(
+                "failed to write halt signal file: %s; system=%s is halted in this process only",
+                problem,
+                self.system_id,
+            )
+            return False
+        logger.warning("circuit breaker tripped: system=%s reason=%s", self.system_id, reason)
+        return True
 
-        event = HaltEvent(
-            system_id=self.system_id,
-            reason=reason,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            signal_path=str(self.signal_path),
-        )
-        for channel in self._notification_channels:
-            try:
-                channel.notify(event)
-            except Exception as exc:
-                logger.warning("halt notification channel failed: %s", exc, exc_info=True)
+    def reset(self) -> bool:
+        """Reset the circuit breaker, allowing operations to resume.
 
-    def reset(self) -> None:
-        """Reset the circuit breaker, allowing operations to resume."""
+        The in-process halt is always cleared. If the cross-process signal entry
+        cannot be removed, the failure is logged at CRITICAL and False is
+        returned; ``is_tripped`` then still reports the halt (when file checks
+        are enabled), so the breaker stays closed.
+
+        Returns:
+            True if no signal entry remains; False if one could not be removed.
+        """
         with self._lock:
             self._event.clear()
             self._reason = ""
             self._tripped_at = None
 
-        # Remove signal file
         try:
             self.signal_path.unlink(missing_ok=True)
-            logger.info("circuit breaker reset: system=%s", self.system_id)
         except Exception as exc:
-            logger.debug("failed to remove signal file: %s", exc, exc_info=True)
+            logger.critical(
+                "failed to remove halt signal %s: %s; system=%s is still halted for "
+                "other processes",
+                self.signal_path,
+                exc,
+                self.system_id,
+                exc_info=True,
+            )
+            return False
+        present, entry_error = _signal_entry_state(self.signal_path)
+        if present:
+            logger.critical(
+                "halt signal %s still present after reset: %s; system=%s is still halted",
+                self.signal_path,
+                entry_error or "entry reappeared",
+                self.system_id,
+            )
+            return False
+        logger.info("circuit breaker reset: system=%s", self.system_id)
+        return True
 
     @property
     def is_tripped(self) -> bool:
@@ -392,8 +502,9 @@ class GovernanceCircuitBreaker:
     def _untrusted_dir(self) -> str | None:
         """Fail closed when the configured signal directory cannot be trusted.
 
-        Missing directories cannot carry a halt, and even the tempdir fallback
-        may become writable by another user after construction.
+        A missing directory also counts as untrusted (the halt could not be read
+        from it, and another user could create it), and even the tempdir
+        fallback may become writable by another user after construction.
         """
         return _signal_dir_problem(self._signal_dir)
 
@@ -415,9 +526,15 @@ class GovernanceCircuitBreaker:
             # O_NONBLOCK: a planted FIFO must not hang the check.
             flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
             fd = os.open(self.signal_path, flags)
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
+            entry = os.fstat(fd)
+            if not stat.S_ISREG(entry.st_mode):
                 os.close(fd)
                 return "halted (signal entry is not a regular file)"
+            owner_problem = _entry_owner_problem(entry.st_uid)
+            if owner_problem:
+                # Still halted (fail closed), but a foreign entry's text is not trusted.
+                os.close(fd)
+                return f"halted (signal entry is {owner_problem})"
             with os.fdopen(fd, "rb") as fh:
                 text = fh.read(_SIGNAL_READ_LIMIT).decode("utf-8", "replace").strip()
             return text or "halted"
