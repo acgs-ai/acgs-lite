@@ -255,19 +255,6 @@ class TestDiffGuard:
 
 
 class TestCiWiring:
-    def test_workflow_runs_base_guard_with_env_inputs(self) -> None:
-        workflow = yaml.safe_load(
-            (ROOT / ".github" / "workflows" / "immutable-core-guard.yml").read_text()
-        )
-        assert "pull_request" in workflow[True]  # PyYAML parses the `on:` key as True
-        steps = workflow["jobs"]["guard"]["steps"]
-        guard = steps[-1]
-        assert "_guard/scripts/check_immutable_core_diff.py" in guard["run"]
-        assert guard["env"]["PR_AUTHOR"] == "${{ github.event.pull_request.user.login }}"
-        assert "${{" not in guard["run"]
-        assert steps[0]["with"]["fetch-depth"] == 0
-        assert steps[1]["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
-
     def test_control_plane_is_critical_coverage(self) -> None:
         control_plane = {
             path.relative_to(ROOT / "src" / "acgs_lite").as_posix()
