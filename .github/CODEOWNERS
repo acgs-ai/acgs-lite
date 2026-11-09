@@ -60,6 +60,8 @@
 # policy: module shadows (package dirs, extensions, pyc)
 /__pycache__/policies.* @acgs-ai/governance-humans
 /__pycache__/policy.* @acgs-ai/governance-humans
+/control-plane/__pycache__/runbooks.* @acgs-ai/governance-humans
+/control-plane/runbooks.* @acgs-ai/governance-humans
 /policies.* @acgs-ai/governance-humans
 /policy.* @acgs-ai/governance-humans
 
@@ -72,6 +74,11 @@
 **/memory_write_policy* @acgs-ai/governance-humans
 /memory-policy/** @acgs-ai/governance-humans
 /memory_policy/** @acgs-ai/governance-humans
+# memory_write_policy: module shadows (package dirs, extensions, pyc)
+/__pycache__/memory-policy.* @acgs-ai/governance-humans
+/__pycache__/memory_policy.* @acgs-ai/governance-humans
+/memory-policy.* @acgs-ai/governance-humans
+/memory_policy.* @acgs-ai/governance-humans
 
 # credentials
 **/.env* @acgs-ai/governance-humans
