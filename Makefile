@@ -206,6 +206,7 @@ test-examples:
 # ── Quality ───────────────────────────────────────────────────────────────────
 lint:
 	$(RUFF) check $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/
+	$(RUFF) format --check $(SRC_DIR)/ $(TEST_DIR)/
 
 format:
 	$(RUFF) check --fix $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/

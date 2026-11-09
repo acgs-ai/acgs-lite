@@ -77,7 +77,11 @@ def signed_envelope_identity(envelope: SignedReceipt) -> str:
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{name} must be a non-empty string")
     canonical = json.dumps(
-        envelope.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+        envelope.to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
     )
     digest = hashlib.sha256(_ENVELOPE_DOMAIN + canonical.encode("utf-8")).hexdigest()
     return f"acgs:signed-envelope:v1:sha256:{digest}"
