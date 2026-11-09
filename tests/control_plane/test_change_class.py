@@ -106,6 +106,7 @@ def _dispatcher(pdp: PolicyDecisionPoint, calls: list[str]) -> GovernedToolDispa
         pdp,
         permissions=permissions,
         tool_tiers={"edit": ActionTier.T2, "quick_edit": ActionTier.T1, "drop": ActionTier.T3},
+        trust_host_identity=True,
     )
 
     def tool(path: str) -> str:

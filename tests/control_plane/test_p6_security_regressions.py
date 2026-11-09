@@ -446,6 +446,8 @@ ALLOWLIST: dict[str, str] = {
     "dispatcher.py:GovernedToolDispatcher._breaker_check": "attested dispatcher principal",
     "dispatcher.py:GovernedToolDispatcher._harness_checks": "attested dispatcher principal",
     "dispatcher.py:GovernedToolDispatcher._stop_signals": "attested dispatcher principal",
+    "dispatcher.py:GovernedToolDispatcher._unattested_human_check": "denies an unattested "
+    "HUMAN at T2+/core unless the host opted in (trust_host_identity)",
     "iam.py:RepositoryPermissions.__init__": "validates WriteGrant config, not a caller",
     "iam.py:RepositoryPermissions.can_write": "called with the attested dispatcher principal",
     "identity.py:HumanAuthenticator._human": "the identity layer itself",

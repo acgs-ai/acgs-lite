@@ -351,6 +351,8 @@ def p5(
             incident_lock=incident,
             run_verifier=runs,
             backup_workflows={"backups"},
+            # Phase 5 fixture models a trusted host that authenticates principals.
+            trust_host_identity=True,
         )
         dispatcher.register(
             "write_file",

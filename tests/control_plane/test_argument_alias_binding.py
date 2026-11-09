@@ -76,6 +76,7 @@ async def test_alias_substitution_denied_without_consuming_approval(
             gated_pdp.registry, [WriteGrant(HUMAN.id, HUMAN.kind, ("workspace/**",))]
         ),
         tool_tiers={"edit": ActionTier.T2},
+        trust_host_identity=True,
     )
 
     def edit(path, left, right):

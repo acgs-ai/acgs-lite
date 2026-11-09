@@ -286,6 +286,16 @@ IMPORT_SHADOW_PATTERNS = (
     "**/usercustomize*/**",
     "**/*.pth",
 )
+# The subset that applies whatever the source layout: startup hooks, ``.pth``
+# files and conftest change what runs regardless of trusted src packages.
+_LAYOUT_FREE_IMPORT_SHADOW_PATTERNS = (
+    "**/conftest.py",
+    "**/sitecustomize*",
+    "**/sitecustomize*/**",
+    "**/usercustomize*",
+    "**/usercustomize*/**",
+    "**/*.pth",
+)
 
 
 def _validate_pattern(pattern: object) -> str:
@@ -413,9 +423,11 @@ class ImmutableCoreRegistry:
 
     def import_shadow_patterns(self) -> tuple[str, ...]:
         """CODEOWNERS-expressible globs of :meth:`_import_shadow` (the
-        ``src/<other>/`` rule has no glob form and is enforced in code)."""
+        ``src/<other>/`` rule has no glob form and is enforced in code).
+        Without trusted src packages only the layout-independent hook,
+        ``.pth`` and conftest globs apply."""
         if self._src_packages is None:
-            return ()
+            return _LAYOUT_FREE_IMPORT_SHADOW_PATTERNS
         return IMPORT_SHADOW_PATTERNS
 
     def _import_shadow(self, normalized: str) -> bool:
@@ -423,9 +435,9 @@ class ImmutableCoreRegistry:
         ``sitecustomize``/``usercustomize``, ``*.pth`` and ``conftest.py``
         anywhere, any repo-root module or package initializer, any
         top-level ``src/*.py`` (``src/json.py`` shadows the stdlib under
-        PYTHONPATH=src) and any ``src/<entry>`` that is not a trusted package."""
-        if self._src_packages is None:
-            return False
+        PYTHONPATH=src) and any ``src/<entry>`` that is not a trusted package.
+        The hook, ``.pth`` and conftest rules hold for every registry; the
+        repo-root and ``src/`` rules only when trusted src packages exist."""
         segments = normalized.lower().split("/")
         if any(seg.split(".", 1)[0] in _STARTUP_HOOKS for seg in segments):
             return True
@@ -435,6 +447,8 @@ class ImmutableCoreRegistry:
             # pytest imports every conftest on its collection path; one can
             # neuter `make verify` / CI.
             return True
+        if self._src_packages is None:
+            return False
         importable = segments[-1].endswith((".py", ".pyc", ".so", ".pyd"))
         if importable and (
             len(segments) == 1

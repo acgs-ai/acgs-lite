@@ -222,6 +222,21 @@ This is a semver-major change (4.0.0): the production profile of the stable
 
 ### Security
 
+- **Breaking for direct `GovernedToolDispatcher` users.** A dispatcher without
+  identity attestation (`require_credential=True` with an identity-backed
+  `CredentialIssuer`) no longer trusts a host-asserted `PrincipalKind.HUMAN`: a HUMAN
+  call at T2+ or touching immutable-core paths is denied ("unattested HUMAN
+  principal"), because HUMAN skips the AGENT-only requester and approval-requester
+  checks. Hosts that authenticate principals themselves opt in with the new
+  `trust_host_identity=True`; combining it with attested identity raises `ValueError`.
+  `build_control_plane` already attests identity and is unaffected; T0/T1 non-core
+  HUMAN calls are unchanged.
+- `ImmutableCoreRegistry` now classifies `sitecustomize`/`usercustomize`, `*.pth` and
+  `conftest.py` paths as `CONTROL_PLANE` core even for custom registries without
+  trusted `src/` packages (previously every import-shadow check was skipped there);
+  `import_shadow_patterns()` returns that layout-independent subset for such
+  registries. Only the repo-root-module and `src/<entry>` rules still depend on
+  `src/` packages.
 - `GovernedCallable` no longer fails open on payloads it could not evaluate. Governed
   input and output longer than 10,000 characters are now denied with
   `GovernancePayloadError` (`rule_id="GOVERNANCE-PAYLOAD-OVERSIZE"`) instead of being

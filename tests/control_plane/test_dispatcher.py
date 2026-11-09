@@ -88,6 +88,7 @@ def _dispatcher(
         permissions=permissions or grants(pdp.registry),
         tool_tiers=TIERS,
         read_only_tools=frozenset({"read_file", "unlisted_reader"}),
+        trust_host_identity=True,
     )
     dispatcher.register(
         "write_file",

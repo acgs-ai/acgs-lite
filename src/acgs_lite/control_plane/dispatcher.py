@@ -38,7 +38,11 @@ deny everything, T0 included); an optional short-TTL scoped credential
 :class:`~.credentials.CredentialIssuer` whose principal matches and whose
 scopes include ``tool:<name>``; Phase 6a: with a directory-backed issuer the
 credential is verified first, its signed kind and system_id must equal the
-passed principal's, and they are the ones every later check sees); resource budgets (one iteration charged per
+passed principal's, and they are the ones every later check sees. Without
+that attestation a host-asserted ``PrincipalKind.HUMAN`` is denied every T2+
+or immutable-core call unless the host opts in with
+``trust_host_identity=True``, i.e. it authenticates principals itself;
+combining that opt-in with attested identity is refused at construction); resource budgets (one iteration charged per
 dispatch; exhausted -> deny, or with an autonomy controller -> demotion); and
 the :class:`~.autonomy.AutonomyController` level (P0_ONLY -> read-only T0
 tools only, SUSPENDED -> nothing). T2/T3 tools need an
@@ -364,6 +368,7 @@ class GovernedToolDispatcher:
         kill_switch: KillSwitch | None = None,
         credential_issuer: CredentialIssuer | None = None,
         require_credential: bool = False,
+        trust_host_identity: bool = False,
         budgets: BudgetLedger | None = None,
         autonomy: AutonomyController | None = None,
         breaker: TriggerCircuitBreaker | None = None,
@@ -464,6 +469,15 @@ class GovernedToolDispatcher:
             and credential_issuer is not None
             and credential_issuer.identity is not None
         )
+        if trust_host_identity and self._attests_identity:
+            # Contradictory: the identity directory, not the host, is the
+            # authority on principal kind. Refused rather than ignored so a
+            # host never believes it is the authority when it is not.
+            raise ValueError(
+                "trust_host_identity=True conflicts with require_credential and an "
+                "identity-backed credential_issuer (the directory attests identity)"
+            )
+        self._trust_host_identity = bool(trust_host_identity)
         self._budgets = budgets
         self._autonomy = autonomy
         self._breaker = breaker
@@ -1102,6 +1116,25 @@ class GovernedToolDispatcher:
         spec = self._tools.get(tool_name)
         return spec is not None and inspect.iscoroutinefunction(spec.fn)
 
+    def _unattested_human_check(
+        self, principal: Principal, tier: ActionTier, core_leaves: list[str]
+    ) -> None:
+        """HUMAN is exempt from the AGENT-only requester, breaker, autonomy and
+        budget checks, so a host-asserted HUMAN kind is trusted only when the
+        identity directory attests it or the host opted in to authenticating
+        principals itself. Otherwise T2+ and immutable-core calls are denied."""
+        if (
+            principal.kind is not PrincipalKind.HUMAN
+            or self._attests_identity
+            or self._trust_host_identity
+        ):
+            return
+        if tier >= APPROVAL_GATE_MIN_TIER or core_leaves:
+            raise _Denied(
+                "unattested HUMAN principal (enable require_credential with an identity "
+                "issuer, or set trust_host_identity=True if the host authenticates principals)"
+            )
+
     @staticmethod
     def _resolve_requested_by(
         principal: Principal,
@@ -1419,6 +1452,7 @@ class GovernedToolDispatcher:
                 credential_id=cid,
             ) from exc
         try:
+            self._unattested_human_check(principal, plan.tier, core_leaves)
             requested_by = self._resolve_requested_by(principal, plan.tier, requested_by, session)
             self._harness_checks(principal, spec, plan.tier, trigger_id, session, consume)
         except _Denied as exc:
@@ -1772,9 +1806,13 @@ class GovernedToolDispatcher:
         otherwise ignored. Phase 6b: ``on_authorized`` (harness code, e.g. the
         socket service's intent record) runs after authorisation and before
         the tool; if it raises, the call is denied and the tool never runs.
-        Without ``require_credential``, the trusted host must authenticate
-        ``principal`` and ``requested_by``; never forward agent-supplied identity
-        labels. With credentials, AGENT T2+ calls require a requester-bound token.
+        Without identity attestation (``require_credential`` with an
+        identity-backed issuer), a HUMAN principal is denied T2+ and
+        immutable-core calls unless the dispatcher was built with
+        ``trust_host_identity=True``; that opt-in means the trusted host
+        authenticates ``principal`` and ``requested_by`` itself and never
+        forwards agent-supplied identity labels. With credentials, AGENT T2+
+        calls require a requester-bound token.
         """
         auth = self._authorize(
             principal,
