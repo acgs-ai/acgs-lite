@@ -23,7 +23,9 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev,autonoma,anthropic,mcp,otel,z3]" httpx
       - name: Lint
-        run: ruff check src/acgs_lite/
+        run: |
+          ruff check src/acgs_lite/
+          ruff format --check src/ tests/
       - name: Validate capability manifest
         if: matrix.python-version == '3.11'
         run: python -m acgs_lite.cli capabilities validate --max-age-days 45
