@@ -224,18 +224,45 @@ def _check_path_components(path: Path) -> None:
     is the one bind() and clients use. A symlink component is refused unless
     :func:`_trusted_symlink`: otherwise whoever controls the link (or its
     directory) could repoint it at their own socket and harvest credentials.
-    ``..`` is refused outright."""
-    if ".." in path.parts:
-        raise ControlPlaneServiceError("socket path must not contain '..'")
-    current = Path(path.anchor)
-    for part in path.parts[1:]:
-        current = current / part
-        try:
-            info = os.lstat(current)
-        except FileNotFoundError:
-            return  # the rest is created below, component by component
-        if stat.S_ISLNK(info.st_mode) and not _trusted_symlink(current, info):
-            raise ControlPlaneServiceError(f"socket path component {str(current)!r} is a symlink")
+    Caller-supplied ``..`` is refused; trusted link targets are walked without
+    collapsing parent segments, so their ancestors remain subject to checks."""
+    followed_links = 0
+
+    def check(candidate: Path, *, target: bool = False) -> None:
+        nonlocal followed_links
+        if not target and ".." in candidate.parts:
+            raise ControlPlaneServiceError("socket path must not contain '..'")
+        current = Path(candidate.anchor)
+        for part in candidate.parts[1:]:
+            current = current / part
+            try:
+                info = os.lstat(current)
+            except FileNotFoundError:
+                return  # the rest is created below, component by component
+            if stat.S_ISLNK(info.st_mode):
+                if not _trusted_symlink(current, info):
+                    raise ControlPlaneServiceError(
+                        f"socket path component {str(current)!r} is a symlink"
+                    )
+                followed_links += 1
+                if followed_links > 40:
+                    raise ControlPlaneServiceError("socket path exceeds symlink limit")
+                destination = Path(os.readlink(current))
+                if not destination.is_absolute():
+                    destination = current.parent / destination
+                # realpath() hides intermediate target chains. Inspect each
+                # expansion, including its final directory, before following it.
+                check(destination, target=True)
+            if (
+                (target or current != candidate)
+                and stat.S_ISDIR(info.st_mode)
+                and not _safe_ancestor(info)
+            ):
+                raise ControlPlaneServiceError(
+                    f"socket directory ancestor {str(current)!r} is writable or owned by others"
+                )
+
+    check(path)
 
 
 def _prepare_directory(directory: Path, group: int | None) -> None:

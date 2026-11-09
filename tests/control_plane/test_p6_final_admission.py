@@ -31,12 +31,14 @@ pytestmark = [pytest.mark.unit, pytest.mark.red_team]
 
 @pytest.mark.parametrize("mode", ["sync", "async_sync", "async_coroutine"])
 @pytest.mark.parametrize("interruption", ["breaker", "halt", "expiry"])
+@pytest.mark.parametrize("stage", ["hook", "pdp"])
 async def test_hook_invalidates_sync_execution_and_keeps_one_decision_group(
     constitution: Constitution,
     permit_all: PolicySet,
     tmp_path: Path,
     mode: str,
     interruption: str,
+    stage: str,
 ) -> None:
     now = [1000.0]
     halted = [False]
@@ -55,7 +57,25 @@ async def test_hook_invalidates_sync_execution_and_keeps_one_decision_group(
     credential = issuer.issue(agent, scopes={"tool:read"}, ttl_s=1)
     switch = KillSwitch("sys-a", signal_dir=tmp_path / "halt", probe=lambda _: halted[0])
     calls: list[str] = []
-    with PolicyDecisionPoint.for_constitution(constitution, permit_all, telemetry=recorder) as pdp:
+
+    def hook(_decisions: Any) -> None:
+        if interruption == "breaker":
+            recorder.record_rollback("loop", "failure")
+        elif interruption == "halt":
+            halted[0] = True
+        else:
+            now[0] += 2
+
+    def listener(decision: Any) -> None:
+        if decision.allowed:
+            hook(decision)
+
+    with PolicyDecisionPoint.for_constitution(
+        constitution,
+        permit_all,
+        telemetry=recorder,
+        listeners=[listener] if stage == "pdp" else [],
+    ) as pdp:
         dispatcher = GovernedToolDispatcher(
             pdp,
             permissions=RepositoryPermissions(DEFAULT_IMMUTABLE_CORE, []),
@@ -73,15 +93,11 @@ async def test_hook_invalidates_sync_execution_and_keeps_one_decision_group(
         fn = read if mode == "async_coroutine" else lambda: calls.append("ran")
         dispatcher.register("read", fn, merge_capable=False)
 
-        def hook(_decisions: Any) -> None:
-            if interruption == "breaker":
-                recorder.record_rollback("loop", "failure")
-            elif interruption == "halt":
-                halted[0] = True
-            else:
-                now[0] += 2
-
-        kwargs = dict(credential=credential.token, trigger_id="loop", on_authorized=hook)
+        kwargs = dict(
+            credential=credential.token,
+            trigger_id="loop",
+            on_authorized=hook if stage == "hook" else None,
+        )
         with pytest.raises(ToolDenied) as denied:
             if mode != "sync":
                 await dispatcher.adispatch(agent, "read", {}, **kwargs)

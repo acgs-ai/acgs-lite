@@ -1545,6 +1545,7 @@ class GovernedToolDispatcher:
                 trigger_id,
                 session,
                 decisions[0].decision_id if decisions else None,
+                credential_id=cid,
             )
         return _Authorized(spec, args, decisions, plan, admission, change_id, tuple(paths))
 

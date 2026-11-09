@@ -811,6 +811,91 @@ class TestReceiptCredentialId:
 
 
 class TestRound2:
+    @pytest.mark.parametrize("missing", [False, True])
+    def test_trusted_symlink_does_not_hide_untrusted_ancestor(
+        self, sock_dir: Path, monkeypatch: pytest.MonkeyPatch, missing: bool
+    ) -> None:
+        untrusted = sock_dir / "untrusted"
+        root_owned = untrusted / "root-owned"
+        root_owned.mkdir(parents=True)
+        safe = sock_dir / "safe"
+        safe.mkdir(mode=0o700)
+        link = root_owned / "link"
+        link.symlink_to(safe)
+        directory = link / "sockets" if missing else link / "existing"
+        if not missing:
+            directory.mkdir(mode=0o700)
+        original_lstat = os.lstat
+
+        def ownership(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+            info = original_lstat(path, *args, **kwargs)
+            values = list(info)
+            if Path(path) == untrusted:
+                values[4] = os.getuid() + 1
+            elif Path(path) in (root_owned, link):
+                values[4] = 0
+            return os.stat_result(values)
+
+        monkeypatch.setattr(os, "lstat", ownership)
+        with pytest.raises(ControlPlaneServiceError, match="ancestor.*owned by others"):
+            service_module._prepare_directory(directory, None)
+        assert not (safe / "sockets").exists()
+
+    @pytest.mark.parametrize("relative", [False, True])
+    @pytest.mark.parametrize("missing", [False, True])
+    def test_trusted_link_target_chain_cannot_hide_untrusted_ancestor(
+        self, sock_dir: Path, monkeypatch: pytest.MonkeyPatch, relative: bool, missing: bool
+    ) -> None:
+        untrusted = sock_dir / "untrusted"
+        hidden = untrusted / "root-owned"
+        hidden.mkdir(parents=True)
+        safe = sock_dir / "safe"
+        safe.mkdir(mode=0o700)
+        inner = hidden / "inner"
+        inner.symlink_to(safe)
+        outer = sock_dir / "outer"
+        outer.symlink_to(inner.relative_to(sock_dir) if relative else inner)
+        if not missing:
+            (safe / "sockets").mkdir(mode=0o700)
+        original_lstat = os.lstat
+
+        def ownership(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+            info = original_lstat(path, *args, **kwargs)
+            values = list(info)
+            if Path(path) == untrusted:
+                values[4] = os.getuid() + 1
+            elif Path(path) in (sock_dir, hidden, inner, outer):
+                values[4] = 0
+            return os.stat_result(values)
+
+        monkeypatch.setattr(os, "lstat", ownership)
+        with pytest.raises(ControlPlaneServiceError, match="ancestor.*owned by others"):
+            service_module._prepare_directory(outer / "sockets", None)
+        assert (safe / "sockets").exists() is not missing
+
+    def test_trusted_link_loop_is_refused(
+        self, sock_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        link = sock_dir / "loop"
+        link.symlink_to("loop")
+        monkeypatch.setattr(service_module, "_trusted_symlink", lambda *_: True)
+        with pytest.raises(ControlPlaneServiceError, match="symlink limit"):
+            _check_path_components(link / "sockets")
+
+    def test_trusted_target_parent_segments_do_not_hide_unsafe_directory(
+        self, sock_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        unsafe = sock_dir / "unsafe"
+        unsafe.mkdir()
+        os.chmod(unsafe, 0o777)
+        safe = sock_dir / "safe"
+        safe.mkdir(mode=0o700)
+        link = sock_dir / "link"
+        link.symlink_to("unsafe/../safe")
+        monkeypatch.setattr(service_module, "_trusted_symlink", lambda *_: True)
+        with pytest.raises(ControlPlaneServiceError, match="ancestor.*writable"):
+            _check_path_components(link / "sockets")
+
     def test_symlink_component_is_refused(self, env: DemoEnvironment, sock_dir: Path) -> None:
         safe = sock_dir / "safe"
         safe.mkdir(mode=0o700)
@@ -819,7 +904,7 @@ class TestRound2:
         os.chmod(evil, 0o777)  # anyone could repoint a link in here
         (evil / "link").symlink_to(safe)
         service = ControlPlaneService(env.cp, evil / "link" / "x.sock", AGENT_ONLY)
-        with pytest.raises(ControlPlaneServiceError, match="symlink"):
+        with pytest.raises(ControlPlaneServiceError, match="ancestor.*writable"):
             service.start()
         service.shutdown()
         assert list(safe.iterdir()) == []
