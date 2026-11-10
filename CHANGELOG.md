@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-11-10
+
+Upgrading from 3.0.x: follow the
+[4.0 upgrade guide](https://github.com/acgs-ai/acgs-lite/blob/main/docs/upgrade-v4.0.md).
+This release also ships the changes listed under 3.0.2 below, which was never
+published on its own.
+
 This is a semver-major change (4.0.0): the production profile of the stable
 `GovernedCallable` now requires Ed25519 execution signatures.
 
@@ -449,7 +456,9 @@ This is a semver-major change (4.0.0): the production profile of the stable
   scope) and fails closed with `policy_digest_conflict` when an execution envelope names a
   different digest; v1 receipts keep the envelope path.
 
-## [3.0.2] - Unreleased
+## [3.0.2] - Unreleased (never published)
+
+3.0.2 was never tagged or published to PyPI. Its changes first ship in 4.0.0.
 
 ### Changed
 
@@ -491,7 +500,7 @@ This is a semver-major change (4.0.0): the production profile of the stable
   (`ENOTDIR`) counts as tripped. Trusted owners are the current user and root only;
   extra ancestor-owner uids (e.g. the user-namespace overflow uid 65534) must be opted
   in via `ACGS_HALT_TRUSTED_UIDS` (comma-separated; never applies to the signal dir
-  itself; superseded in Unreleased, where the signal dir trusts the same set).
+  itself; superseded in 4.0.0, where the signal dir trusts the same set).
 - **Behaviour change:** a breaker whose signal dir is missing or fails these checks
   counts as tripped (`check()` raises `GovernanceHaltError("halted (untrusted signal
   dir: ...)")`, `breaker-status` reports HALTED, `resume` exits 2). This includes the
@@ -1237,7 +1246,8 @@ Stability table in the README for the stability tier of each subsystem.
 - CLI tool (`acgs` / `acgs-lite`)
 - Keyword-based and regex rule matching
 
-[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/acgs-ai/acgs-lite/compare/v3.0.1...v4.0.0
 [3.0.1]: https://github.com/acgs-ai/acgs-lite/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.12.0...v3.0.0
 [2.12.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.11.0...v2.12.0

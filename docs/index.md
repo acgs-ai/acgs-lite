@@ -11,10 +11,12 @@ Then add the integration and audit storage your application needs.
 [Try the 5-minute membrane](guides/five-minute-membrane.md){ .md-button }
 
 !!! note "Published package and source candidate"
-    The published PyPI package is **3.0.1**. This checkout also documents unreleased
-    execution-grant, trusted-context, durable-audit, and recovery hardening that is
-    **not in the published 3.0.1 wheel**. Match examples to the artifact you installed.
-    A source checkout reporting the same version does not prove identical contents.
+    This documentation describes **4.0.0**. The execution-grant, trusted-context,
+    durable-audit, and recovery hardening it documents is **not in the 3.0.1 wheel**;
+    it needs `acgs-lite>=4.0.0`. Check the [PyPI page](https://pypi.org/project/acgs-lite/)
+    for the newest published version, and match examples to the artifact you installed
+    (`python -c "import acgs_lite; print(acgs_lite.__version__)"`). A source checkout
+    reporting the same version does not prove identical contents.
 
 ## Find your next step
 

@@ -23,10 +23,11 @@ LLM reasoning → constitutional check → decision receipt → governed executi
 
 ### Current status & non-claims
 
-- **Public package:** v3.0.1 on PyPI. Apache-2.0. Beta.
-- **Unreleased source hardening:** the production execution-grant, trusted-context,
-  durable-audit, and recovery contracts described below are present in this source
-  candidate. They are not present in the published v3.0.1 wheel.
+- **Package:** `acgs-lite` on PyPI. This README describes 4.0.0. Apache-2.0. Beta.
+- **4.0.0 hardening:** the production execution-grant, trusted-context,
+  durable-audit, and recovery contracts described below first ship in 4.0.0, a
+  breaking release. They are not present in the v3.0.1 wheel. See the
+  [4.0 upgrade guide](docs/upgrade-v4.0.md).
 - **Local proofs exist.** Receipt-gated execution, MACI role checks, and an
   in-process SHA-256 audit chain are implemented and tested.
 - **No independently confirmed production users yet.**
@@ -633,7 +634,7 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 
 ---
 
-## Stable surfaces today (3.0.1 published)
+## Stable surfaces today
 
 This table describes library surfaces with stable APIs and test coverage. It is
 not a blanket production-readiness claim for every deployment.

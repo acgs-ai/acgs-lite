@@ -121,6 +121,7 @@ validation commands do not depend on those local files.
 If you find a security vulnerability, please do **not** open a public issue. Instead, follow our [Security Policy](SECURITY.md) to report it responsibly.
 
 For installation, release channels, and local validation commands, see the [installation guide](docs/installation.md).
+Maintainers publish releases by following the [release runbook](docs/releasing.md).
 
 ## 📜 License
 
