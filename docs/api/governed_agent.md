@@ -59,8 +59,33 @@ agent = GovernedAgent(
 result = agent.run("summarise this document", governance_action="execute")
 ```
 
-MACI is enforced by default. A governed call without an explicit role and
-per-call `governance_action` is denied before the wrapped agent executes.
+MACI is enforced by default. A governed call without an explicit role and a
+`governance_action` is denied before the wrapped agent executes.
+
+### Pinning the action label
+
+The `governance_action` label decides which MACI check runs and which rules
+with a `condition` on it apply. Pin it in the constructor when the operator,
+not the caller, should decide it:
+
+```python
+agent = GovernedAgent(
+    my_llm_agent,
+    constitution=constitution,
+    maci_role=MACIRole.EXECUTOR,
+    governance_context={"governance_action": "execute"},
+)
+
+agent.run("summarise this document")                              # checked as "execute"
+agent.run("summarise this document", governance_action="execute")  # equal: allowed
+agent.run("summarise this document", governance_action="read")     # GovernanceError, agent not called
+```
+
+A pinned label is what MACI checks, what rule conditions see and what the CDP
+record carries. A per-call label that differs from it raises `GovernanceError`
+(`rule_id="MACI-ACTION"`) before the wrapped agent runs. If the label is not
+pinned, the per-call `governance_action` is asserted by the caller of `run()`,
+so it must never be derived from model output, tool arguments or request data.
 
 ### With a proposer role
 

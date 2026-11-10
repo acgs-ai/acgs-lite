@@ -170,9 +170,17 @@ This is a semver-major change (4.0.0): the production profile of the stable
   with a later `valid_from`, or a condition key such as `env=` to switch a
   conditional rule off. The context is now built only from the new constructor
   argument `governance_context=` (a mapping, copied at construction and never
-  merged with per-call kwargs) plus the call's `governance_action` (still chosen
-  by the caller, and it overrides a `governance_action` set in
-  `governance_context`, so rule conditions on it are caller-selected), and every
+  merged with per-call kwargs) plus the call's resolved `governance_action`. An
+  operator can pin the label with `governance_context={"governance_action": ...}`:
+  the pinned label is then what MACI checks, what rule conditions see and what
+  the CDP record carries, a per-call `governance_action` that differs from it
+  raises `GovernanceError` (`rule_id="MACI-ACTION"`) before the agent runs, an
+  equal one is allowed, and a pinned label alone satisfies the MACI requirement
+  for a label. A pinned value that is not a non-empty string raises `TypeError`
+  at construction. If the label is not pinned it is asserted by the caller of
+  `run()` and selects the MACI check and the rules conditioned on it, so it must
+  never be derived from model output, tool arguments or request data
+  (`tests/test_governed_agent_pinned_action.py`). Every
   check of the call uses it: the input, the caller's kwargs, and the agent's
   output, including each remediation retry's output. The output check adds
   `"source": "agent_output"` unless `governance_context` sets `source` itself.
