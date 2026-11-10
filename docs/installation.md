@@ -9,7 +9,7 @@ Optional SDKs may impose stricter Python and platform requirements.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install acgs-lite==3.0.1
+python -m pip install acgs-lite==4.0.0
 python -m pip check
 acgs --help
 ```
@@ -53,7 +53,7 @@ See [Contributing](contributing.md) for validation and optional-test setup.
 For a published artifact, append an extra before the version pin:
 
 ```bash
-python -m pip install "acgs-lite[openai,crypto]==3.0.1"
+python -m pip install "acgs-lite[openai,crypto]==4.0.0"
 ```
 
 For the current source checkout, use an editable install:

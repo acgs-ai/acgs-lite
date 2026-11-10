@@ -39,7 +39,7 @@ LLM reasoning → constitutional check → decision receipt → governed executi
 
 ### Minimal quickstart
 
-Works after `pip install acgs-lite==3.0.1`. Default engine is fail-closed: the
+Works after `pip install acgs-lite==4.0.0`. Default engine is fail-closed: the
 last line **raises**.
 
 <!-- doc-test: published-engine-check -->
@@ -358,7 +358,7 @@ TASK: Install and verify ACGS-Lite constitutional AI governance.
 
 STEPS:
 1. Install the package:
-   pip install acgs-lite==3.0.1
+   pip install acgs-lite==4.0.0
 
 2. Pip-only proof (no clone). Paste and run the minimal README snippet.
    The last line must raise ConstitutionalViolationError for "wire transfer $1000".
