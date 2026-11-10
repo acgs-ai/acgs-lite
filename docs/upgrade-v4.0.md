@@ -131,7 +131,8 @@ What to change:
 `GovernedCallable` and `GovernedAgent` accept only these exact types (matched with
 `type(v) is T`, so subclasses are refused): `dict` with exact `str` keys, `list`,
 `tuple`, `str`, `int`, `bool`, finite `float`, `None`, and `bytes`/`bytearray` that
-decode as strict UTF-8 with no NUL.
+decode as strict UTF-8 with no NUL. Text and keys that contain C0 control
+characters other than tab, newline and carriage return are also denied.
 
 Everything else denies with `GOVERNANCE-PAYLOAD-UNEVALUABLE`, on input and output,
 at any depth, in every profile. That includes `Enum` members, dataclasses,
@@ -185,7 +186,8 @@ governed = GovernedCallable(
     constitution,
     authorization_profile=AuthorizationProfile.PRODUCTION,
     receipt_signer=signer,
-    trusted_execution_keys={signer.key_id: public_key_hex},  # distributed out of band
+    # Distributed out of band; must equal signer.public_key_hex() exactly (lowercase hex).
+    trusted_execution_keys={signer.key_id: public_key_hex},
 )
 ```
 

@@ -22,8 +22,8 @@ The wheel does not include the repository's `examples/` directory.
     The signed production execution grants, the JSON-only governed-payload contract,
     `GovernedAgent(governance_context=...)`, and the halt-signal and recovery hardening
     listed in the [changelog](changelog.md) first ship in **4.0.0**. The 3.0.1 wheel
-    does not contain them. To use them, install `acgs-lite>=4.0.0` once 4.0.0 is on
-    PyPI (or work from a source checkout), and read the
+    does not contain them. To use them, install `acgs-lite>=4.0.0`
+    (or work from a source checkout), and read the
     [4.0 upgrade guide](upgrade-v4.0.md) first: 4.0.0 is a breaking release.
     Check what you have installed with
     `python -c "import acgs_lite; print(acgs_lite.__version__)"` or

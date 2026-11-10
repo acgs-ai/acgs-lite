@@ -96,7 +96,7 @@ compatibility receipt executor: ALLOW with a self-hashed receipt, TRANSFORM
 (PII), DENY of a wire, and missing-receipt refusal. A self-hash is integrity
 evidence, not an issuer trust anchor or a single-use replay defense.
 
-For the unreleased source candidate's same-instance grant, trusted host context,
+For the 4.0.0 same-instance grant, trusted host context,
 and required durable-audit example, use the
 [production execution-boundary profile](api/legitimacy.md#execution-boundary-binding).
 The host remains responsible for authenticating the actor and tenant.

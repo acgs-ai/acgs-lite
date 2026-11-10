@@ -57,6 +57,14 @@ Do all of these on the `main` commit you intend to release.
       -f pr_number=PR_NUMBER -f base_sha=MAIN_SHA -f head_sha=PR_HEAD_SHA
     ```
 
+    The authorization is bound to that exact `main` SHA and PR head, and its
+    artifact is kept for 2 days. If `main` or the PR head moves before the
+    merge, or the 2 days pass, run both workflows again with the new SHAs.
+8.  **Independent review.** `make publish` asks for "independent review and
+    release authorization" before `publish.yml` is dispatched, and no workflow
+    enforces it. Have a second maintainer review the release-prep PR and the
+    candidate run before you publish.
+
 ## 2. Tag the release commit
 
 Merge the release-prep PR first, then tag the `main` commit you checked in step 1
@@ -138,7 +146,10 @@ gh workflow run publish.yml --repo acgs-ai/acgs-lite --ref main \
 
 Publishing must happen within 24 hours of the candidate run's `created_at` time
 (when the run started, not when it finished). The job runs in the `pypi`
-environment, so it may wait for an environment approval.
+environment. At the time of the 4.0.0 release that environment had no required
+reviewers, so dispatching `publish.yml` uploads to PyPI as soon as its checks
+pass, with no approval stop. Check the environment's protection rules before you
+rely on one, and dispatch the workflow only when you mean to publish.
 
 ### What the publish run checks
 
@@ -188,9 +199,9 @@ gh run download RUN_ID --repo acgs-ai/acgs-lite \
 sha256sum /tmp/acgs-candidate/*.whl /tmp/acgs-candidate/*.tar.gz
 ```
 
-Afterwards, in a follow-up PR, update the install pins in `docs/quickstart.md` and
-`docs/installation.md`, the note in `docs/index.md`, and the version placeholders
-in the issue and discussion templates under `.github/`. (The README was fixed
+Afterwards, in a follow-up PR, update the version placeholders in the issue and
+discussion templates under `.github/`. (The README and the install pins in
+`docs/quickstart.md`, `docs/installation.md` and `docs/index.md` are updated
 before tagging; see step 1.)
 
 ## What cannot be undone

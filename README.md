@@ -27,7 +27,7 @@ LLM reasoning → constitutional check → decision receipt → governed executi
 - **4.0.0 hardening:** the production execution-grant, trusted-context,
   durable-audit, and recovery contracts described below first ship in 4.0.0, a
   breaking release. They are not present in the v3.0.1 wheel. See the
-  [4.0 upgrade guide](docs/upgrade-v4.0.md).
+  [4.0 upgrade guide](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/upgrade-v4.0.md).
 - **Local proofs exist.** Receipt-gated execution, MACI role checks, and an
   in-process SHA-256 audit chain are implemented and tested.
 - **No independently confirmed production users yet.**
@@ -68,9 +68,9 @@ is the executor gate: ALLOW with a receipt, TRANSFORM (PII redaction), DENY of a
 wire, and refusal of a missing receipt
 (`No legitimacy receipt, no execution`).
 
-### Unreleased local production profile
+### Production profile (4.0.0)
 
-The following source-candidate API binds a host-supplied actor/tenant context,
+The production profile binds a host-supplied actor/tenant context,
 the exact call and policy, single consumption in one wrapper instance, and a
 confirmed JSONL authorization record before the callable starts. The production
 profile requires the `crypto` extra and a persistent Ed25519 signer whose public
@@ -580,7 +580,7 @@ replay-verification API.
 
 The default strict `GovernanceEngine` blocks matching rules. Execution guarantees
 depend on the selected entry point and profile; compatibility receipts and
-best-effort audit writes provide weaker guarantees than the source candidate's
+best-effort audit writes provide weaker guarantees than the
 configured production grant path.
 
 | Guarantee | Behavior |
