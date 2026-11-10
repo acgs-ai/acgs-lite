@@ -35,7 +35,7 @@ LLM reasoning → constitutional check → decision receipt → governed executi
   *your* constitution, storage, authentication, and operational controls.
 - **`pip install` does not ship `examples/`.** Do not run a repo path after
   install. Use the minimal snippet below, or the
-  [5-minute membrane page](docs/guides/five-minute-membrane.md).
+  [5-minute membrane page](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/guides/five-minute-membrane.md).
 
 ### Minimal quickstart
 
@@ -63,7 +63,7 @@ True
 ConstitutionalViolationError: Action blocked by rule no-wire: Block unauthorized wires
 ```
 
-That is the check. The [5-minute membrane](docs/guides/five-minute-membrane.md)
+That is the check. The [5-minute membrane](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/guides/five-minute-membrane.md)
 is the executor gate: ALLOW with a receipt, TRANSFORM (PII redaction), DENY of a
 wire, and refusal of a missing receipt
 (`No legitimacy receipt, no execution`).
@@ -214,9 +214,9 @@ default. The historical compatibility receipt path does not provide general
 trusted verification for arbitrary named controls; use the production grant
 profile, which refuses unverifiable control carriers, for a side-effect boundary.
 
-Start with [GOAL.md](./GOAL.md) for the product boundary and
-[ROADMAP.md](./ROADMAP.md) for milestones. The Runtime Legitimacy Kernel is
-documented in [`docs/api/legitimacy.md`](./docs/api/legitimacy.md).
+Start with [GOAL.md](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/GOAL.md) for the product boundary and
+[ROADMAP.md](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/ROADMAP.md) for milestones. The Runtime Legitimacy Kernel is
+documented in [`docs/api/legitimacy.md`](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/api/legitimacy.md).
 
 Non-goals:
 
@@ -232,29 +232,29 @@ Non-goals:
 Please report suspected ACGS-Lite governance or security vulnerabilities
 privately to `security@acgs.ai` instead of opening a public issue. The canonical
 supported-version, scope, and disclosure-window policy is in
-[`SECURITY.md`](./SECURITY.md), with a mirrored docs page at
-[`docs/security.md`](./docs/security.md).
+[`SECURITY.md`](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/SECURITY.md), with a mirrored docs page at
+[`docs/security.md`](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/security.md).
 
 ## Recommended starting points
 
 **After `pip install` (no clone):**
 
 - **Minimal fail-closed check** — the snippet above
-- **5-minute membrane** — [docs/guides/five-minute-membrane.md](docs/guides/five-minute-membrane.md)
+- **5-minute membrane** — [docs/guides/five-minute-membrane.md](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/guides/five-minute-membrane.md)
   (ALLOW / TRANSFORM / DENY / missing-receipt refusal + audit chain)
 
 **After cloning this repo:**
 
 - **Pip-only script in-tree** — `python examples/membrane_5min.py`
-- **Richer membrane walkthrough** — [`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py)
-- **Contributor validation** — `make verify` (see [contributor setup](CONTRIBUTING.md))
-- **Self-verifying install** — [`examples/agent_quickstart/`](./examples/agent_quickstart/)
-- **Audit trail demo** — [`examples/audit_trail/`](./examples/audit_trail/)
-- **Shared infrastructure path** — [`examples/mcp_agent_client.py`](./examples/mcp_agent_client.py)
+- **Richer membrane walkthrough** — [`examples/governed_execution_membrane.py`](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/examples/governed_execution_membrane.py)
+- **Contributor validation** — `make verify` (see [contributor setup](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/CONTRIBUTING.md))
+- **Self-verifying install** — [`examples/agent_quickstart/`](https://github.com/acgs-ai/acgs-lite/tree/v4.0.0/examples/agent_quickstart)
+- **Audit trail demo** — [`examples/audit_trail/`](https://github.com/acgs-ai/acgs-lite/tree/v4.0.0/examples/audit_trail)
+- **Shared infrastructure path** — [`examples/mcp_agent_client.py`](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/examples/mcp_agent_client.py)
 - **Self-assessed compliance mapping** — `acgs assess --framework eu-ai-act` (mapping only; not certification)
 
 The Phoenix example under
-[`examples/phoenix_acgs_governed_agent/`](./examples/phoenix_acgs_governed_agent/)
+[`examples/phoenix_acgs_governed_agent/`](https://github.com/acgs-ai/acgs-lite/tree/v4.0.0/examples/phoenix_acgs_governed_agent)
 shows `request -> decision -> receipt -> bounded execution` telemetry; its
 `governance.decision.*` span attributes are experimental.
 
@@ -847,7 +847,7 @@ acgs resume --system-id agent-01
 |-------|-------------|
 | [Examples](https://github.com/acgs-ai/acgs-lite/blob/main/examples/README.md) | Canonical demo path: block, audit, then MCP |
 | [Constitution Templates](https://github.com/acgs-ai/acgs-lite/blob/main/examples/constitutions/README.md) | Reusable constitutions for content moderation, customer service, healthcare, hiring, and lending |
-| [5-minute membrane](docs/guides/five-minute-membrane.md) | Pip-only ALLOW / TRANSFORM / DENY + receipt refusal |
+| [5-minute membrane](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/guides/five-minute-membrane.md) | Pip-only ALLOW / TRANSFORM / DENY + receipt refusal |
 | [Quickstart](https://acgs.ai/docs/quickstart) | Install, wrap a callable, then inspect examples after a clone |
 | [Architecture](https://acgs.ai/docs/architecture) | Engine internals, MACI deep dive |
 | [Integrations](https://acgs.ai/docs/integrations) | OpenAI, Anthropic, LangChain, MCP, A2A |
@@ -863,7 +863,7 @@ acgs resume --system-id agent-01
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](https://github.com/acgs-ai/acgs-lite/blob/main/CONTRIBUTING.md) for guidelines, the [community guide](docs/community.md) for support and participation routes, and the [installation guide](docs/installation.md) for package, container, and documentation-site distribution paths.
+We welcome contributions! See [CONTRIBUTING.md](https://github.com/acgs-ai/acgs-lite/blob/main/CONTRIBUTING.md) for guidelines, the [community guide](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/community.md) for support and participation routes, and the [installation guide](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/installation.md) for package, container, and documentation-site distribution paths.
 
 ```bash
 git clone https://github.com/acgs-ai/acgs-lite.git

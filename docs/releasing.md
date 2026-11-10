@@ -38,7 +38,10 @@ Do all of these on the `main` commit you intend to release.
     description, so the README at the tagged commit becomes the PyPI page for
     `X.Y.Z` and cannot be changed afterwards. Before tagging, make sure its install
     pins (`pip install acgs-lite==...`) and its "Current status" lines are correct
-    for `X.Y.Z`.
+    for `X.Y.Z`. PyPI does not resolve relative links, so every link in the
+    README must be an absolute URL; point repository links at the release tag
+    (`https://github.com/acgs-ai/acgs-lite/blob/vX.Y.Z/...`) and update the tag
+    in them for each release.
 6.  **Dependents still work.** The candidate run installs the source checkout as
     `.[crypto]` with `gove-zone==1.0.0rc2` and runs `tests/gove`, and installs the
     built wheel with `gove-zone==1.0.0rc2` for wheel qualification. Check any other
