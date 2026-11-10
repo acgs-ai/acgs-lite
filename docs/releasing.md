@@ -57,9 +57,14 @@ Do all of these on the `main` commit you intend to release.
       -f pr_number=PR_NUMBER -f base_sha=MAIN_SHA -f head_sha=PR_HEAD_SHA
     ```
 
-    The authorization is bound to that exact `main` SHA and PR head, and its
-    artifact is kept for 2 days. If `main` or the PR head moves before the
-    merge, or the 2 days pass, run both workflows again with the new SHAs.
+    Wait for the authorization run to finish successfully before you start the
+    guard: `gh workflow run` returns as soon as the run is queued, and the guard
+    only looks for authorization runs that have already succeeded.
+
+    The authorization is bound to that exact `main` SHA and PR head and is valid
+    for 24 hours (`max_age_seconds` in the policy file). Its artifact is kept
+    for 2 days, but that is retention, not validity. If `main` or the PR head
+    moves before the merge, or 24 hours pass, authorize again with the new SHAs.
 8.  **Independent review.** `make publish` asks for "independent review and
     release authorization" before `publish.yml` is dispatched, and no workflow
     enforces it. Have a second maintainer review the release-prep PR and the

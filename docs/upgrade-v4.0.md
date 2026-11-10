@@ -138,8 +138,16 @@ Everything else denies with `GOVERNANCE-PAYLOAD-UNEVALUABLE`, on input and outpu
 at any depth, in every profile. That includes `Enum` members, dataclasses,
 pydantic models, `datetime`/`date`/`time`, `UUID`, paths, `Decimal`, sets,
 `NamedTuple`, non-`dict` mappings, non-`str` dict keys, NaN and infinities.
-A return value that is not JSON-native denies after the call ran: the attempt is
-recorded `PARTIAL` and the caller does not receive the result.
+A return value that is not JSON-native denies after the call ran and the caller
+does not receive the result. For a production-profile `GovernedCallable` the
+attempt is recorded `PARTIAL`; compatibility calls and `GovernedAgent` keep no
+execution-attempt record.
+
+A direct `GovernedCallable` call can fail earlier with a different exception:
+the invocation binder runs before the payload check, so an argument it cannot
+digest (for example `bytes` that are not strict UTF-8) raises
+`ArgumentNotDigestible`, a `LegitimacyInvariantError`, where `issue_grant()`
+raises `GovernancePayloadError` for the same value. Handle both.
 
 Convert at the call site, because the governed function receives exactly the
 value that was evaluated:
@@ -197,7 +205,10 @@ so provisioning the key and its pin is your job.
 
 Grants now expire. Execute within `grant_ttl_seconds` (default 300) of
 `issue_grant()`, or raise the TTL. Expiry blocks new executions only: a retry with
-the same grant and `execution_attempt_id` is still answered from the ledger. The
+the same grant and `execution_attempt_id` is still answered from the ledger, but
+not indefinitely: a settled grant can be pruned once one more
+`grant_ttl_seconds` has passed after the later of its expiry and its settlement,
+and a retry after that is refused. The
 ledger is still in-process, so a signed receipt executes only on the instance
 that issued it. See the [Runtime Legitimacy Kernel](api/legitimacy.md) reference.
 
