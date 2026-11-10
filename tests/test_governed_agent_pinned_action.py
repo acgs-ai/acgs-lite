@@ -198,3 +198,60 @@ def test_audit_and_cdp_carry_resolved_label(mode: str, per_call: str | None) -> 
     records = backend.list()
     assert len(records) == 1
     assert records[0].action == "execute"
+
+
+@MODES
+@pytest.mark.parametrize("enforce_maci", [True, False], ids=["maci-enforced", "maci-advisory"])
+def test_case_variant_per_call_label_conflicts_with_pin(mode: str, enforce_maci: bool) -> None:
+    # Labels compare exactly: "Execute" is not the pinned "execute".
+    stub = _stub(mode)
+    options: dict[str, Any] = (
+        {"maci_role": MACIRole.EXECUTOR} if enforce_maci else {"enforce_maci": False}
+    )
+    governed = GovernedAgent(
+        stub,
+        constitution=Constitution.from_rules([_execute_only_rule()]),
+        governance_context={"governance_action": "execute"},
+        **options,
+    )
+
+    with pytest.raises(GovernanceError) as exc_info:
+        _invoke(mode, governed, "summarise the report", governance_action="Execute")
+
+    assert exc_info.value.rule_id == "MACI-ACTION"
+    assert not isinstance(exc_info.value, ConstitutionalViolationError)
+    assert stub.calls == []
+
+
+@MODES
+@pytest.mark.parametrize("mutation", ["relabel", "delete"])
+def test_pin_is_captured_at_construction(mode: str, mutation: str) -> None:
+    # Mutating the caller's mapping after construction cannot move or drop the pin.
+    stub = _stub(mode)
+    backend = InMemoryCDPBackend()
+    operator_context: dict[str, Any] = {"governance_action": "execute"}
+    governed = GovernedAgent(
+        stub,
+        constitution=Constitution.default(),
+        maci_role=MACIRole.EXECUTOR,
+        governance_context=operator_context,
+        cdp_backend=backend,
+    )
+    if mutation == "relabel":
+        operator_context["governance_action"] = "read"
+    else:
+        del operator_context["governance_action"]
+
+    with pytest.raises(GovernanceError) as exc_info:
+        _invoke(mode, governed, "summarise the report", governance_action="read")
+    assert exc_info.value.rule_id == "MACI-ACTION"
+    assert stub.calls == []
+
+    assert _invoke(mode, governed, "summarise the report") == "done"
+    assert len(stub.calls) == 1
+
+    maci_entries = [e for e in governed.audit_log.entries if e.type == "maci_check"]
+    assert [(e.action, e.valid) for e in maci_entries] == [("execute", True)]
+    records = backend.list()
+    assert len(records) == 1
+    assert records[0].action == "execute"
