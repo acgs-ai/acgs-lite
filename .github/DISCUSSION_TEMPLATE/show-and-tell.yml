@@ -8,7 +8,7 @@ body:
     attributes:
       label: ACGS-Lite version
       description: Run `python -c "import acgs_lite; print(acgs_lite.__version__)"` and paste the result.
-      placeholder: 3.0.1
+      placeholder: 4.0.0
     validations:
       required: true
   - type: input
