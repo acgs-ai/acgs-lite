@@ -76,6 +76,7 @@ def _dispatcher(pdp: PolicyDecisionPoint) -> tuple[GovernedToolDispatcher, _Sink
             "shell": ActionTier.T2,
         },
         read_only_tools=frozenset({"read_default", "read"}),
+        trust_host_identity=True,
     )
 
     def write_default(path: str = "evaluator/score.py", content: str = "x") -> None:
@@ -375,6 +376,43 @@ class TestImportPathShadows:
 
         registry = ImmutableCoreRegistry({CoreCategory.EVALUATOR: ["evaluator/**"]})
         assert registry.classify("src/json.py") is None
+        assert registry.classify("json.py") is None
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "sitecustomize.py",
+            "usercustomize.py",
+            "workspace/sitecustomize/__init__.py",
+            "foo/bar.pth",
+            "pkg/conftest.py",
+            "conftest.py",
+        ],
+    )
+    def test_layout_free_shadows_core_without_src_packages(self, path: str) -> None:
+        from acgs_lite.control_plane import ImmutableCoreRegistry
+
+        registry = ImmutableCoreRegistry({CoreCategory.EVALUATOR: ["evaluator/**"]})
+        assert registry.classify(path) is CoreCategory.CONTROL_PLANE
+
+    def test_import_shadow_patterns_without_src_packages(self) -> None:
+        from acgs_lite.control_plane import ImmutableCoreRegistry
+        from acgs_lite.control_plane.immutable_core import IMPORT_SHADOW_PATTERNS
+
+        registry = ImmutableCoreRegistry({CoreCategory.EVALUATOR: ["evaluator/**"]})
+        globs = registry.import_shadow_patterns()
+        assert set(globs) == {
+            "**/conftest.py",
+            "**/sitecustomize*",
+            "**/sitecustomize*/**",
+            "**/usercustomize*",
+            "**/usercustomize*/**",
+            "**/*.pth",
+        }
+        assert set(globs) < set(IMPORT_SHADOW_PATTERNS)
+        assert DEFAULT_IMMUTABLE_CORE.import_shadow_patterns() == IMPORT_SHADOW_PATTERNS
+        text = render_codeowners(registry, ["@o"])
+        assert "**/*.pth @o" in text and "/src/*.py @o" not in text
 
     def test_codeowners_lists_import_shadows(self) -> None:
         text = render_codeowners(DEFAULT_IMMUTABLE_CORE, ["@o"])

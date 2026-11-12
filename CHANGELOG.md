@@ -237,6 +237,33 @@ This is a semver-major change (4.0.0): the production profile of the stable
 
 ### Security
 
+- **Breaking for direct `GovernedToolDispatcher` users.** A dispatcher without
+  identity attestation (`require_credential=True` with an identity-backed
+  `CredentialIssuer`) no longer trusts a host-asserted `PrincipalKind.HUMAN`, because
+  HUMAN skips the AGENT-only requester, change-ownership, merge, breaker, autonomy and
+  budget checks. Invariant: an unattested HUMAN may run only read-only, non-core calls
+  below T2. Writes, merge-capable, branch-writing and shell tools, T2+ calls and
+  immutable-core paths are denied ("unattested HUMAN principal …") on `dispatch`,
+  `adispatch`, `authorize_without_consuming` and the MCP adapter. The reads it may
+  run are governed like a non-human's: the directory-like read guard applies (a
+  directory holding `.env` is denied), and because breaker, autonomy and budget state
+  is keyed by principal id, an agent relabelled HUMAN keeps an open bound trigger or
+  suspended pinned cohort, its autonomy demotion/suspension, and its exhausted
+  budget run. Residual: an unattested HUMAN needs no `trigger_id`, and one with no
+  budget run is not denied for lacking one (requiring either would deny every
+  unattested human), so an agent bound only through a system cohort, with no pin
+  and no run, that drops its `system_id` while claiming HUMAN still keeps T0/T1
+  reads of non-core leaf files. Attest identity to close it. Hosts that
+  authenticate principals themselves opt in with the new `trust_host_identity=True`
+  (a `bool`; anything else raises `TypeError`); combining it with attested identity
+  raises `ValueError`. `build_control_plane` already attests identity and is
+  unaffected.
+- `ImmutableCoreRegistry` now classifies `sitecustomize`/`usercustomize`, `*.pth` and
+  `conftest.py` paths as `CONTROL_PLANE` core even for custom registries without
+  trusted `src/` packages (previously every import-shadow check was skipped there);
+  `import_shadow_patterns()` returns that layout-independent subset for such
+  registries. Only the repo-root-module and `src/<entry>` rules still depend on
+  `src/` packages.
 - `GovernedCallable` no longer fails open on payloads it could not evaluate. Governed
   input and output longer than 10,000 characters are now denied with
   `GovernancePayloadError` (`rule_id="GOVERNANCE-PAYLOAD-OVERSIZE"`) instead of being

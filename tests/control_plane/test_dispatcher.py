@@ -80,7 +80,10 @@ class Recorder:
 
 
 def _dispatcher(
-    pdp: PolicyDecisionPoint, permissions: RepositoryPermissions | None = None
+    pdp: PolicyDecisionPoint,
+    permissions: RepositoryPermissions | None = None,
+    *,
+    trust_host_identity: bool = True,
 ) -> tuple[GovernedToolDispatcher, Recorder]:
     recorder = Recorder()
     dispatcher = GovernedToolDispatcher(
@@ -88,6 +91,7 @@ def _dispatcher(
         permissions=permissions or grants(pdp.registry),
         tool_tiers=TIERS,
         read_only_tools=frozenset({"read_file", "unlisted_reader"}),
+        trust_host_identity=trust_host_identity,
     )
     dispatcher.register(
         "write_file",
@@ -502,3 +506,67 @@ class TestDeniedByBothLayers:
             if isinstance(node, ast.ImportFrom) and node.module is not None
         }
         assert not any(m.endswith(("pdp", "policy", "invariants", "dispatcher")) for m in modules)
+
+
+@pytest.mark.parametrize("trusted", [True, False], ids=["trusted-host", "default-mode"])
+class TestHumanReadPathsBothModes:
+    """The shared factory defaults to a trusted host; these HUMAN read paths
+    also run with the opt-in off (no attestation), where an unattested HUMAN
+    gets reads only: non-core, leaf-file, below T2."""
+
+    @staticmethod
+    def _reader(pdp: PolicyDecisionPoint, trusted: bool) -> GovernedToolDispatcher:
+        dispatcher, _ = _dispatcher(pdp, trust_host_identity=trusted)
+
+        def read_file(path: str) -> str:
+            return f"read {path}"
+
+        dispatcher.register("read_file", read_file, path_params={"path"}, merge_capable=False)
+        return dispatcher
+
+    def test_leaf_read_allowed(
+        self, pdp: PolicyDecisionPoint, human: Principal, trusted: bool
+    ) -> None:
+        result = self._reader(pdp, trusted).dispatch(
+            human, "read_file", {"path": "workspace/a.txt"}
+        )
+        assert result.value == "read workspace/a.txt"
+
+    def test_core_read(self, pdp: PolicyDecisionPoint, human: Principal, trusted: bool) -> None:
+        dispatcher = self._reader(pdp, trusted)
+        args = {"path": ".github/workflows/ci.yml"}
+        if trusted:
+            assert dispatcher.dispatch(human, "read_file", args).value == "read " + args["path"]
+        else:
+            with pytest.raises(ToolDenied, match="unattested HUMAN principal"):
+                dispatcher.dispatch(human, "read_file", args)
+
+    def test_directory_read(
+        self, pdp: PolicyDecisionPoint, human: Principal, trusted: bool
+    ) -> None:
+        import os
+
+        root = pdp.registry.repo_root
+        assert root is not None
+        os.makedirs(os.path.join(root, "workspace"), exist_ok=True)
+        with open(os.path.join(root, "workspace", ".env"), "w", encoding="utf-8") as fh:
+            fh.write("API_KEY=leak")
+        dispatcher = self._reader(pdp, trusted)
+        if trusted:
+            assert dispatcher.dispatch(human, "read_file", {"path": "workspace"}).value
+        else:
+            with pytest.raises(ToolDenied, match="directory-like read target"):
+                dispatcher.dispatch(human, "read_file", {"path": "workspace"})
+
+    def test_write_needs_trust(
+        self, pdp: PolicyDecisionPoint, human: Principal, trusted: bool
+    ) -> None:
+        dispatcher, recorder = _dispatcher(pdp, trust_host_identity=trusted)
+        args = {"path": "workspace/a.txt", "content": "x"}
+        if trusted:
+            dispatcher.dispatch(human, "write_file", args)
+            assert recorder.calls == [args]
+        else:
+            with pytest.raises(ToolDenied, match="unattested HUMAN principal"):
+                dispatcher.dispatch(human, "write_file", args)
+            assert recorder.calls == []

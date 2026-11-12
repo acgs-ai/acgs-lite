@@ -38,7 +38,15 @@ deny everything, T0 included); an optional short-TTL scoped credential
 :class:`~.credentials.CredentialIssuer` whose principal matches and whose
 scopes include ``tool:<name>``; Phase 6a: with a directory-backed issuer the
 credential is verified first, its signed kind and system_id must equal the
-passed principal's, and they are the ones every later check sees); resource budgets (one iteration charged per
+passed principal's, and they are the ones every later check sees. Without
+that attestation a host-asserted ``PrincipalKind.HUMAN`` may run only
+read-only, non-core calls below T2 (no writes, merge-capable, branch-writing
+or shell tools), and those calls get the non-human directory-read guard and
+the breaker (bound triggers and pinned cohort, no trigger_id needed),
+autonomy and budget (when a run exists for its id) checks, unless the host
+opts in with
+``trust_host_identity=True``, i.e. it authenticates principals itself;
+combining that opt-in with attested identity is refused at construction); resource budgets (one iteration charged per
 dispatch; exhausted -> deny, or with an autonomy controller -> demotion); and
 the :class:`~.autonomy.AutonomyController` level (P0_ONLY -> read-only T0
 tools only, SUSPENDED -> nothing). T2/T3 tools need an
@@ -364,6 +372,7 @@ class GovernedToolDispatcher:
         kill_switch: KillSwitch | None = None,
         credential_issuer: CredentialIssuer | None = None,
         require_credential: bool = False,
+        trust_host_identity: bool = False,
         budgets: BudgetLedger | None = None,
         autonomy: AutonomyController | None = None,
         breaker: TriggerCircuitBreaker | None = None,
@@ -464,6 +473,19 @@ class GovernedToolDispatcher:
             and credential_issuer is not None
             and credential_issuer.identity is not None
         )
+        if not isinstance(trust_host_identity, bool):
+            # A truthy non-bool ("false", 0.0, a config object) must not
+            # silently grant host trust.
+            raise TypeError("trust_host_identity must be a bool")
+        if trust_host_identity and self._attests_identity:
+            # Contradictory: the identity directory, not the host, is the
+            # authority on principal kind. Refused rather than ignored so a
+            # host never believes it is the authority when it is not.
+            raise ValueError(
+                "trust_host_identity=True conflicts with require_credential and an "
+                "identity-backed credential_issuer (the directory attests identity)"
+            )
+        self._trust_host_identity = trust_host_identity
         self._budgets = budgets
         self._autonomy = autonomy
         self._breaker = breaker
@@ -858,7 +880,7 @@ class GovernedToolDispatcher:
                 # enforced on it: only a principal granted "**" may use it.
                 raise _Denied("shell-like tools need an unrestricted ('**') repository write grant")
 
-        if spec.read_only and principal.kind is not PrincipalKind.HUMAN:
+        if spec.read_only and not self._trusted_human(principal):
             for path in declared:
                 root = self._registry.repo_root
                 if root is None:
@@ -899,7 +921,7 @@ class GovernedToolDispatcher:
                 session.trigger_id if session is not None and session.trigger_id else trigger_id
             )
             if trigger is None:
-                breaker_open = principal.kind is not PrincipalKind.HUMAN
+                breaker_open = not self._trusted_human(principal)
             else:
                 breaker_open = breaker.state(trigger) is not BreakerState.CLOSED
         fraction = None if self._budgets is None else self._budgets.used_fraction(principal)
@@ -1102,6 +1124,55 @@ class GovernedToolDispatcher:
         spec = self._tools.get(tool_name)
         return spec is not None and inspect.iscoroutinefunction(spec.fn)
 
+    def _trusted_human(self, principal: Principal) -> bool:
+        """True for a HUMAN whose kind is trustworthy: attested by the
+        identity directory, or asserted by a host that opted in to
+        authenticating principals itself (``trust_host_identity``). Every
+        HUMAN exemption in this dispatcher goes through this notion."""
+        return principal.kind is PrincipalKind.HUMAN and (
+            self._attests_identity or self._trust_host_identity
+        )
+
+    def _governed_view(self, principal: Principal) -> Principal:
+        """*principal* as the autonomy controller should see it: an untrusted
+        HUMAN is evaluated as a non-human with the same id and system_id (the
+        controller exempts HUMAN; its state is keyed by id, so an agent
+        relabelled HUMAN keeps its demotion or suspension)."""
+        if principal.kind is not PrincipalKind.HUMAN or self._trusted_human(principal):
+            return principal
+        return Principal(principal.id, PrincipalKind.AGENT, system_id=principal.system_id)
+
+    def _unattested_human_check(
+        self,
+        principal: Principal,
+        spec: _ToolSpec,
+        plan: _CallPlan,
+        core_leaves: list[str],
+    ) -> None:
+        """HUMAN is exempt from the AGENT-only requester, ownership, merge,
+        directory-read, breaker, autonomy and budget checks, so a host-asserted
+        HUMAN kind is trusted only by :meth:`_trusted_human`. Otherwise the
+        invariant is: an unattested HUMAN may run only read-only, non-core
+        calls below T2 -- no writes, merge-capable, branch-writing or shell
+        tools -- and is governed like a non-human by the read, breaker,
+        autonomy and budget checks."""
+        if principal.kind is not PrincipalKind.HUMAN or self._trusted_human(principal):
+            return
+        if (
+            not spec.read_only
+            or spec.merge_capable
+            or plan.merge_capable
+            or spec.branch_param is not None
+            or spec.command_param is not None
+            or plan.tier >= APPROVAL_GATE_MIN_TIER
+            or core_leaves
+        ):
+            raise _Denied(
+                "unattested HUMAN principal may only run read-only, non-core calls below T2 "
+                "(enable require_credential with an identity issuer, or set "
+                "trust_host_identity=True if the host authenticates principals)"
+            )
+
     @staticmethod
     def _resolve_requested_by(
         principal: Principal,
@@ -1145,11 +1216,25 @@ class GovernedToolDispatcher:
         admission: _BreakerAdmission | None = None,
     ) -> _BreakerAdmission | None:
         breaker = self._breaker
-        if breaker is None or principal.kind is PrincipalKind.HUMAN:
+        if breaker is None or self._trusted_human(principal):
             return None
         registry = breaker.registry
         if registry is None:  # pragma: no cover - refused at construction
             raise _Denied("no trigger registry")
+        if principal.kind is PrincipalKind.HUMAN:
+            # Unattested HUMAN: a human has no trigger to name, but bindings
+            # are keyed by id, so an agent relabelled HUMAN keeps its own.
+            # Any non-CLOSED trigger bound to this id or its pinned cohort
+            # denies; no probe is spent.
+            for cohort in registry.cohorts_of(principal):
+                if breaker.cohort_suspended(cohort):
+                    raise _Denied(
+                        f"system cohort {cohort} suspended (a bound trigger is not closed)"
+                    )
+            for bound in registry.triggers_for_principal(principal):
+                if breaker.state(bound) is not BreakerState.CLOSED:
+                    raise _Denied(f"trigger {bound} bound to this principal is not closed")
+            return None
         if session is not None and session.trigger_id is not None:
             if trigger_id is not None and trigger_id != session.trigger_id:
                 raise _Denied("trigger_id does not match the credential session")
@@ -1183,12 +1268,11 @@ class GovernedToolDispatcher:
     def _autonomy_check(
         self, principal: Principal, read_t0: bool, *, admitted: bool = False
     ) -> None:
-        if principal.kind is PrincipalKind.HUMAN or self._autonomy is None:
+        if self._trusted_human(principal) or self._autonomy is None:
             return
+        subject = self._governed_view(principal)
         level = (
-            self._autonomy.admitted_level(principal)
-            if admitted
-            else self._autonomy.level(principal)
+            self._autonomy.admitted_level(subject) if admitted else self._autonomy.level(subject)
         )
         if level is AutonomyLevel.SUSPENDED:
             raise _Denied("autonomy suspended")
@@ -1237,14 +1321,22 @@ class GovernedToolDispatcher:
         consume: bool = True,
     ) -> None:
         """Kill-switch-independent harness gates; raise :class:`_Denied`."""
-        governed = principal.kind is not PrincipalKind.HUMAN
         read_t0 = spec.read_only and tier == ActionTier.T0
+        budgets = self._budgets
+        # Budgets are keyed by id: an unattested HUMAN is charged against a
+        # run started for its id (as every agent's is), so an exhausted agent
+        # relabelled HUMAN stays exhausted. Requiring a run would deny every
+        # unattested human the host never budgeted, so that denial stays
+        # non-human only.
+        governed = not self._trusted_human(principal) and (
+            principal.kind is not PrincipalKind.HUMAN
+            or (budgets is not None and budgets.has_run(principal))
+        )
         if self._incident_lock is not None and not read_t0:
             # Humans too: during an incident there is exactly one writer.
             denial = self._incident_lock.write_denial(principal)
             if denial is not None:
                 raise _Denied(denial)
-        budgets = self._budgets
         if governed and budgets is not None:
             # TODO(control-plane-gap): no run means no enforceable budget, so
             # the call is denied; hosts must start_run() before dispatching.
@@ -1254,7 +1346,8 @@ class GovernedToolDispatcher:
             if state.is_exhausted:
                 if self._autonomy is not None:
                     self._autonomy.demote(
-                        principal, "resource budget exhausted: " + ", ".join(state.exhausted)
+                        self._governed_view(principal),
+                        "resource budget exhausted: " + ", ".join(state.exhausted),
                     )
                 if self._autonomy is None or not read_t0:
                     raise _Denied("budget exhausted: " + ", ".join(state.exhausted))
@@ -1419,6 +1512,7 @@ class GovernedToolDispatcher:
                 credential_id=cid,
             ) from exc
         try:
+            self._unattested_human_check(principal, spec, plan, core_leaves)
             requested_by = self._resolve_requested_by(principal, plan.tier, requested_by, session)
             self._harness_checks(principal, spec, plan.tier, trigger_id, session, consume)
         except _Denied as exc:
@@ -1772,9 +1866,13 @@ class GovernedToolDispatcher:
         otherwise ignored. Phase 6b: ``on_authorized`` (harness code, e.g. the
         socket service's intent record) runs after authorisation and before
         the tool; if it raises, the call is denied and the tool never runs.
-        Without ``require_credential``, the trusted host must authenticate
-        ``principal`` and ``requested_by``; never forward agent-supplied identity
-        labels. With credentials, AGENT T2+ calls require a requester-bound token.
+        Without identity attestation (``require_credential`` with an
+        identity-backed issuer), a HUMAN principal may run only read-only,
+        non-core calls below T2 unless the dispatcher was built with
+        ``trust_host_identity=True``; that opt-in means the trusted host
+        authenticates ``principal`` and ``requested_by`` itself and never
+        forwards agent-supplied identity labels. With credentials, AGENT T2+
+        calls require a requester-bound token.
         """
         auth = self._authorize(
             principal,
