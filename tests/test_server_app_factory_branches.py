@@ -162,7 +162,8 @@ def test_record_outcome_writes_through_custom_audit_store() -> None:
 
 
 @pytest.mark.unit
-def test_audit_store_adapter_len_reports_store_count() -> None:
+def test_audit_store_adapter_len_contract_matches_store_count() -> None:
+    # No HTTP route reaches __len__: this is an adapter contract test, not route coverage.
     store = _RecordingAuditStore()
     client = TestClient(create_governance_app(audit_store=store, api_key=KEY))
     for action in ("first note", "second note"):
@@ -278,7 +279,9 @@ def test_cdp_certificate_missing_record_is_404(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.unit
-def test_cdp_certificate_without_pdf_extra_is_503(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cdp_certificate_import_guard_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Exercises the route's import guard for acgs_lite.cdp.certificate (a None
+    # sys.modules entry forces ImportError); it does not model an install without fpdf2.
     backend = InMemoryCDPBackend()
     record = CDPRecordV1(cdp_id="cert-1", tenant_id="default")
     record.finalize()
