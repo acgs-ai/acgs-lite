@@ -12,8 +12,8 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from acgs_lite import Constitution, Rule, Severity, ViolationAction  # noqa: E402
 from acgs_lite.engine import GovernanceEngine  # noqa: E402
-from acgs_lite.errors import ConstitutionalViolationError  # noqa: E402
 from acgs_lite.server import create_governance_app  # noqa: E402
 
 ROUTE = "/integrations/claude-code/check"
@@ -243,19 +243,24 @@ def test_hook_event_name_is_passed_to_engine_context(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.unit
-def test_constitutional_violation_from_engine_is_denied(monkeypatch: pytest.MonkeyPatch) -> None:
-    def raise_violation(*args: object, **kwargs: object) -> object:
-        raise ConstitutionalViolationError(
-            "blocked by test rule", rule_id="CC-TEST", severity="critical"
-        )
-
-    monkeypatch.setattr(GovernanceEngine, "validate", raise_violation)
-    client = TestClient(create_governance_app(api_key=KEY))
+def test_halt_rule_violation_is_denied_through_real_engine() -> None:
+    constitution = Constitution.from_rules(
+        [
+            Rule(
+                id="CC-HALT",
+                text="Never detonate anything",
+                severity=Severity.CRITICAL,
+                keywords=["detonate"],
+                workflow_action=ViolationAction.HALT,
+            )
+        ]
+    )
+    client = TestClient(create_governance_app(constitution, api_key=KEY))
 
     resp = client.post(
         ROUTE,
         headers=HDR,
-        json={"tool_name": "Bash", "tool_input": {"command": "echo hi"}},
+        json={"tool_name": "Bash", "tool_input": {"command": "detonate the payload"}},
     )
 
     assert resp.status_code == 200
@@ -263,9 +268,15 @@ def test_constitutional_violation_from_engine_is_denied(monkeypatch: pytest.Monk
     assert body["decision"] == "deny"
     assert body["compliant"] is False
     assert body["reason"] == "constitutional_denial"
-    assert body["first_violation"]["rule_id"] == "CC-TEST"
-    assert body["first_violation"]["severity"] == "critical"
-    assert body["first_violation"]["category"] == "constitution"
+    assert body["first_violation"]["rule_id"] == "CC-HALT"
+
+    benign = client.post(
+        ROUTE,
+        headers=HDR,
+        json={"tool_name": "Bash", "tool_input": {"command": "echo hi"}},
+    )
+    assert benign.status_code == 200
+    assert benign.json()["decision"] == "allow"
 
 
 @pytest.mark.unit
