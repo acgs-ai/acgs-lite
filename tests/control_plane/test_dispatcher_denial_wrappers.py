@@ -306,7 +306,10 @@ def test_failed_consumption_claim_is_denied(backup: Any, monkeypatch: pytest.Mon
     kw = backup.kwargs(d)
     monkeypatch.setattr(backup.runs, "consume_backup", _raiser(OSError("fsync failed")))
 
-    with pytest.raises(ToolDenied, match="backup run already consumed"):
+    # The denial is correct, but the source reports a storage failure as "backup run
+    # already consumed", which is misleading (source issue, not fixed here), so the
+    # reason text is deliberately not pinned.
+    with pytest.raises(ToolDenied):
         d.dispatch(AGENT, "delete", BACKUP_ARGS, **kw)
     assert backup.calls == []
     assert not backup.runs.backup_consumed(backup.ref)

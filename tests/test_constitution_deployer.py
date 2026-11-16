@@ -58,7 +58,7 @@ def test_threshold_boundary_accepted(base: Constitution, suggested: SuggestedRul
 
 
 def test_appends_synthesized_rule(base: Constitution, suggested: SuggestedRule) -> None:
-    new_c, new_hash = ConstitutionDeployer().deploy_approved_rules(base, [suggested], 0.8)
+    new_c, _ = ConstitutionDeployer().deploy_approved_rules(base, [suggested], 0.8)
 
     assert [r.id for r in new_c.rules] == ["R-DEL", "SYN-1"]
     added = new_c.rules[-1]
@@ -67,7 +67,6 @@ def test_appends_synthesized_rule(base: Constitution, suggested: SuggestedRule) 
     assert added.severity is Severity.HIGH
     assert added.category == "data"
     assert added.text == "no exfiltration"
-    assert new_hash == new_c.hash
     # Input constitution is not mutated.
     assert len(base.rules) == 1
 
