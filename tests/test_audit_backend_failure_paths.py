@@ -162,8 +162,9 @@ def test_atomic_paths_warn_without_checkpoint_support(caplog: pytest.LogCaptureF
     assert len(log) == 3
     assert log.verify_chain() is True
 
-    # Documented limitation (not asserted): without checkpoint support the
-    # backend keeps the row written before the failed persist step.
+    # Documented limitation, deliberately not asserted because it is not desired
+    # behaviour: without checkpoint support the backend keeps the row written
+    # before the failed persist step.
     with pytest.raises(RuntimeError, match="persist failed"):
         log.record_atomic(_entry(4), persist=_raiser)
     assert len(log) == 3

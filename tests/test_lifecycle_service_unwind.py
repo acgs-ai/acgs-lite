@@ -323,14 +323,33 @@ async def test_rollback_unwind_restores_parent_activated_by() -> None:
     lc, store, sink = _build()
     v1 = await _drive_to_active(lc)
     v2 = await _drive_to_active(lc)
-    before = _stored(store, v1).activated_by
-    assert before == "executor-1"
+    parent = store.get_bundle(v1)
+    if parent is None or parent.activated_by != "executor-1":
+        pytest.fail("precondition: parent bundle must exist and be activated by executor-1")
+    before = parent.activated_by
 
     sink.armed = True
     with pytest.raises(LifecycleEvidenceError, match="rollback"):
         await lc.rollback(v2, "executor-2", "regression")
 
-    assert _stored(store, v1).activated_by == before
+    restored_parent = store.get_bundle(v1)
+    if restored_parent is None:
+        pytest.fail("parent bundle disappeared from the store")
+    assert restored_parent.activated_by == before
+
+
+@pytest.mark.asyncio
+async def test_activate_unwind_without_prior_activation_restores_staged_and_no_active() -> None:
+    lc, store, sink = _build()
+    v1 = await _drive_to_staged(lc)
+    assert store.get_activation(TENANT) is None
+
+    sink.armed = True
+    with pytest.raises(LifecycleEvidenceError, match="activate"):
+        await lc.activate(v1, "executor-1")
+
+    assert _stored(store, v1).status == BundleStatus.STAGED
+    assert store.get_active_bundle(TENANT) is None
 
 
 @pytest.mark.xfail(
@@ -345,12 +364,16 @@ async def test_rollback_unwind_restores_parent_activated_by() -> None:
 async def test_activate_unwind_without_prior_activation_leaves_no_activation() -> None:
     lc, store, sink = _build()
     v1 = await _drive_to_staged(lc)
-    assert store.get_activation(TENANT) is None
+    if store.get_activation(TENANT) is not None:
+        pytest.fail("precondition: tenant must have no prior activation")
 
     sink.armed = True
     with pytest.raises(LifecycleEvidenceError, match="activate"):
         await lc.activate(v1, "executor-1")
 
-    assert _stored(store, v1).status == BundleStatus.STAGED
-    assert store.get_active_bundle(TENANT) is None
+    bundle = store.get_bundle(v1)
+    if bundle is None or bundle.status != BundleStatus.STAGED:
+        pytest.fail("bundle did not return to STAGED after the failed activation")
+    if store.get_active_bundle(TENANT) is not None:
+        pytest.fail("a bundle is active after the failed activation")
     assert store.get_activation(TENANT) is None

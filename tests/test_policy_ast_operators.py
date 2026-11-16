@@ -69,6 +69,8 @@ def test_policy_below_node_limit_still_parses() -> None:
     tree = parse_policy_source("And(" + ",".join(["a"] * 100) + ")")
 
     assert isinstance(tree, ast.Expression)
+    assert build_policy_expression(tree, {"a": True}, HELPERS) is True
+    assert build_policy_expression(tree, {"a": False}, HELPERS) is False
 
 
 def test_builder_refuses_unhandled_node_without_generic_fallback() -> None:

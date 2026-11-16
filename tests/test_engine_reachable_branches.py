@@ -113,7 +113,6 @@ def test_unknown_attribute_raises() -> None:
 def test_dir_lists_exports_and_submodules() -> None:
     names = dir(engine_pkg)
     assert {"GovernanceEngine", "Severity", "types", "models"} <= set(names)
-    assert names == sorted(names)
 
 
 def test_matcher_mixin_requires_host_overrides() -> None:

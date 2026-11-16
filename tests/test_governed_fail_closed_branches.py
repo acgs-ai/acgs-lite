@@ -170,10 +170,15 @@ def test_cdp_falls_back_when_server_backend_is_unavailable(
 ) -> None:
     monkeypatch.setenv("ACGS_CDP_ENABLED", "true")
     monkeypatch.setitem(sys.modules, "acgs_lite.server", None)
+    # The fallback is constructed at call time from acgs_lite.cdp.store; hand it a
+    # recording backend so the saved record is observable.
+    fallback = InMemoryCDPBackend()
+    monkeypatch.setattr("acgs_lite.cdp.store.InMemoryCDPBackend", lambda: fallback)
     caplog.set_level(logging.DEBUG, logger=GOVERNED_LOGGER)
 
     assert ga(plain).run("hi", governance_action="execute") == "plain:hi"
     assert "server backend unavailable" in caplog.text
+    assert len(fallback.save_calls) == 1
 
 
 def test_cdp_uses_the_server_backend_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:

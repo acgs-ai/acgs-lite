@@ -153,7 +153,9 @@ def test_record_outcome_writes_through_custom_audit_store() -> None:
         latency_ms=5,
     )
 
-    resp = client.post("/governance/record-outcome", json=outcome.model_dump(mode="json"))
+    resp = client.post(
+        "/governance/record-outcome", headers=HDR, json=outcome.model_dump(mode="json")
+    )
 
     assert resp.status_code == 201
     assert resp.json()["details"]["audit_chain_valid"] is True
@@ -304,7 +306,9 @@ def test_openshell_experimental_flag_disables_router() -> None:
     disabled = TestClient(create_governance_app(include_openshell_experimental=False, api_key=KEY))
     enabled_app = create_governance_app(api_key=KEY)
 
-    resp = disabled.post("/governance/evaluate-action", json=_make_action().model_dump(mode="json"))
+    resp = disabled.post(
+        "/governance/evaluate-action", headers=HDR, json=_make_action().model_dump(mode="json")
+    )
 
     assert resp.status_code == 404
     assert "/governance/evaluate-action" in enabled_app.openapi()["paths"]
@@ -315,12 +319,43 @@ def test_openshell_state_path_persists_decisions(tmp_path: Path) -> None:
     state_path = tmp_path / "state.json"
     client = TestClient(create_governance_app(openshell_state_path=state_path, api_key=KEY))
 
-    resp = client.post("/governance/evaluate-action", json=_make_action().model_dump(mode="json"))
+    resp = client.post(
+        "/governance/evaluate-action", headers=HDR, json=_make_action().model_dump(mode="json")
+    )
 
     assert resp.status_code == 200
     decision_id = resp.json()["decision_id"]
     assert state_path.exists()
     assert decision_id in state_path.read_text()
+
+
+@pytest.mark.unit
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason=(
+        "openshell governance router is mounted without the API-key dependency "
+        "(server.py include_router ~796); create_governance_app docstring promises "
+        "the key guards all mutating endpoints"
+    ),
+)
+def test_openshell_record_outcome_requires_api_key() -> None:
+    client = TestClient(create_governance_app(api_key=KEY))
+    outcome = ExecutionOutcome(
+        decision_id="dec_001",
+        request_id="req_1",
+        executor=ActorRef(actor_id="agent/exec", role=ActorRole.EXECUTOR, sandbox_id="sb"),
+        outcome_status=OutcomeStatus.SUCCEEDED,
+        result_hash="sha256:abc",
+        summary="done",
+        latency_ms=5,
+    )
+    if "/governance/record-outcome" not in client.app.openapi()["paths"]:
+        pytest.fail("openshell governance router is not mounted; precondition not met")
+
+    resp = client.post("/governance/record-outcome", json=outcome.model_dump(mode="json"))
+
+    assert resp.status_code in (401, 403)
 
 
 @pytest.mark.unit
