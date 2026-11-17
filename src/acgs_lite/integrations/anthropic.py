@@ -154,6 +154,9 @@ def _struct_to_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)
     if is_dataclass(value):
+        if isinstance(value, type):
+            # A dataclass class (not an instance); keeps the TypeError asdict() raises.
+            raise TypeError("asdict() should be called on dataclass instances")
         return asdict(value)
     if hasattr(value, "__dict__"):
         return dict(vars(value))

@@ -14,8 +14,9 @@ import re
 import time
 import unicodedata
 from collections import defaultdict
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from acgs_lite.audit import AuditEntry, AuditLog
 from acgs_lite.constitution import (
@@ -34,6 +35,13 @@ from .batch import BatchValidationMixin
 from .enforcement import EnforcementResolution, resolve_enforcement
 from .matcher import _HAS_AHO, _HAS_RUST, _RUST_ALLOW, GovernanceMatcherMixin, _ac, _rust
 from .models import CustomValidator, ValidationResult, Violation, _dedup_violations
+
+
+class _PatternSearch(Protocol):
+    """Call shape of a bound ``re.Pattern[str].search``, as used by the matcher."""
+
+    def __call__(self, string: str, pos: int = ..., /) -> re.Match[str] | None: ...
+
 
 # Default_Ignorable_Code_Point, from Unicode 16.0.0 DerivedCoreProperties.txt.
 # ``unicodedata`` does not expose the property. Besides format characters it covers
@@ -307,7 +315,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         self._no_anchor_patterns = _no_anchor_patterns
         all_anchors = set(_anchor_patterns.keys())
         if all_anchors:
-            self._pat_anchor_search = re.compile(
+            self._pat_anchor_search: Callable[[str], re.Match[str] | None] | None = re.compile(
                 "|".join(re.escape(a) for a in sorted(all_anchors, key=len, reverse=True))
             ).search
         else:
@@ -322,8 +330,8 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             self._combined_kw_re: re.Pattern[str] | None = re.compile(
                 "|".join(re.escape(kw) for kw in sorted_kws)
             )
-            self._combined_findall = self._combined_kw_re.findall
-            self._combined_search = self._combined_kw_re.search
+            self._combined_findall: Callable[[str], list[str]] | None = self._combined_kw_re.findall
+            self._combined_search: _PatternSearch | None = self._combined_kw_re.search
 
             neg_kws = sorted(
                 (kw for kw in kw_to_idxs if _KW_NEGATIVE_RE.search(kw)),
@@ -334,7 +342,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 self._neg_kw_re: re.Pattern[str] | None = re.compile(
                     "|".join(re.escape(kw) for kw in neg_kws)
                 )
-                self._neg_findall = self._neg_kw_re.findall
+                self._neg_findall: Callable[[str], list[str]] | None = self._neg_kw_re.findall
             else:
                 self._neg_kw_re = None
                 self._neg_findall = None
@@ -556,7 +564,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         action: str,
         warnings: list[Violation] | None = None,
         action_taken: ViolationAction | None = None,
-        enforcement: EnforcementResolution | None = None,
+        enforcement: EnforcementResolution[Violation] | None = None,
     ) -> ValidationResult:
         """Return an isolated fast-path result.
 
@@ -598,7 +606,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         violations: list[Violation],
         *,
         action_text: str,
-    ) -> EnforcementResolution:
+    ) -> EnforcementResolution[Violation]:
         """Resolve matched violations into runtime enforcement artifacts."""
         return resolve_enforcement(
             violations,
@@ -608,7 +616,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
 
     def _raise_for_enforcement(
         self,
-        enforcement: EnforcementResolution,
+        enforcement: EnforcementResolution[Violation],
         *,
         strict: bool,
         action_text: str,
@@ -673,7 +681,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         latency_ms: float,
         timestamp: str,
         rule_evaluations: list[dict[str, Any]],
-        enforcement: EnforcementResolution | None = None,
+        enforcement: EnforcementResolution[Violation] | None = None,
         audit_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Record a validation audit entry including enforcement metadata."""
@@ -1111,10 +1119,9 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             # are present we fall through to the Python path, which defers the raise.
             _action_lower = action if action.islower() else action.lower()
             _decision, _data = _rv.validate_hot(_action_lower)
-            _has_gov_ctx = context is not None and (
+            if context is not None and (
                 "action_description" in context or "action_detail" in context
-            )
-            if _has_gov_ctx:
+            ):
                 _result = self._validate_rust_gov_context(
                     action,
                     _decision,
@@ -1440,7 +1447,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         self.custom_validators.append(validator)
 
     @contextmanager
-    def non_strict(self):
+    def non_strict(self) -> Iterator[GovernanceEngine]:
         """Context manager to temporarily disable strict mode.
 
         Restores the previous strict setting on exit, even if an exception is raised.
