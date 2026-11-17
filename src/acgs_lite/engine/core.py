@@ -738,24 +738,42 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
     def _runtime_active_rules(self, context: dict[str, Any] | None) -> list[Rule]:
         """Resolve rules that are currently enforceable for the given runtime context."""
         ctx = context or {}
-        evaluation_time = self._resolve_runtime_evaluation_time(ctx)
+        rules = self.constitution.rules
+        evaluation_time = self._context_evaluation_time(ctx) if ctx else None
+        if evaluation_time is None:
+            for rule in rules:
+                if rule.valid_from or rule.valid_until:
+                    evaluation_time = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+                    break
+            else:
+                # No rule is time-bounded and the evaluation time would be our own
+                # well-formed clock reading, so is_valid_at() is True for every rule.
+                # Skip reading the clock; a caller-supplied time still goes through
+                # is_valid_at() below so a malformed one keeps raising ValueError.
+                return [
+                    rule
+                    for rule in rules
+                    if rule.enabled
+                    and not rule.deprecated
+                    and (not rule.condition or rule.condition_matches(ctx))
+                ]
         return [
             rule
-            for rule in self.constitution.rules
+            for rule in rules
             if rule.enabled
             and not rule.deprecated
-            and rule.condition_matches(ctx)
+            and (not rule.condition or rule.condition_matches(ctx))
             and rule.is_valid_at(evaluation_time)
         ]
 
     @staticmethod
-    def _resolve_runtime_evaluation_time(context: dict[str, Any]) -> str:
-        """Resolve the timestamp used for temporal rule activation."""
+    def _context_evaluation_time(context: dict[str, Any]) -> str | None:
+        """Return the caller-supplied timestamp for temporal rule activation, if any."""
         for key in ("timestamp", "evaluation_time", "valid_at", "at"):
             value = context.get(key)
             if isinstance(value, str) and value:
                 return value
-        return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+        return None
 
     def _validate_with_runtime_rule_filtering(
         self,
@@ -781,19 +799,11 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         # with its own signals; findings are unioned and deduplicated below.
         for text_lower in _match_variants(action):
             has_neg = bool(_NEGATIVE_VERBS_RE.search(text_lower))
-            has_pos = (not has_neg) and any(
-                w in _POSITIVE_VERBS_SET for w in text_lower.split()[:4]
-            )
+            has_pos = (not has_neg) and not _POSITIVE_VERBS_SET.isdisjoint(text_lower.split()[:4])
             for rule in applicable_rules:
                 if rule.matches_with_signals(text_lower, has_neg, has_pos):
                     violations.append(
-                        Violation(
-                            rule_id=rule.id,
-                            rule_text=rule.text,
-                            severity=rule.severity,
-                            matched_content=action_200,
-                            category=rule.category,
-                        )
+                        Violation(rule.id, rule.text, rule.severity, action_200, rule.category)
                     )
 
         if context and ("action_detail" in context or "action_description" in context):
@@ -802,18 +812,18 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                     continue
                 for value_lower in _match_variants(value):
                     value_has_neg = bool(_NEGATIVE_VERBS_RE.search(value_lower))
-                    value_has_pos = (not value_has_neg) and any(
-                        word in _POSITIVE_VERBS_SET for word in value_lower.split()[:4]
+                    value_has_pos = (not value_has_neg) and not _POSITIVE_VERBS_SET.isdisjoint(
+                        value_lower.split()[:4]
                     )
                     for rule in applicable_rules:
                         if rule.matches_with_signals(value_lower, value_has_neg, value_has_pos):
                             violations.append(
                                 Violation(
-                                    rule_id=rule.id,
-                                    rule_text=rule.text,
-                                    severity=rule.severity,
-                                    matched_content=f"context[{key}]: {value[:100]}",
-                                    category=rule.category,
+                                    rule.id,
+                                    rule.text,
+                                    rule.severity,
+                                    f"context[{key}]: {value[:100]}",
+                                    rule.category,
                                 )
                             )
 
@@ -845,28 +855,29 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         latency_ms = (time.perf_counter() - start) * 1000
         request_id = str(next(_request_counter))
         timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        all_matched = enforcement.blocking_violations + enforcement.warning_violations
+        # Positional, in ValidationResult field order (keyword passing costs more).
         result = ValidationResult(
-            valid=valid,
-            constitutional_hash=self._const_hash,
-            violations=enforcement.blocking_violations,
-            rules_checked=len(applicable_rules),
-            latency_ms=latency_ms,
-            request_id=request_id,
-            timestamp=timestamp,
-            action=action_trimmed,
-            agent_id=agent_id,
-            warnings=enforcement.warning_violations,
-            action_taken=enforcement.action_taken,
-            notifications=enforcement.notifications,
-            review_requests=enforcement.review_requests,
-            escalations=enforcement.escalations,
-            incident_alerts=enforcement.incident_alerts,
+            valid,
+            self._const_hash,
+            enforcement.blocking_violations,
+            len(applicable_rules),
+            latency_ms,
+            request_id,
+            timestamp,
+            action_trimmed,
+            agent_id,
+            enforcement.warning_violations,
+            enforcement.action_taken,
+            enforcement.notifications,
+            enforcement.review_requests,
+            enforcement.escalations,
+            enforcement.incident_alerts,
         )
 
         if self._fast_records is not None:
             self._fast_records.append(None)
         else:
+            all_matched = enforcement.blocking_violations + enforcement.warning_violations
             self._record_validation_audit(
                 request_id=request_id,
                 agent_id=agent_id,
