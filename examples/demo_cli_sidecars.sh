@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC_DIR="$REPO_ROOT/src"
+if [[ ! -d "$SRC_DIR" && -d "$REPO_ROOT/packages/acgs-lite/src" ]]; then
+  SRC_DIR="$REPO_ROOT/packages/acgs-lite/src"
+fi
+PYTHON_BIN="${PYTHON:-python3}"
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/acgs-sidecars-demo.XXXXXX")"
 KEEP_ARTIFACTS="${KEEP_ARTIFACTS:-0}"
 
@@ -14,7 +19,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-CLI=(env PYTHONPATH="$REPO_ROOT/packages/acgs-lite/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m acgs_lite.cli)
+CLI=(env PYTHONPATH="$SRC_DIR${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m acgs_lite.cli)
 
 section() {
   printf '\n\033[1;36m== %s ==\033[0m\n' "$1"
