@@ -11,7 +11,7 @@ readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 authors = [
-    {name = "ACGS Team", email = "hello@acgs.dev"},
+    {name = "ACGS Team", email = "hello@acgs.ai"},
 ]
 keywords = ["ai", "governance", "constitutional", "agents", "legitimacy", "fail-closed", "decision-receipts", "bounded-execution", "maci", "audit", "eu-ai-act", "ai-governance", "compliance", "constitutional-ai", "formal-verification", "z3", "lean4", "hipaa", "gdpr", "nist-ai-rmf", "ai-act", "responsible-ai"]
 classifiers = [
@@ -67,6 +67,8 @@ all = ["acgs-lite[a2a,openai,anthropic,agno,langchain,litellm,google,llamaindex,
 docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",
+    # mkdocstrings>=1.0.7 needs Python 3.11; 1.0.6 breaks on pymdown-extensions 12.
+    "pymdown-extensions<12; python_version < '3.11'",
     "mike>=2.0",
     "mkdocs-git-revision-date-localized-plugin>=1.2",
 ]
@@ -153,17 +155,3 @@ ignore_missing_imports = true
 warn_unused_ignores = false
 allow_untyped_decorators = true
 disable_error_code = ["import-untyped", "import-not-found", "no-untyped-call", "misc", "type-arg", "no-any-return"]
-
-[[tool.mypy.overrides]]
-module = [
-    "acgs_lite.constitution.constitution",
-    "acgs_lite.constitution.memoization",
-    "acgs_lite.constitution.policy_export",
-    "acgs_lite.constitution.regulatory",
-    "acgs_lite.constitution.rule",
-    "acgs_lite.engine.batch",
-    "acgs_lite.engine.core",
-    "acgs_lite.integrations.a2a",
-    "acgs_lite.integrations.anthropic",
-]
-ignore_errors = true

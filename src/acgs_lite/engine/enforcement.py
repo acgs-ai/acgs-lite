@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Generic, Protocol, TypeVar
 
 from acgs_lite.constitution.rule import ViolationAction
 
@@ -17,15 +17,30 @@ DEFAULT_HALT_CHANNEL = "governance_halt"
 class ViolationLike(Protocol):
     """Minimal violation shape needed to build enforcement artifacts."""
 
-    rule_id: str
-    rule_text: str
-    severity: Any
-    matched_content: str
-    category: str
+    @property
+    def rule_id(self) -> str: ...
+    @property
+    def rule_text(self) -> str: ...
+    @property
+    def severity(self) -> Any: ...
+    @property
+    def matched_content(self) -> str: ...
+    @property
+    def category(self) -> str: ...
+
+
+_V = TypeVar("_V", bound=ViolationLike)
+
+
+_NO_VALUE: Any = object()
 
 
 def _severity_value(value: Any) -> str:
-    return value.value if hasattr(value, "value") else str(value)
+    # One attribute read instead of hasattr() + a second read: enum ``.value`` is a
+    # DynamicClassAttribute descriptor on Python 3.10, so each read is a Python call.
+    # getattr() with a default swallows exactly what hasattr() swallows (AttributeError).
+    resolved = getattr(value, "value", _NO_VALUE)
+    return str(value) if resolved is _NO_VALUE else resolved
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,18 +174,18 @@ class EnforcementOutcome:
 
 
 @dataclass(slots=True)
-class EnforcementResolution:
+class EnforcementResolution(Generic[_V]):
     """Aggregated runtime artifacts produced by validation dispatch."""
 
-    blocking_violations: list[ViolationLike] = field(default_factory=list)
-    warning_violations: list[ViolationLike] = field(default_factory=list)
+    blocking_violations: list[_V] = field(default_factory=list)
+    warning_violations: list[_V] = field(default_factory=list)
     notifications: list[NotificationEvent] = field(default_factory=list)
     review_requests: list[ReviewRequest] = field(default_factory=list)
     escalations: list[EscalationRequest] = field(default_factory=list)
     incident_alerts: list[IncidentAlert] = field(default_factory=list)
     action_taken: ViolationAction | None = None
     primary_action: ViolationAction | None = None
-    primary_violation: ViolationLike | None = None
+    primary_violation: _V | None = None
     _outcome_specs: list[
         tuple[
             str,
@@ -229,33 +244,40 @@ _ACTION_PRIORITY = {
     ViolationAction.HALT: 5,
 }
 
+# Module-level aliases: a global read is cheaper than an enum class attribute read.
+_WARN = ViolationAction.WARN
+_BLOCK_AND_NOTIFY = ViolationAction.BLOCK_AND_NOTIFY
+_REQUIRE_HUMAN_REVIEW = ViolationAction.REQUIRE_HUMAN_REVIEW
+_ESCALATE = ViolationAction.ESCALATE
+_HALT = ViolationAction.HALT
+
 
 def resolve_enforcement(
-    violations: list[ViolationLike],
+    violations: list[_V],
     *,
     action_text: str,
-    workflow_action_for_violation: Callable[[ViolationLike], ViolationAction],
-) -> EnforcementResolution:
+    workflow_action_for_violation: Callable[[_V], ViolationAction],
+) -> EnforcementResolution[_V]:
     """Resolve matched violations into runtime artifacts."""
-    resolution = EnforcementResolution()
+    resolution: EnforcementResolution[_V] = EnforcementResolution()
     best_priority = -1
 
     for violation in violations:
         workflow_action = workflow_action_for_violation(violation)
         severity = _severity_value(violation.severity)
-        blocking = workflow_action is not ViolationAction.WARN
+        blocking = workflow_action is not _WARN
 
         notification = None
         review_request = None
         escalation = None
         incident_alert = None
 
-        if workflow_action is ViolationAction.WARN:
+        if workflow_action is _WARN:
             resolution.warning_violations.append(violation)
         else:
             resolution.blocking_violations.append(violation)
 
-        if workflow_action is ViolationAction.BLOCK_AND_NOTIFY:
+        if workflow_action is _BLOCK_AND_NOTIFY:
             notification = NotificationEvent(
                 rule_id=violation.rule_id,
                 rule_text=violation.rule_text,
@@ -265,7 +287,7 @@ def resolve_enforcement(
                 matched_content=violation.matched_content,
             )
             resolution.notifications.append(notification)
-        elif workflow_action is ViolationAction.REQUIRE_HUMAN_REVIEW:
+        elif workflow_action is _REQUIRE_HUMAN_REVIEW:
             review_request = ReviewRequest(
                 rule_id=violation.rule_id,
                 rule_text=violation.rule_text,
@@ -275,7 +297,7 @@ def resolve_enforcement(
                 matched_content=violation.matched_content,
             )
             resolution.review_requests.append(review_request)
-        elif workflow_action is ViolationAction.ESCALATE:
+        elif workflow_action is _ESCALATE:
             escalation = EscalationRequest(
                 rule_id=violation.rule_id,
                 rule_text=violation.rule_text,
@@ -285,7 +307,7 @@ def resolve_enforcement(
                 matched_content=violation.matched_content,
             )
             resolution.escalations.append(escalation)
-        elif workflow_action is ViolationAction.HALT:
+        elif workflow_action is _HALT:
             incident_alert = IncidentAlert(
                 rule_id=violation.rule_id,
                 rule_text=violation.rule_text,
