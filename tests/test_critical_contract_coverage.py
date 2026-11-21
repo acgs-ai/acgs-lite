@@ -701,7 +701,6 @@ class TestDelegationRegistry:
 
 from acgs_lite.constitution import Constitution, Rule, Severity
 from acgs_lite.constitution.rule import ViolationAction
-from acgs_lite.engine._rust_dispatch import RustDispatchMixin
 from acgs_lite.engine.core import GovernanceEngine
 from acgs_lite.engine.matcher import GovernanceMatcherMixin
 from acgs_lite.engine.models import ValidationResult
@@ -709,6 +708,7 @@ from acgs_lite.engine.rust import _RUST_ALLOW, _RUST_DENY, _RUST_DENY_CRITICAL
 from acgs_lite.errors import ConstitutionalViolationError
 from acgs_lite.legitimacy import LegitimacyInvariantError, TrustedExecutionContext
 from acgs_lite.legitimacy.authorization import (
+    EngineDecision,
     ExecutionAuthority,
     build_issue_receipt,
     extract_authorization_kwargs,
@@ -738,6 +738,15 @@ from acgs_lite.legitimacy.signing import (
     SignedReceipt,
     sign_execution_authorization,
     verify_signature,
+)
+
+# Phase 2: callers must pass the engine's decision; these tests exercise an allow.
+_ALLOW_DECISION = EngineDecision(
+    decision_type="ALLOW",
+    matched_rule_ids=("NO_SPECIFIC_CONSTRAINT_MATCHED_UNDER_POLICY_VERSION",),
+    required_controls=(),
+    rationale=None,
+    payload_count=1,
 )
 
 
@@ -774,16 +783,6 @@ def _rule_contract() -> tuple[list[tuple[object, ...]], list[ConstitutionalViola
     return rule_data, errors
 
 
-class _DormantDispatchHost(RustDispatchMixin):
-    def __init__(self, *, strict: bool = True) -> None:
-        self._rule_data, self._rule_excs = _rule_contract()
-        self._rule_id_to_exc_idx = {"WARN": 0, "BLOCK": 1}
-        self._rust_validator = _SyntheticRustValidator()
-        self._pooled_result = ValidationResult(True, "synthetic")
-        self._pooled_escalate = ValidationResult(True, "synthetic")
-        self.strict = strict
-
-
 class _MatcherHost(GovernanceMatcherMixin):
     def __init__(self, *, strict: bool = True) -> None:
         self._rule_data, self._rule_excs = _rule_contract()
@@ -802,55 +801,34 @@ class _MatcherHost(GovernanceMatcherMixin):
         return ValidationResult(valid, "synthetic", violations, action=action)
 
 
-@pytest.mark.parametrize("host_type", [_DormantDispatchHost, _MatcherHost])
-def test_synthetic_no_context_allow_and_unknown(host_type):
-    host = host_type()
+def test_synthetic_no_context_allow_and_unknown():
+    host = _MatcherHost()
     records: list[object] = []
     args = ("safe", _RUST_ALLOW, 0, host._rule_excs, records)
-    if host_type is _MatcherHost:
-        result = host._validate_rust_no_context(*args, strict=True)
-    else:
-        result = host._validate_rust_no_context(*args)
+    result = host._validate_rust_no_context(*args, strict=True)
     assert result is not None and result.valid
     assert records == [None]
-    if host_type is _MatcherHost:
-        assert host._validate_rust_no_context("x", 999, 0, [], [], strict=True) is None
-    else:
-        assert host._validate_rust_no_context("x", 999, 0, [], []) is None
+    assert host._validate_rust_no_context("x", 999, 0, [], [], strict=True) is None
 
 
-@pytest.mark.parametrize("host_type", [_DormantDispatchHost, _MatcherHost])
-def test_synthetic_no_context_critical_and_bitmap(host_type):
-    host = host_type()
+def test_synthetic_no_context_critical_and_bitmap():
+    host = _MatcherHost()
     records: list[object] = []
     with pytest.raises(ConstitutionalViolationError, match="index out of range"):
-        if host_type is _MatcherHost:
-            host._validate_rust_no_context("bad", _RUST_DENY_CRITICAL, 9, [], records, True)
-        else:
-            host._validate_rust_no_context("bad", _RUST_DENY_CRITICAL, 9, [], records)
+        host._validate_rust_no_context("bad", _RUST_DENY_CRITICAL, 9, [], records, True)
     with pytest.raises(ConstitutionalViolationError):
-        if host_type is _MatcherHost:
-            host._validate_rust_no_context("bad", _RUST_DENY_CRITICAL, 1, host._rule_excs, [], True)
-        else:
-            host._validate_rust_no_context("bad", _RUST_DENY_CRITICAL, 1, host._rule_excs, [])
+        host._validate_rust_no_context("bad", _RUST_DENY_CRITICAL, 1, host._rule_excs, [], True)
     with pytest.raises(ConstitutionalViolationError, match="BLOCK"):
-        if host_type is _MatcherHost:
-            host._validate_rust_no_context("bad", _RUST_DENY, 3, host._rule_excs, [], True)
-        else:
-            host._validate_rust_no_context("bad", _RUST_DENY, 3, host._rule_excs, [])
+        host._validate_rust_no_context("bad", _RUST_DENY, 3, host._rule_excs, [], True)
 
     host.strict = False
-    if host_type is _MatcherHost:
-        result = host._validate_rust_no_context("warn", _RUST_DENY, 1, host._rule_excs, [], False)
-    else:
-        result = host._validate_rust_no_context("warn", _RUST_DENY, 1, host._rule_excs, [])
+    result = host._validate_rust_no_context("warn", _RUST_DENY, 1, host._rule_excs, [], False)
     assert result is not None and result.valid
     assert [v.rule_id for v in result.violations] == ["WARN"]
 
 
-@pytest.mark.parametrize("host_type", [_DormantDispatchHost, _MatcherHost])
-def test_synthetic_governance_context_merge(host_type):
-    host = host_type(strict=False)
+def test_synthetic_governance_context_merge():
+    host = _MatcherHost(strict=False)
     host._rust_validator.hot = {
         "detail": (_RUST_DENY, 1),
         "DETAIL": (_RUST_DENY, 1),
@@ -884,9 +862,8 @@ def test_synthetic_governance_context_merge(host_type):
     assert allowed is not None and allowed.valid
 
 
-@pytest.mark.parametrize("host_type", [_DormantDispatchHost, _MatcherHost])
-def test_synthetic_metadata_context(host_type):
-    host = host_type()
+def test_synthetic_metadata_context():
+    host = _MatcherHost()
     assert host._validate_rust_metadata_context(
         "safe", _RUST_ALLOW, 0, host._rule_excs, [], True
     ).valid
@@ -898,22 +875,15 @@ def test_synthetic_metadata_context(host_type):
         host._validate_rust_metadata_context(
             "bad", _RUST_DENY_CRITICAL, 1, host._rule_excs, [], False
         )
-    if host_type is _MatcherHost:
-        with pytest.raises(ConstitutionalViolationError, match="BLOCK"):
-            host._validate_rust_metadata_context("bad", _RUST_DENY, 3, host._rule_excs, [], True)
-    else:
-        blocked = host._validate_rust_metadata_context(
-            "bad", _RUST_DENY, 3, host._rule_excs, [], True
-        )
-        assert blocked is not None and [v.rule_id for v in blocked.violations] == ["WARN", "BLOCK"]
+    with pytest.raises(ConstitutionalViolationError, match="BLOCK"):
+        host._validate_rust_metadata_context("bad", _RUST_DENY, 3, host._rule_excs, [], True)
     result = host._validate_rust_metadata_context("warn", _RUST_DENY, 1, host._rule_excs, [], False)
     assert result is not None and result.valid
     assert host._validate_rust_metadata_context("x", 999, 0, [], [], False) is None
 
 
-@pytest.mark.parametrize("host_type", [_DormantDispatchHost, _MatcherHost])
-def test_synthetic_full_decoder_contract(host_type):
-    host = host_type()
+def test_synthetic_full_decoder_contract():
+    host = _MatcherHost()
     rv = host._rust_validator
     rv.full = (_RUST_ALLOW, [], False)
     assert host._validate_rust_full("SAFE", True, [], host._rule_excs, []).valid
@@ -1059,7 +1029,9 @@ def test_execution_authority_rejects_every_changed_binding() -> None:
     constitution = Constitution.default()
     invocation = bind_invocation(action, ("safe",), {})
     policy = bind_policy(constitution)
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
     authority = ExecutionAuthority()
     grant = authority.issue(
         receipt=receipt,
@@ -1122,7 +1094,9 @@ def test_execution_authority_rejects_bad_or_expired_timestamps(
 
     invocation = bind_invocation(action, ("safe",), {})
     policy = bind_policy(Constitution.default())
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
     authority = ExecutionAuthority()
     grant = authority.issue(
         receipt=receipt,
@@ -1233,7 +1207,9 @@ def test_receipt_execution_refuses_unverifiable_audit_and_control_evidence() -> 
 
     invocation = bind_invocation(action, ("account-1",), {})
     policy = bind_policy(Constitution.default())
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
 
     class MissingVerifier:
         pass
@@ -1285,7 +1261,9 @@ def test_execution_signature_binds_envelope_and_rejects_malformed_wire_data() ->
 
     invocation = bind_invocation(action, ("account-1",), {})
     policy = bind_policy(Constitution.default())
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
     with pytest.raises(ValueError, match="exactly 32 bytes"):
         Ed25519ReceiptSigner.from_seed(b"short")
     signer = Ed25519ReceiptSigner.from_seed(b"s" * 32, key_id="test-key")
@@ -1327,7 +1305,9 @@ def test_corrupted_receipt_fields_fail_before_execution(
 
     invocation = bind_invocation(action, ("safe",), {})
     policy = bind_policy(Constitution.default())
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
     object.__setattr__(receipt, field, value)
     with pytest.raises(LegitimacyInvariantError, match=message):
         validate_receipt_for_execution(receipt)
@@ -1339,7 +1319,9 @@ def test_receipt_hash_verifier_failure_is_fail_closed(monkeypatch) -> None:
 
     invocation = bind_invocation(action, ("safe",), {})
     policy = bind_policy(Constitution.default())
-    receipt = build_issue_receipt(func=action, invocation=invocation, policy=policy)
+    receipt = build_issue_receipt(
+        func=action, invocation=invocation, policy=policy, decision=_ALLOW_DECISION
+    )
 
     def raises(_self):
         raise RuntimeError("synthetic verifier failure")

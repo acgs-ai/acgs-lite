@@ -1,0 +1,1608 @@
+{
+  "schema_version": 1,
+  "repository": {
+    "full_name": "acgs-ai/acgs-lite",
+    "id": 1201916496
+  },
+  "default_branch": "main",
+  "maintainers": [
+    {
+      "login": "dislovelhl",
+      "id": 253742157
+    }
+  ],
+  "authorization_workflow": "immutable-core-authorize.yml",
+  "max_age_seconds": 86400,
+  "protected_paths": [
+    {
+      "pattern": "**/*.pth",
+      "regex": "(?:[^/]+/)*[^/]*\\.pth",
+      "flags": 50
+    },
+    {
+      "pattern": "**/.env*",
+      "regex": "(?:[^/]+/)*\\.env[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "**/conftest.py",
+      "regex": "(?:[^/]+/)*conftest\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "**/constitution*.json",
+      "regex": "(?:[^/]+/)*constitution[^/]*\\.json",
+      "flags": 50
+    },
+    {
+      "pattern": "**/constitution*.toml",
+      "regex": "(?:[^/]+/)*constitution[^/]*\\.toml",
+      "flags": 50
+    },
+    {
+      "pattern": "**/constitution*.yaml",
+      "regex": "(?:[^/]+/)*constitution[^/]*\\.yaml",
+      "flags": 50
+    },
+    {
+      "pattern": "**/constitution*.yml",
+      "regex": "(?:[^/]+/)*constitution[^/]*\\.yml",
+      "flags": 50
+    },
+    {
+      "pattern": "**/memory-write-policy*",
+      "regex": "(?:[^/]+/)*memory\\-write\\-policy[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "**/memory_write_policy*",
+      "regex": "(?:[^/]+/)*memory_write_policy[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "**/sitecustomize*",
+      "regex": "(?:[^/]+/)*sitecustomize[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "**/sitecustomize*/**",
+      "regex": "(?:[^/]+/)*sitecustomize[^/]*(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "**/tool-allowlist*",
+      "regex": "(?:[^/]+/)*tool\\-allowlist[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "**/tool_allowlist*",
+      "regex": "(?:[^/]+/)*tool_allowlist[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "**/usercustomize*",
+      "regex": "(?:[^/]+/)*usercustomize[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "**/usercustomize*/**",
+      "regex": "(?:[^/]+/)*usercustomize[^/]*(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "*.py",
+      "regex": "[^/]*\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "*.pyc",
+      "regex": "[^/]*\\.pyc",
+      "flags": 50
+    },
+    {
+      "pattern": "*.pyd",
+      "regex": "[^/]*\\.pyd",
+      "flags": 50
+    },
+    {
+      "pattern": "*.so",
+      "regex": "[^/]*\\.so",
+      "flags": 50
+    },
+    {
+      "pattern": "*/__init__*.pyd",
+      "regex": "[^/]*/__init__[^/]*\\.pyd",
+      "flags": 50
+    },
+    {
+      "pattern": "*/__init__*.so",
+      "regex": "[^/]*/__init__[^/]*\\.so",
+      "flags": 50
+    },
+    {
+      "pattern": "*/__init__.py",
+      "regex": "[^/]*/__init__\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "*/__init__.pyc",
+      "regex": "[^/]*/__init__\\.pyc",
+      "flags": 50
+    },
+    {
+      "pattern": ".cargo.*",
+      "regex": "\\.cargo\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": ".cargo/**",
+      "regex": "\\.cargo(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": ".github.*",
+      "regex": "\\.github\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": ".github/**",
+      "regex": "\\.github(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": ".github/CODEOWNERS",
+      "regex": "\\.github/CODEOWNERS",
+      "flags": 50
+    },
+    {
+      "pattern": ".gitlab-ci.yml",
+      "regex": "\\.gitlab\\-ci\\.yml",
+      "flags": 50
+    },
+    {
+      "pattern": ".mypy.ini",
+      "regex": "\\.mypy\\.ini",
+      "flags": 50
+    },
+    {
+      "pattern": ".pre-commit-config.yaml",
+      "regex": "\\.pre\\-commit\\-config\\.yaml",
+      "flags": 50
+    },
+    {
+      "pattern": ".pytest.ini",
+      "regex": "\\.pytest\\.ini",
+      "flags": 50
+    },
+    {
+      "pattern": ".pytest.toml",
+      "regex": "\\.pytest\\.toml",
+      "flags": 50
+    },
+    {
+      "pattern": "@implicit-src-shadow:acgs_lite",
+      "regex": "src/(?!(?:acgs_lite)(?:/|$)).*",
+      "flags": 50
+    },
+    {
+      "pattern": "CODEOWNERS",
+      "regex": "CODEOWNERS",
+      "flags": 50
+    },
+    {
+      "pattern": "Makefile",
+      "regex": "Makefile",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/.cargo.*",
+      "regex": "__pycache__/\\.cargo\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/.github.*",
+      "regex": "__pycache__/\\.github\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/audit.*",
+      "regex": "__pycache__/audit\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/audit_logs.*",
+      "regex": "__pycache__/audit_logs\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/control-plane.*",
+      "regex": "__pycache__/control\\-plane\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/credentials.*",
+      "regex": "__pycache__/credentials\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/data.*",
+      "regex": "__pycache__/data\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/eval-suites.*",
+      "regex": "__pycache__/eval\\-suites\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/eval_suites.*",
+      "regex": "__pycache__/eval_suites\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/evals.*",
+      "regex": "__pycache__/evals\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/evaluator.*",
+      "regex": "__pycache__/evaluator\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/held_out.*",
+      "regex": "__pycache__/held_out\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/heldout.*",
+      "regex": "__pycache__/heldout\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/iam.*",
+      "regex": "__pycache__/iam\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/memory-policy.*",
+      "regex": "__pycache__/memory\\-policy\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/memory_policy.*",
+      "regex": "__pycache__/memory_policy\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/policies.*",
+      "regex": "__pycache__/policies\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/policy.*",
+      "regex": "__pycache__/policy\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/promotion.*",
+      "regex": "__pycache__/promotion\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/rust.*",
+      "regex": "__pycache__/rust\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/sandbox.*",
+      "regex": "__pycache__/sandbox\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/scripts.*",
+      "regex": "__pycache__/scripts\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/secrets.*",
+      "regex": "__pycache__/secrets\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/src.*",
+      "regex": "__pycache__/src\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/test_suites.*",
+      "regex": "__pycache__/test_suites\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "__pycache__/tests.*",
+      "regex": "__pycache__/tests\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "audit.*",
+      "regex": "audit\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "audit/**",
+      "regex": "audit(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "audit_logs.*",
+      "regex": "audit_logs\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "audit_logs/**",
+      "regex": "audit_logs(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "config/sandbox*",
+      "regex": "config/sandbox[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "config/sandbox*/**",
+      "regex": "config/sandbox[^/]*(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "control-plane.*",
+      "regex": "control\\-plane\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "control-plane/**",
+      "regex": "control\\-plane(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "control-plane/__pycache__/runbooks.*",
+      "regex": "control\\-plane/__pycache__/runbooks\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "control-plane/runbooks.*",
+      "regex": "control\\-plane/runbooks\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "control-plane/runbooks/**",
+      "regex": "control\\-plane/runbooks(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "credentials.*",
+      "regex": "credentials\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "credentials/**",
+      "regex": "credentials(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "data.*",
+      "regex": "data\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "data/__pycache__/held_out.*",
+      "regex": "data/__pycache__/held_out\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "data/__pycache__/heldout.*",
+      "regex": "data/__pycache__/heldout\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "data/held_out.*",
+      "regex": "data/held_out\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "data/held_out/**",
+      "regex": "data/held_out(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "data/heldout.*",
+      "regex": "data/heldout\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "data/heldout/**",
+      "regex": "data/heldout(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "docs/CODEOWNERS",
+      "regex": "docs/CODEOWNERS",
+      "flags": 50
+    },
+    {
+      "pattern": "eval-suites.*",
+      "regex": "eval\\-suites\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "eval-suites/**",
+      "regex": "eval\\-suites(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "eval_suites.*",
+      "regex": "eval_suites\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "eval_suites/**",
+      "regex": "eval_suites(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "evals.*",
+      "regex": "evals\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "evals/**",
+      "regex": "evals(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "evaluator.*",
+      "regex": "evaluator\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "evaluator/**",
+      "regex": "evaluator(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "held_out.*",
+      "regex": "held_out\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "held_out/**",
+      "regex": "held_out(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "heldout.*",
+      "regex": "heldout\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "heldout/**",
+      "regex": "heldout(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "iam.*",
+      "regex": "iam\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "iam/**",
+      "regex": "iam(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "memory-policy.*",
+      "regex": "memory\\-policy\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "memory-policy/**",
+      "regex": "memory\\-policy(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "memory_policy.*",
+      "regex": "memory_policy\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "memory_policy/**",
+      "regex": "memory_policy(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "mypy.ini",
+      "regex": "mypy\\.ini",
+      "flags": 50
+    },
+    {
+      "pattern": "policies.*",
+      "regex": "policies\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "policies/**",
+      "regex": "policies(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "policy.*",
+      "regex": "policy\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "policy/**",
+      "regex": "policy(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "promotion.*",
+      "regex": "promotion\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "promotion/**",
+      "regex": "promotion(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "pyproject.toml",
+      "regex": "pyproject\\.toml",
+      "flags": 50
+    },
+    {
+      "pattern": "pytest.ini",
+      "regex": "pytest\\.ini",
+      "flags": 50
+    },
+    {
+      "pattern": "pytest.toml",
+      "regex": "pytest\\.toml",
+      "flags": 50
+    },
+    {
+      "pattern": "requirements-test-optional.txt",
+      "regex": "requirements\\-test\\-optional\\.txt",
+      "flags": 50
+    },
+    {
+      "pattern": "rust-toolchain",
+      "regex": "rust\\-toolchain",
+      "flags": 50
+    },
+    {
+      "pattern": "rust-toolchain.toml",
+      "regex": "rust\\-toolchain\\.toml",
+      "flags": 50
+    },
+    {
+      "pattern": "rust.*",
+      "regex": "rust\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "rust/**",
+      "regex": "rust(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "sandbox.*",
+      "regex": "sandbox\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "sandbox/**",
+      "regex": "sandbox(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts.*",
+      "regex": "scripts\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/**",
+      "regex": "scripts(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/__pycache__/check_critical_coverage.*",
+      "regex": "scripts/__pycache__/check_critical_coverage\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/__pycache__/check_immutable_core_diff.*",
+      "regex": "scripts/__pycache__/check_immutable_core_diff\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/__pycache__/check_links.*",
+      "regex": "scripts/__pycache__/check_links\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/__pycache__/check_release_coherence.*",
+      "regex": "scripts/__pycache__/check_release_coherence\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/__pycache__/qualify_wheel.*",
+      "regex": "scripts/__pycache__/qualify_wheel\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/__pycache__/release_candidate.*",
+      "regex": "scripts/__pycache__/release_candidate\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/__pycache__/render_codeowners.*",
+      "regex": "scripts/__pycache__/render_codeowners\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/__pycache__/run_governance_regression.*",
+      "regex": "scripts/__pycache__/run_governance_regression\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_critical_coverage.*",
+      "regex": "scripts/check_critical_coverage\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_critical_coverage.py",
+      "regex": "scripts/check_critical_coverage\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_critical_coverage/**",
+      "regex": "scripts/check_critical_coverage(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_immutable_core_diff.*",
+      "regex": "scripts/check_immutable_core_diff\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_immutable_core_diff.py",
+      "regex": "scripts/check_immutable_core_diff\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_immutable_core_diff/**",
+      "regex": "scripts/check_immutable_core_diff(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_links.*",
+      "regex": "scripts/check_links\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_links.py",
+      "regex": "scripts/check_links\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_links/**",
+      "regex": "scripts/check_links(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_release_coherence.*",
+      "regex": "scripts/check_release_coherence\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_release_coherence.py",
+      "regex": "scripts/check_release_coherence\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/check_release_coherence/**",
+      "regex": "scripts/check_release_coherence(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/qualify_wheel.*",
+      "regex": "scripts/qualify_wheel\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/qualify_wheel.py",
+      "regex": "scripts/qualify_wheel\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/qualify_wheel/**",
+      "regex": "scripts/qualify_wheel(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/release_candidate.*",
+      "regex": "scripts/release_candidate\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/release_candidate.py",
+      "regex": "scripts/release_candidate\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/release_candidate/**",
+      "regex": "scripts/release_candidate(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/render_codeowners.*",
+      "regex": "scripts/render_codeowners\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/render_codeowners.py",
+      "regex": "scripts/render_codeowners\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/render_codeowners/**",
+      "regex": "scripts/render_codeowners(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/run_governance_regression.*",
+      "regex": "scripts/run_governance_regression\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/run_governance_regression.py",
+      "regex": "scripts/run_governance_regression\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "scripts/run_governance_regression/**",
+      "regex": "scripts/run_governance_regression(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "secrets.*",
+      "regex": "secrets\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "secrets/**",
+      "regex": "secrets(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "setup.cfg",
+      "regex": "setup\\.cfg",
+      "flags": 50
+    },
+    {
+      "pattern": "src.*",
+      "regex": "src\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/*.py",
+      "regex": "src/[^/]*\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/__pycache__/acgs_lite.*",
+      "regex": "src/__pycache__/acgs_lite\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite.*",
+      "regex": "src/acgs_lite\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__init__.*",
+      "regex": "src/acgs_lite/__init__\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__init__.py",
+      "regex": "src/acgs_lite/__init__\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/__init__.*",
+      "regex": "src/acgs_lite/__pycache__/__init__\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/_compat.*",
+      "regex": "src/acgs_lite/__pycache__/_compat\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/_meta.*",
+      "regex": "src/acgs_lite/__pycache__/_meta\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/agents.*",
+      "regex": "src/acgs_lite/__pycache__/agents\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/arckit.*",
+      "regex": "src/acgs_lite/__pycache__/arckit\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/audit.*",
+      "regex": "src/acgs_lite/__pycache__/audit\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/cdp.*",
+      "regex": "src/acgs_lite/__pycache__/cdp\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/circuit_breaker.*",
+      "regex": "src/acgs_lite/__pycache__/circuit_breaker\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/cli.*",
+      "regex": "src/acgs_lite/__pycache__/cli\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/commands.*",
+      "regex": "src/acgs_lite/__pycache__/commands\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/constitution.*",
+      "regex": "src/acgs_lite/__pycache__/constitution\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/constrained_output.*",
+      "regex": "src/acgs_lite/__pycache__/constrained_output\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/control_plane.*",
+      "regex": "src/acgs_lite/__pycache__/control_plane\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/engine.*",
+      "regex": "src/acgs_lite/__pycache__/engine\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/errors.*",
+      "regex": "src/acgs_lite/__pycache__/errors\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/evals.*",
+      "regex": "src/acgs_lite/__pycache__/evals\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/events.*",
+      "regex": "src/acgs_lite/__pycache__/events\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/fail_closed.*",
+      "regex": "src/acgs_lite/__pycache__/fail_closed\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/formal.*",
+      "regex": "src/acgs_lite/__pycache__/formal\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/governed.*",
+      "regex": "src/acgs_lite/__pycache__/governed\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/integrations.*",
+      "regex": "src/acgs_lite/__pycache__/integrations\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/lean_verify.*",
+      "regex": "src/acgs_lite/__pycache__/lean_verify\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/legitimacy.*",
+      "regex": "src/acgs_lite/__pycache__/legitimacy\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/licensing.*",
+      "regex": "src/acgs_lite/__pycache__/licensing\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/maci.*",
+      "regex": "src/acgs_lite/__pycache__/maci\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/observability.*",
+      "regex": "src/acgs_lite/__pycache__/observability\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/policygen.*",
+      "regex": "src/acgs_lite/__pycache__/policygen\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/production.*",
+      "regex": "src/acgs_lite/__pycache__/production\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/provenance.*",
+      "regex": "src/acgs_lite/__pycache__/provenance\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/provider_capabilities.*",
+      "regex": "src/acgs_lite/__pycache__/provider_capabilities\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/scoring.*",
+      "regex": "src/acgs_lite/__pycache__/scoring\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/serialization.*",
+      "regex": "src/acgs_lite/__pycache__/serialization\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/trajectory.*",
+      "regex": "src/acgs_lite/__pycache__/trajectory\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/__pycache__/z3_verify.*",
+      "regex": "src/acgs_lite/__pycache__/z3_verify\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/_compat.*",
+      "regex": "src/acgs_lite/_compat\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/_compat.py",
+      "regex": "src/acgs_lite/_compat\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/_compat/**",
+      "regex": "src/acgs_lite/_compat(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/_meta.*",
+      "regex": "src/acgs_lite/_meta\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/_meta.py",
+      "regex": "src/acgs_lite/_meta\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/_meta/**",
+      "regex": "src/acgs_lite/_meta(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/agents.*",
+      "regex": "src/acgs_lite/agents\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/agents/**",
+      "regex": "src/acgs_lite/agents(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/arckit.*",
+      "regex": "src/acgs_lite/arckit\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/arckit/**",
+      "regex": "src/acgs_lite/arckit(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/audit.*",
+      "regex": "src/acgs_lite/audit\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/audit.py",
+      "regex": "src/acgs_lite/audit\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/audit/**",
+      "regex": "src/acgs_lite/audit(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/cdp.*",
+      "regex": "src/acgs_lite/cdp\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/cdp/**",
+      "regex": "src/acgs_lite/cdp(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/circuit_breaker.*",
+      "regex": "src/acgs_lite/circuit_breaker\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/circuit_breaker.py",
+      "regex": "src/acgs_lite/circuit_breaker\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/circuit_breaker/**",
+      "regex": "src/acgs_lite/circuit_breaker(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/cli.*",
+      "regex": "src/acgs_lite/cli\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/cli.py",
+      "regex": "src/acgs_lite/cli\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/cli/**",
+      "regex": "src/acgs_lite/cli(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/commands.*",
+      "regex": "src/acgs_lite/commands\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/commands/**",
+      "regex": "src/acgs_lite/commands(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/constitution.*",
+      "regex": "src/acgs_lite/constitution\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/constitution/**",
+      "regex": "src/acgs_lite/constitution(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/constrained_output.*",
+      "regex": "src/acgs_lite/constrained_output\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/constrained_output.py",
+      "regex": "src/acgs_lite/constrained_output\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/constrained_output/**",
+      "regex": "src/acgs_lite/constrained_output(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/control_plane.*",
+      "regex": "src/acgs_lite/control_plane\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/control_plane/**",
+      "regex": "src/acgs_lite/control_plane(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/engine.*",
+      "regex": "src/acgs_lite/engine\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/engine/**",
+      "regex": "src/acgs_lite/engine(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/errors.*",
+      "regex": "src/acgs_lite/errors\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/errors.py",
+      "regex": "src/acgs_lite/errors\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/errors/**",
+      "regex": "src/acgs_lite/errors(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/evals.*",
+      "regex": "src/acgs_lite/evals\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/evals/**",
+      "regex": "src/acgs_lite/evals(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/events.*",
+      "regex": "src/acgs_lite/events\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/events.py",
+      "regex": "src/acgs_lite/events\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/events/**",
+      "regex": "src/acgs_lite/events(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/fail_closed.*",
+      "regex": "src/acgs_lite/fail_closed\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/fail_closed.py",
+      "regex": "src/acgs_lite/fail_closed\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/fail_closed/**",
+      "regex": "src/acgs_lite/fail_closed(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/formal.*",
+      "regex": "src/acgs_lite/formal\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/formal/**",
+      "regex": "src/acgs_lite/formal(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/governed.*",
+      "regex": "src/acgs_lite/governed\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/governed.py",
+      "regex": "src/acgs_lite/governed\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/governed/**",
+      "regex": "src/acgs_lite/governed(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/integrations.*",
+      "regex": "src/acgs_lite/integrations\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/integrations/__init__.*",
+      "regex": "src/acgs_lite/integrations/__init__\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/integrations/__init__.py",
+      "regex": "src/acgs_lite/integrations/__init__\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/integrations/__pycache__/__init__.*",
+      "regex": "src/acgs_lite/integrations/__pycache__/__init__\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/integrations/__pycache__/control_plane_mcp.*",
+      "regex": "src/acgs_lite/integrations/__pycache__/control_plane_mcp\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/integrations/control_plane_mcp.*",
+      "regex": "src/acgs_lite/integrations/control_plane_mcp\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/integrations/control_plane_mcp.py",
+      "regex": "src/acgs_lite/integrations/control_plane_mcp\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/integrations/control_plane_mcp/**",
+      "regex": "src/acgs_lite/integrations/control_plane_mcp(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/lean_verify.*",
+      "regex": "src/acgs_lite/lean_verify\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/lean_verify.py",
+      "regex": "src/acgs_lite/lean_verify\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/lean_verify/**",
+      "regex": "src/acgs_lite/lean_verify(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/legitimacy.*",
+      "regex": "src/acgs_lite/legitimacy\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/legitimacy/**",
+      "regex": "src/acgs_lite/legitimacy(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/licensing.*",
+      "regex": "src/acgs_lite/licensing\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/licensing.py",
+      "regex": "src/acgs_lite/licensing\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/licensing/**",
+      "regex": "src/acgs_lite/licensing(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/maci.*",
+      "regex": "src/acgs_lite/maci\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/maci/**",
+      "regex": "src/acgs_lite/maci(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/observability.*",
+      "regex": "src/acgs_lite/observability\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/observability/__init__.*",
+      "regex": "src/acgs_lite/observability/__init__\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/observability/__init__.py",
+      "regex": "src/acgs_lite/observability/__init__\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/observability/__pycache__/__init__.*",
+      "regex": "src/acgs_lite/observability/__pycache__/__init__\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/observability/__pycache__/session_observer.*",
+      "regex": "src/acgs_lite/observability/__pycache__/session_observer\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/observability/session_observer.*",
+      "regex": "src/acgs_lite/observability/session_observer\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/observability/session_observer.py",
+      "regex": "src/acgs_lite/observability/session_observer\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/observability/session_observer/**",
+      "regex": "src/acgs_lite/observability/session_observer(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/policygen.*",
+      "regex": "src/acgs_lite/policygen\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/policygen/**",
+      "regex": "src/acgs_lite/policygen(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/production.*",
+      "regex": "src/acgs_lite/production\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/production.py",
+      "regex": "src/acgs_lite/production\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/production/**",
+      "regex": "src/acgs_lite/production(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/provenance.*",
+      "regex": "src/acgs_lite/provenance\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/provenance.py",
+      "regex": "src/acgs_lite/provenance\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/provenance/**",
+      "regex": "src/acgs_lite/provenance(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/provider_capabilities.*",
+      "regex": "src/acgs_lite/provider_capabilities\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/provider_capabilities.py",
+      "regex": "src/acgs_lite/provider_capabilities\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/provider_capabilities/**",
+      "regex": "src/acgs_lite/provider_capabilities(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/provider_capabilities_manifest.json",
+      "regex": "src/acgs_lite/provider_capabilities_manifest\\.json",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/scoring.*",
+      "regex": "src/acgs_lite/scoring\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/scoring.py",
+      "regex": "src/acgs_lite/scoring\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/scoring/**",
+      "regex": "src/acgs_lite/scoring(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/serialization.*",
+      "regex": "src/acgs_lite/serialization\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/serialization.py",
+      "regex": "src/acgs_lite/serialization\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/serialization/**",
+      "regex": "src/acgs_lite/serialization(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/trajectory.*",
+      "regex": "src/acgs_lite/trajectory\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/trajectory.py",
+      "regex": "src/acgs_lite/trajectory\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/trajectory/**",
+      "regex": "src/acgs_lite/trajectory(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/z3_verify.*",
+      "regex": "src/acgs_lite/z3_verify\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/z3_verify.py",
+      "regex": "src/acgs_lite/z3_verify\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "src/acgs_lite/z3_verify/**",
+      "regex": "src/acgs_lite/z3_verify(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "test_suites.*",
+      "regex": "test_suites\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "test_suites/**",
+      "regex": "test_suites(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "tests.*",
+      "regex": "tests\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/**/.pytest.ini",
+      "regex": "tests/(?:[^/]+/)*\\.pytest\\.ini",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/**/.pytest.toml",
+      "regex": "tests/(?:[^/]+/)*\\.pytest\\.toml",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/**/pyproject.toml",
+      "regex": "tests/(?:[^/]+/)*pyproject\\.toml",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/**/pytest.ini",
+      "regex": "tests/(?:[^/]+/)*pytest\\.ini",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/**/pytest.toml",
+      "regex": "tests/(?:[^/]+/)*pytest\\.toml",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/**/setup.cfg",
+      "regex": "tests/(?:[^/]+/)*setup\\.cfg",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/**/tox.ini",
+      "regex": "tests/(?:[^/]+/)*tox\\.ini",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/__init__.*",
+      "regex": "tests/__init__\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/__init__.py",
+      "regex": "tests/__init__\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/__pycache__/__init__.*",
+      "regex": "tests/__pycache__/__init__\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/__pycache__/conftest.*",
+      "regex": "tests/__pycache__/conftest\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/__pycache__/control_plane.*",
+      "regex": "tests/__pycache__/control_plane\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/__pycache__/red_team.*",
+      "regex": "tests/__pycache__/red_team\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/conftest.*",
+      "regex": "tests/conftest\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/conftest.py",
+      "regex": "tests/conftest\\.py",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/conftest/**",
+      "regex": "tests/conftest(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/control_plane.*",
+      "regex": "tests/control_plane\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/control_plane/**",
+      "regex": "tests/control_plane(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/red_team.*",
+      "regex": "tests/red_team\\.[^/]*",
+      "flags": 50
+    },
+    {
+      "pattern": "tests/red_team/**",
+      "regex": "tests/red_team(?:/.*)?",
+      "flags": 50
+    },
+    {
+      "pattern": "tox.ini",
+      "regex": "tox\\.ini",
+      "flags": 50
+    },
+    {
+      "pattern": "uv.lock",
+      "regex": "uv\\.lock",
+      "flags": 50
+    }
+  ]
+}

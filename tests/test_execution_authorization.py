@@ -13,6 +13,16 @@ from acgs_lite.legitimacy import (
     ExecutionGrant,
     LegitimacyInvariantError,
 )
+from acgs_lite.legitimacy.signing import Ed25519ReceiptSigner
+
+
+def _production_signing() -> dict[str, object]:
+    """Pinned, non-ephemeral Ed25519 execution signer the production profile requires."""
+    signer = Ed25519ReceiptSigner.from_seed(bytes(range(32)))
+    return {
+        "receipt_signer": signer,
+        "trusted_execution_keys": {signer.key_id: signer.public_key_hex()},
+    }
 
 
 def _receipt(*, method: str = "transfer") -> DecisionReceipt:
@@ -39,6 +49,7 @@ def test_raw_receipt_rejected_in_production_profile() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -69,6 +80,7 @@ def test_issue_grant_then_execute_in_production() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -87,6 +99,7 @@ def test_argument_substitution_inside_allowed_subject_blocked() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -105,6 +118,7 @@ def test_method_spoof_via_governance_method_kwarg_blocked() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -128,10 +142,12 @@ def test_foreign_guard_grant_blocked() -> None:
     left = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
     right = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @left
@@ -154,6 +170,7 @@ def test_both_authorization_kwargs_blocked() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -172,6 +189,7 @@ def test_issue_grant_does_not_invoke_target() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -187,6 +205,7 @@ def test_issue_grant_rejects_authorization_transport_kwargs() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -201,6 +220,7 @@ def test_issue_grant_rejects_caller_created_receipt() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -217,6 +237,7 @@ async def test_async_wrapper_rejects_raw_receipt_in_production() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -235,6 +256,7 @@ async def test_async_wrapper_argument_substitution_blocked() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -253,6 +275,7 @@ def test_hand_constructed_grant_blocked() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -285,6 +308,7 @@ def test_grant_id_rejected_until_ledger() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
     )
 
     @guard
@@ -306,6 +330,7 @@ def test_legacy_signed_receipt_rejected_in_production() -> None:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        **_production_signing(),
         trusted_issuer_keys={signer.key_id: signer.public_key_hex()},
     )
 

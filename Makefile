@@ -193,26 +193,49 @@ test-governance:
 	$(TEST_ENV) $(PYTHON) scripts/run_governance_regression.py --check
 
 test-examples:
-	@echo "Running examples as smoke tests..."
-	$(TEST_ENV) $(PYTHON) examples/membrane_5min.py
+	@echo "Running 29 offline examples as smoke tests..."
+	$(TEST_ENV) $(PYTHON) examples/adaptive_policy_generation.py
+	$(TEST_ENV) $(PYTHON) examples/agent_quickstart/run.py
+	$(TEST_ENV) $(PYTHON) examples/audit_trail/main.py
 	$(TEST_ENV) $(PYTHON) examples/basic_governance/main.py
 	$(TEST_ENV) $(PYTHON) examples/compliance_eu_ai_act/main.py
-	$(TEST_ENV) $(PYTHON) examples/maci_separation/main.py
-	$(TEST_ENV) $(PYTHON) examples/audit_trail/main.py
-	$(TEST_ENV) $(PYTHON) examples/mock_stub_testing/main.py
+	$(TEST_ENV) $(PYTHON) examples/compliance_reports/run.py
+	$(TEST_ENV) $(PYTHON) examples/control_plane_demo.py
+	$(TEST_ENV) PYTHON="$(PYTHON)" bash examples/demo_cli_sidecars.sh
+	$(TEST_ENV) $(PYTHON) examples/dspy_governance/run.py
+	$(TEST_ENV) $(PYTHON) examples/eu_ai_act_quickstart.py
+	$(TEST_ENV) $(PYTHON) examples/eu_ai_act_runtime/art12_record_keeping.py
+	$(TEST_ENV) $(PYTHON) examples/eu_ai_act_runtime/art14_human_oversight.py
+	$(TEST_ENV) $(PYTHON) examples/eu_ai_act_runtime/art15_robustness.py
 	$(TEST_ENV) $(PYTHON) examples/gaia_amd/main.py
-	@echo "All examples passed."
+	$(TEST_ENV) $(PYTHON) examples/gitlab_anthropic_demo.py --simulate
+	$(TEST_ENV) $(PYTHON) examples/governed_execution_membrane.py
+	$(TEST_ENV) $(PYTHON) examples/hackathon_starter_chatbot.py
+	$(TEST_ENV) $(PYTHON) examples/hackathon_starter_content_mod.py
+	$(TEST_ENV) $(PYTHON) examples/hackathon_starter_maci.py
+	$(TEST_ENV) $(PYTHON) examples/lifecycle_quickstart.py
+	$(TEST_ENV) $(PYTHON) examples/maci_separation/main.py
+	$(TEST_ENV) $(PYTHON) examples/membrane_5min.py
+	$(TEST_ENV) $(PYTHON) examples/mock_stub_testing/main.py
+	$(TEST_ENV) $(PYTHON) examples/phoenix_acgs_governed_agent/mock_llm.py
+	$(TEST_ENV) $(PYTHON) examples/quickstart.py
+	$(TEST_ENV) $(PYTHON) examples/quickstart_content_mod.py
+	$(TEST_ENV) $(PYTHON) examples/quickstart_healthcare.py
+	$(TEST_ENV) $(PYTHON) examples/quickstart_hiring.py
+	$(TEST_ENV) $(PYTHON) examples/release_proof.py
+	@echo "All 29 offline examples passed."
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 lint:
 	$(RUFF) check $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/
+	$(RUFF) format --check $(SRC_DIR)/ $(TEST_DIR)/
 
 format:
 	$(RUFF) check --fix $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/
 	$(RUFF) format $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/
 
 typecheck:
-	$(MYPY) $(SRC_DIR)/ --ignore-missing-imports
+	$(MYPY) --config-file pyproject.toml $(SRC_DIR)/ --ignore-missing-imports
 
 check: lint typecheck test
 

@@ -1,3 +1,4 @@
+# requires: acgs-lite[otel] (opentelemetry-sdk); optional arize-phoenix, OPENAI_API_KEY
 """Phoenix + ACGS-lite governed execution telemetry demo.
 
 Runs four scenarios — allow, deny, review, fail-closed — through a

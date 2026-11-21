@@ -23,7 +23,9 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev,autonoma,anthropic,mcp,otel,z3]" httpx
       - name: Lint
-        run: ruff check src/acgs_lite/
+        run: |
+          ruff check src/acgs_lite/
+          ruff format --check src/ tests/
       - name: Validate capability manifest
         if: matrix.python-version == '3.11'
         run: python -m acgs_lite.cli capabilities validate --max-age-days 45
@@ -90,11 +92,11 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v7
-      - uses: github/codeql-action/init@v4.39.0
+      - uses: github/codeql-action/init@v4.39.3
         with:
           languages: python
           queries: security-and-quality
-      - uses: github/codeql-action/analyze@v4.39.0
+      - uses: github/codeql-action/analyze@v4.39.3
         with:
           category: "/language:python"
 
@@ -146,9 +148,16 @@ jobs:
           python -c "import acgs_lite_rust; print(acgs_lite_rust.__file__)"
       - name: Install pinned Lean qualification toolchain
         run: |
-          curl --fail --location --connect-timeout 20 --max-time 300 \
+          if ! curl --fail --location --connect-timeout 20 --max-time 300 \
+            --retry 3 --retry-delay 5 --retry-max-time 120 \
             --output "$RUNNER_TEMP/lean.tar.zst" \
-            https://github.com/leanprover/lean4/releases/download/v4.34.0/lean-4.34.0-linux.tar.zst
+            "https://github.com/leanprover/lean4/releases/download/v4.34.0/lean-4.34.0-linux.tar.zst?download=1"; then
+            curl --fail --location --connect-timeout 20 --max-time 300 \
+              --retry 3 --retry-delay 5 --retry-max-time 120 --retry-all-errors \
+              --header 'Accept: application/octet-stream' \
+              --output "$RUNNER_TEMP/lean.tar.zst" \
+              https://api.github.com/repos/leanprover/lean4/releases/assets/563514501
+          fi
           echo "caaa98356098c85dc0fcbbd28e1ec66f39eb6551829972b752ff20e1286b646b  $RUNNER_TEMP/lean.tar.zst" | sha256sum --check
           tar --zstd -xf "$RUNNER_TEMP/lean.tar.zst" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/lean-4.34.0-linux/bin" >> "$GITHUB_PATH"
@@ -166,6 +175,21 @@ jobs:
           assert tests > 0 and skipped == 0 and failed == 0, (tests, skipped, failed)
           print(f"Optional integrations: {tests} tests, no skips or failures")
           PY
+
+  rust-core:
+    name: Rust core (cargo test)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.93.1"
+      # Only acgs-validator-core carries Rust unit tests. The pyo3 (extension-module
+      # cdylib), wasm and spacetime members are built by wheels.yml / not testable
+      # with a plain `cargo test`.
+      - name: cargo test (acgs-validator-core)
+        working-directory: rust
+        run: cargo test --locked -p acgs-validator-core
 
   docs:
     name: Docs build and link check

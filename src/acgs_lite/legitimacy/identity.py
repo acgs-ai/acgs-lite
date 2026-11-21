@@ -14,7 +14,7 @@ import re
 
 from acgs_lite.legitimacy.authorization import ExecutionGrant
 from acgs_lite.legitimacy.invocation import PolicyBinding
-from acgs_lite.legitimacy.receipt import DecisionReceipt
+from acgs_lite.legitimacy.receipt import RECEIPT_SCHEMA_V2, DecisionReceipt
 from acgs_lite.legitimacy.signing import (
     SIGNATURE_ALGORITHM,
     SIGNATURE_SCOPE_EXECUTION,
@@ -47,7 +47,8 @@ def receipt_identity(receipt: DecisionReceipt) -> str:
     _hex(receipt.receipt_hash, 64, "receipt hash")
     if not receipt.verify_hash():
         raise ValueError("receipt hash does not match its payload")
-    return f"acgs:receipt:v1:sha256:{receipt.receipt_hash}"
+    version = "v2" if receipt.schema_version == RECEIPT_SCHEMA_V2 else "v1"
+    return f"acgs:receipt:{version}:sha256:{receipt.receipt_hash}"
 
 
 def signed_envelope_identity(envelope: SignedReceipt) -> str:
@@ -76,7 +77,11 @@ def signed_envelope_identity(envelope: SignedReceipt) -> str:
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{name} must be a non-empty string")
     canonical = json.dumps(
-        envelope.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+        envelope.to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
     )
     digest = hashlib.sha256(_ENVELOPE_DOMAIN + canonical.encode("utf-8")).hexdigest()
     return f"acgs:signed-envelope:v1:sha256:{digest}"
