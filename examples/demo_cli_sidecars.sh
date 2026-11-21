@@ -7,6 +7,9 @@ if [[ ! -d "$SRC_DIR" && -d "$REPO_ROOT/packages/acgs-lite/src" ]]; then
   SRC_DIR="$REPO_ROOT/packages/acgs-lite/src"
 fi
 PYTHON_BIN="${PYTHON:-python3}"
+if [[ "$PYTHON_BIN" == */* && "$PYTHON_BIN" != /* ]]; then
+  PYTHON_BIN="${PWD}/${PYTHON_BIN#./}"
+fi
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/acgs-sidecars-demo.XXXXXX")"
 KEEP_ARTIFACTS="${KEEP_ARTIFACTS:-0}"
 
