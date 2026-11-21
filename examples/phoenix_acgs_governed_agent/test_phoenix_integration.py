@@ -1,3 +1,4 @@
+# requires: pytest, acgs-lite[otel] (opentelemetry-sdk)
 """Integration tests verifying governance spans reach Phoenix via InMemorySpanExporter.
 
 Each test exercises one scenario through ``governance_span()`` and asserts on
