@@ -1,3 +1,4 @@
+# requires: acgs-lite[mcp]
 """ACGS-Lite 2026.1.0 — MCP Governance Client Example.
 
 This script demonstrates how an MCP-compliant agent (proposer) can use the
