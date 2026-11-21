@@ -80,7 +80,9 @@ def _dispatcher(pdp: PolicyDecisionPoint) -> tuple[GovernedToolDispatcher, Calls
             WriteGrant("alice", PrincipalKind.HUMAN, ("**",)),
         ],
     )
-    dispatcher = GovernedToolDispatcher(pdp, permissions=permissions, tool_tiers=TIERS)
+    dispatcher = GovernedToolDispatcher(
+        pdp, permissions=permissions, tool_tiers=TIERS, trust_host_identity=True
+    )
     for name in TIERS:
         dispatcher.register(
             name, calls.tool, path_params={"path"}, opaque_params={"content"}, merge_capable=False

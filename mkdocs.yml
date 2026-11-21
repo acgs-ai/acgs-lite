@@ -80,6 +80,7 @@ nav:
       - Quickstart: quickstart.md
       - 5-minute membrane: guides/five-minute-membrane.md
       - Integration decision guide: integration-decision-guide.md
+      - Examples: examples.md
   - Governance context:
       - Why Governance?: why-governance.md
       - OWASP Top 10 for Agents: owasp-2026.md

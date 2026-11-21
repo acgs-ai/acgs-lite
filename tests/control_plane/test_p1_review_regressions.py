@@ -76,6 +76,7 @@ def _dispatcher(pdp: PolicyDecisionPoint) -> tuple[GovernedToolDispatcher, _Sink
             "shell": ActionTier.T2,
         },
         read_only_tools=frozenset({"read_default", "read"}),
+        trust_host_identity=True,
     )
 
     def write_default(path: str = "evaluator/score.py", content: str = "x") -> None:
@@ -375,6 +376,72 @@ class TestImportPathShadows:
 
         registry = ImmutableCoreRegistry({CoreCategory.EVALUATOR: ["evaluator/**"]})
         assert registry.classify("src/json.py") is None
+        assert registry.classify("json.py") is None
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "sitecustomize.py",
+            "usercustomize.py",
+            "workspace/sitecustomize/__init__.py",
+            "foo/bar.pth",
+            "pkg/conftest.py",
+            "conftest.py",
+        ],
+    )
+    def test_layout_free_shadows_core_without_src_packages(self, path: str) -> None:
+        from acgs_lite.control_plane import ImmutableCoreRegistry
+
+        registry = ImmutableCoreRegistry({CoreCategory.EVALUATOR: ["evaluator/**"]})
+        assert registry.classify(path) is CoreCategory.CONTROL_PLANE
+
+    def test_import_shadow_patterns_without_src_packages(self) -> None:
+        from acgs_lite.control_plane import ImmutableCoreRegistry
+        from acgs_lite.control_plane.immutable_core import IMPORT_SHADOW_PATTERNS
+
+        registry = ImmutableCoreRegistry({CoreCategory.EVALUATOR: ["evaluator/**"]})
+        globs = registry.import_shadow_patterns()
+        assert set(globs) == {
+            "**/conftest.py",
+            "**/sitecustomize*",
+            "**/sitecustomize*/**",
+            "**/usercustomize*",
+            "**/usercustomize*/**",
+            "**/*.pth",
+        }
+        assert set(globs) < set(IMPORT_SHADOW_PATTERNS)
+        assert DEFAULT_IMMUTABLE_CORE.import_shadow_patterns() == IMPORT_SHADOW_PATTERNS
+        text = render_codeowners(registry, ["@o"])
+        assert "**/*.pth @o" in text and "/src/*.py @o" not in text
+
+    def test_custom_anchored_registry_denies_directory_mutation(
+        self, constitution: Constitution, permit_all: PolicySet, tmp_path: Path
+    ) -> None:
+        (tmp_path / "pkg").mkdir()
+        (tmp_path / "pkg" / "conftest.py").write_text("# core\n", encoding="utf-8")
+        (tmp_path / "pkg" / "notes.txt").write_text("ok\n", encoding="utf-8")
+        registry = ImmutableCoreRegistry(
+            {CoreCategory.EVALUATOR: ["evaluator/**"]}, repo_root=str(tmp_path)
+        )
+        assert registry.has_unanchored_patterns() is True
+        perms = RepositoryPermissions(
+            registry, [WriteGrant("agent-1", PrincipalKind.AGENT, ("pkg/**",))]
+        )
+        sink = _Sink()
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, registry=registry
+        ) as pdp:
+            d = GovernedToolDispatcher(pdp, permissions=perms, tool_tiers={"rm": ActionTier.T1})
+
+            def rm(path: str) -> str:
+                sink.calls.append(path)
+                return path
+
+            d.register("rm", rm, path_params={"path"}, merge_capable=False)
+            with pytest.raises(ToolDenied, match="directory-like"):
+                d.dispatch(AGENT, "rm", {"path": "pkg"})
+            d.dispatch(AGENT, "rm", {"path": "pkg/notes.txt"})
+        assert sink.calls == ["pkg/notes.txt"]
 
     def test_codeowners_lists_import_shadows(self) -> None:
         text = render_codeowners(DEFAULT_IMMUTABLE_CORE, ["@o"])

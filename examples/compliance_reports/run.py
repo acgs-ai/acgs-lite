@@ -33,7 +33,7 @@ Constitutional Hash: 608508a9bd224290
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from acgs_lite.compliance import (
@@ -457,7 +457,7 @@ Consult qualified legal counsel for binding compliance opinions.
 
 
 def run() -> None:
-    generated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     all_profile_results = []
 
     print("=" * 60)
