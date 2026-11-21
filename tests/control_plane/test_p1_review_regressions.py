@@ -414,6 +414,35 @@ class TestImportPathShadows:
         text = render_codeowners(registry, ["@o"])
         assert "**/*.pth @o" in text and "/src/*.py @o" not in text
 
+    def test_custom_anchored_registry_denies_directory_mutation(
+        self, constitution: Constitution, permit_all: PolicySet, tmp_path: Path
+    ) -> None:
+        (tmp_path / "pkg").mkdir()
+        (tmp_path / "pkg" / "conftest.py").write_text("# core\n", encoding="utf-8")
+        (tmp_path / "pkg" / "notes.txt").write_text("ok\n", encoding="utf-8")
+        registry = ImmutableCoreRegistry(
+            {CoreCategory.EVALUATOR: ["evaluator/**"]}, repo_root=str(tmp_path)
+        )
+        assert registry.has_unanchored_patterns() is True
+        perms = RepositoryPermissions(
+            registry, [WriteGrant("agent-1", PrincipalKind.AGENT, ("pkg/**",))]
+        )
+        sink = _Sink()
+        with PolicyDecisionPoint.for_constitution(
+            constitution, permit_all, registry=registry
+        ) as pdp:
+            d = GovernedToolDispatcher(pdp, permissions=perms, tool_tiers={"rm": ActionTier.T1})
+
+            def rm(path: str) -> str:
+                sink.calls.append(path)
+                return path
+
+            d.register("rm", rm, path_params={"path"}, merge_capable=False)
+            with pytest.raises(ToolDenied, match="directory-like"):
+                d.dispatch(AGENT, "rm", {"path": "pkg"})
+            d.dispatch(AGENT, "rm", {"path": "pkg/notes.txt"})
+        assert sink.calls == ["pkg/notes.txt"]
+
     def test_codeowners_lists_import_shadows(self) -> None:
         text = render_codeowners(DEFAULT_IMMUTABLE_CORE, ["@o"])
         assert "/src/*.py @o" in text and "**/*.pth @o" in text

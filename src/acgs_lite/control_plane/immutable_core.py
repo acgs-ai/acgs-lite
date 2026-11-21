@@ -516,9 +516,12 @@ class ImmutableCoreRegistry:
         return self.classify(path) is not None
 
     def has_unanchored_patterns(self) -> bool:
-        """True if any pattern starts with a wildcard (e.g. ``**/.env*``), so
-        that core files may exist under *any* directory."""
-        return any(not literal_prefix(p) for _, pats in self._entries for p in pats)
+        """True if any explicit or implicit import-shadow pattern starts with a
+        wildcard (e.g. ``**/.env*`` or ``**/conftest.py``), so that core files
+        may exist under *any* directory."""
+        return any(not literal_prefix(p) for _, pats in self._entries for p in pats) or any(
+            not literal_prefix(p) for p in self.import_shadow_patterns()
+        )
 
     def to_mapping(self) -> dict[str, Any]:
         return {
