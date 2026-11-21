@@ -1,3 +1,4 @@
+# requires: acgs-lite[gitlab], GITLAB_TOKEN, GITLAB_PROJECT_ID, --mr-iid, network
 """GitLab MR Governance Demo — ACGS + GitLab AI Hackathon
 
 Runs constitutional governance validation on a GitLab merge request:

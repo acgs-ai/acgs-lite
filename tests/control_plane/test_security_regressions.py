@@ -79,6 +79,7 @@ def dispatcher(gated_pdp: PolicyDecisionPoint, sink: Sink) -> GovernedToolDispat
         gated_pdp,
         permissions=_permissions(gated_pdp.registry),
         tool_tiers={"write": ActionTier.T1, "rm": ActionTier.T1, "shell": ActionTier.T2},
+        trust_host_identity=True,
     )
 
     def write(
