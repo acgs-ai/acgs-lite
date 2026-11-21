@@ -7,6 +7,7 @@ Zero hot-path overhead (offline tooling only).
 
 from __future__ import annotations
 
+import itertools
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -28,6 +29,9 @@ class DeliveryStatus(Enum):
     FILTERED = "filtered"
 
 
+_NOTIFICATION_SEQ = itertools.count(1)
+
+
 @dataclass
 class GovernanceNotification:
     topic: str
@@ -39,7 +43,7 @@ class GovernanceNotification:
 
     def __post_init__(self) -> None:
         if not self.notification_id:
-            self.notification_id = f"notif-{int(self.created_at * 1000)}-{id(self) % 10000}"
+            self.notification_id = f"notif-{int(self.created_at * 1000)}-{next(_NOTIFICATION_SEQ)}"
 
 
 @dataclass
