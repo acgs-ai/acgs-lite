@@ -117,6 +117,6 @@ jobs:
               shutil.copy2(source, Path("_publish_artifacts", expected["name"]))
           PY
       - name: Publish exact qualified artifacts without rebuilding
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: _publish_artifacts/
