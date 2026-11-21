@@ -330,15 +330,6 @@ def test_openshell_state_path_persists_decisions(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "openshell governance router is mounted without the API-key dependency "
-        "(server.py include_router ~796); create_governance_app docstring promises "
-        "the key guards all mutating endpoints"
-    ),
-)
 def test_openshell_record_outcome_requires_api_key() -> None:
     client = TestClient(create_governance_app(api_key=KEY))
     outcome = ExecutionOutcome(
