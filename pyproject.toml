@@ -155,17 +155,3 @@ ignore_missing_imports = true
 warn_unused_ignores = false
 allow_untyped_decorators = true
 disable_error_code = ["import-untyped", "import-not-found", "no-untyped-call", "misc", "type-arg", "no-any-return"]
-
-[[tool.mypy.overrides]]
-module = [
-    "acgs_lite.constitution.constitution",
-    "acgs_lite.constitution.memoization",
-    "acgs_lite.constitution.policy_export",
-    "acgs_lite.constitution.regulatory",
-    "acgs_lite.constitution.rule",
-    "acgs_lite.engine.batch",
-    "acgs_lite.engine.core",
-    "acgs_lite.integrations.a2a",
-    "acgs_lite.integrations.anthropic",
-]
-ignore_errors = true

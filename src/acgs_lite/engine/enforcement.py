@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Generic, Protocol, TypeVar
 
 from acgs_lite.constitution.rule import ViolationAction
 
@@ -17,11 +17,19 @@ DEFAULT_HALT_CHANNEL = "governance_halt"
 class ViolationLike(Protocol):
     """Minimal violation shape needed to build enforcement artifacts."""
 
-    rule_id: str
-    rule_text: str
-    severity: Any
-    matched_content: str
-    category: str
+    @property
+    def rule_id(self) -> str: ...
+    @property
+    def rule_text(self) -> str: ...
+    @property
+    def severity(self) -> Any: ...
+    @property
+    def matched_content(self) -> str: ...
+    @property
+    def category(self) -> str: ...
+
+
+_V = TypeVar("_V", bound=ViolationLike)
 
 
 def _severity_value(value: Any) -> str:
@@ -159,18 +167,18 @@ class EnforcementOutcome:
 
 
 @dataclass(slots=True)
-class EnforcementResolution:
+class EnforcementResolution(Generic[_V]):
     """Aggregated runtime artifacts produced by validation dispatch."""
 
-    blocking_violations: list[ViolationLike] = field(default_factory=list)
-    warning_violations: list[ViolationLike] = field(default_factory=list)
+    blocking_violations: list[_V] = field(default_factory=list)
+    warning_violations: list[_V] = field(default_factory=list)
     notifications: list[NotificationEvent] = field(default_factory=list)
     review_requests: list[ReviewRequest] = field(default_factory=list)
     escalations: list[EscalationRequest] = field(default_factory=list)
     incident_alerts: list[IncidentAlert] = field(default_factory=list)
     action_taken: ViolationAction | None = None
     primary_action: ViolationAction | None = None
-    primary_violation: ViolationLike | None = None
+    primary_violation: _V | None = None
     _outcome_specs: list[
         tuple[
             str,
@@ -231,13 +239,13 @@ _ACTION_PRIORITY = {
 
 
 def resolve_enforcement(
-    violations: list[ViolationLike],
+    violations: list[_V],
     *,
     action_text: str,
-    workflow_action_for_violation: Callable[[ViolationLike], ViolationAction],
-) -> EnforcementResolution:
+    workflow_action_for_violation: Callable[[_V], ViolationAction],
+) -> EnforcementResolution[_V]:
     """Resolve matched violations into runtime artifacts."""
-    resolution = EnforcementResolution()
+    resolution: EnforcementResolution[_V] = EnforcementResolution()
     best_priority = -1
 
     for violation in violations:
