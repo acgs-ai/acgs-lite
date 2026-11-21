@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `create_governance_app` now applies the `X-API-Key` check to the OpenShell
+  governance router. With `api_key` / `ACGS_API_KEY` set, every `/governance/*`
+  route returns 401 without the key; before, those routes were served without
+  it. Clients that call `/governance/*` must send the same `X-API-Key` header as
+  for `/validate`. Apps started with `require_auth=False` and no key are
+  unchanged.
+
+## [4.0.0] - 2026-11-10
+
+Upgrading from 3.0.x: follow the
+[4.0 upgrade guide](https://github.com/acgs-ai/acgs-lite/blob/main/docs/upgrade-v4.0.md).
+This release also ships the changes listed under 3.0.2 below, which was never
+published on its own.
+
 This is a semver-major change (4.0.0): the production profile of the stable
 `GovernedCallable` now requires Ed25519 execution signatures.
 
@@ -170,9 +186,17 @@ This is a semver-major change (4.0.0): the production profile of the stable
   with a later `valid_from`, or a condition key such as `env=` to switch a
   conditional rule off. The context is now built only from the new constructor
   argument `governance_context=` (a mapping, copied at construction and never
-  merged with per-call kwargs) plus the call's `governance_action` (still chosen
-  by the caller, and it overrides a `governance_action` set in
-  `governance_context`, so rule conditions on it are caller-selected), and every
+  merged with per-call kwargs) plus the call's resolved `governance_action`. An
+  operator can pin the label with `governance_context={"governance_action": ...}`:
+  the pinned label is then what MACI checks, what rule conditions see and what
+  the CDP record carries, a per-call `governance_action` that differs from it
+  raises `GovernanceError` (`rule_id="MACI-ACTION"`) before the agent runs, an
+  equal one is allowed, and a pinned label alone satisfies the MACI requirement
+  for a label. A pinned value that is not a non-empty string raises `TypeError`
+  at construction. If the label is not pinned it is asserted by the caller of
+  `run()` and selects the MACI check and the rules conditioned on it, so it must
+  never be derived from model output, tool arguments or request data
+  (`tests/test_governed_agent_pinned_action.py`). Every
   check of the call uses it: the input, the caller's kwargs, and the agent's
   output, including each remediation retry's output. The output check adds
   `"source": "agent_output"` unless `governance_context` sets `source` itself.
@@ -468,7 +492,9 @@ This is a semver-major change (4.0.0): the production profile of the stable
   scope) and fails closed with `policy_digest_conflict` when an execution envelope names a
   different digest; v1 receipts keep the envelope path.
 
-## [3.0.2] - Unreleased
+## [3.0.2] - Unreleased (never published)
+
+3.0.2 was never tagged or published to PyPI. Its changes first ship in 4.0.0.
 
 ### Changed
 
@@ -510,7 +536,7 @@ This is a semver-major change (4.0.0): the production profile of the stable
   (`ENOTDIR`) counts as tripped. Trusted owners are the current user and root only;
   extra ancestor-owner uids (e.g. the user-namespace overflow uid 65534) must be opted
   in via `ACGS_HALT_TRUSTED_UIDS` (comma-separated; never applies to the signal dir
-  itself; superseded in Unreleased, where the signal dir trusts the same set).
+  itself; superseded in 4.0.0, where the signal dir trusts the same set).
 - **Behaviour change:** a breaker whose signal dir is missing or fails these checks
   counts as tripped (`check()` raises `GovernanceHaltError("halted (untrusted signal
   dir: ...)")`, `breaker-status` reports HALTED, `resume` exits 2). This includes the
@@ -1256,7 +1282,8 @@ Stability table in the README for the stability tier of each subsystem.
 - CLI tool (`acgs` / `acgs-lite`)
 - Keyword-based and regex rule matching
 
-[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/acgs-ai/acgs-lite/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/acgs-ai/acgs-lite/compare/v3.0.1...v4.0.0
 [3.0.1]: https://github.com/acgs-ai/acgs-lite/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.12.0...v3.0.0
 [2.12.0]: https://github.com/acgs-ai/acgs-lite/compare/v2.11.0...v2.12.0

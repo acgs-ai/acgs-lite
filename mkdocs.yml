@@ -80,6 +80,7 @@ nav:
       - Quickstart: quickstart.md
       - 5-minute membrane: guides/five-minute-membrane.md
       - Integration decision guide: integration-decision-guide.md
+      - Examples: examples.md
   - Governance context:
       - Why Governance?: why-governance.md
       - OWASP Top 10 for Agents: owasp-2026.md
@@ -105,6 +106,7 @@ nav:
       - FAQ: community/faq.md
       - Share a walkthrough: community/share-a-walkthrough.md
       - Contributing: contributing.md
+      - Releasing (maintainers): releasing.md
       - Adding an Integration: contributing-integrations.md
       - Adding a Compliance Framework: contributing-frameworks.md
   - API Reference:
@@ -124,6 +126,7 @@ nav:
   - Additional Resources:
       - MCP Notes: mcp.md
       - Telegram Webhook: telegram-webhook.md
+      - Upgrade to v4.0: upgrade-v4.0.md
       - Upgrade to v2.10: upgrade-v2.10.md
 
 markdown_extensions:

@@ -225,17 +225,28 @@ class GovernedAgent:
     structured-output request injection). Produces full audit
     trails. MACI role checks are enforced by default: callers must provide an
     explicit ``maci_role`` when constructing the wrapper and a permitted
-    ``governance_action`` on every execution. Passing ``enforce_maci=False`` is
+    ``governance_action`` for every execution, either pinned in
+    ``governance_context`` or passed per call. Passing ``enforce_maci=False`` is
     an explicit advisory-mode opt-out for non-side-effecting evaluation flows.
 
     The engine evaluation context (the clock for time-bounded rules and the
-    inputs to rule ``condition`` predicates and custom validators) comes only
-    from the operator: the constructor's ``governance_context`` plus the call's
+    inputs to rule ``condition`` predicates and custom validators) is built from
+    the constructor's ``governance_context`` plus the call's resolved
     ``governance_action``. It applies to the input, the caller's kwargs and the
     output (each retry's too). Caller keyword arguments never enter it; they are
     evaluated as payload content only, so a caller cannot pass ``timestamp=``
     (or ``evaluation_time``/``valid_at``/``at``) to deactivate a rule, or a
     condition key to select which rules apply.
+
+    The ``governance_action`` label is the one exception. If the operator pins
+    it with ``governance_context={"governance_action": ...}``, the pinned label
+    is what MACI checks, what rule conditions see and what the CDP record
+    carries; a per-call ``governance_action`` that differs from it raises
+    :class:`~acgs_lite.errors.GovernanceError` (``rule_id="MACI-ACTION"``) before
+    the agent runs, and an equal one is allowed. If it is not pinned, the
+    per-call ``governance_action`` is asserted by the caller of ``run()``: it
+    selects the MACI check and the rules conditioned on it, so it must never be
+    derived from model output, tool arguments or request data.
 
     Usage::
 
@@ -327,6 +338,13 @@ class GovernedAgent:
         # Operator-supplied engine context, copied so later mutation of the
         # caller's mapping cannot change it. Never merged with per-call kwargs.
         self._governance_context: dict[str, Any] = dict(governance_context or {})
+        # An operator-pinned action label wins over any per-call label.
+        self._pinned_action: str | None = None
+        if "governance_action" in self._governance_context:
+            pinned = self._governance_context["governance_action"]
+            if not isinstance(pinned, str) or not pinned:
+                raise TypeError("governance_context['governance_action'] must be a non-empty str")
+            self._pinned_action = pinned
 
         if maci_role:
             self.maci.assign_role(agent_id, maci_role)
@@ -493,12 +511,30 @@ class GovernedAgent:
                 action=payload,
             )
 
+    def _resolve_governance_action(self, governance_action: str | None) -> str | None:
+        """Return the one action label this call is checked under.
+
+        An operator-pinned ``governance_context["governance_action"]`` wins; a
+        per-call label that differs from it denies before anything else runs.
+        Without a pin, the caller's label is used as given.
+        """
+        if self._pinned_action is None:
+            return governance_action
+        if governance_action is not None and governance_action != self._pinned_action:
+            raise GovernanceError(
+                "governance_action conflicts with the governance_action pinned "
+                "in the operator's governance_context",
+                rule_id="MACI-ACTION",
+            )
+        return self._pinned_action
+
     def _engine_context(self, governance_action: str | None) -> dict[str, Any]:
         """Build the engine context from trusted sources only.
 
-        That is the constructor's ``governance_context`` plus the call's
-        ``governance_action``. Caller kwargs are excluded: the engine reads the
-        evaluation clock and rule-condition inputs from this dict.
+        That is the constructor's ``governance_context`` plus the call's resolved
+        ``governance_action`` (see :meth:`_resolve_governance_action`). Caller
+        kwargs are excluded: the engine reads the evaluation clock and
+        rule-condition inputs from this dict.
         """
         context = dict(self._governance_context)
         if governance_action is not None:
@@ -543,7 +579,10 @@ class GovernedAgent:
         if self._circuit_breaker is not None:
             self._circuit_breaker.check()
 
-        # Step 1: Enforce MACI boundary before any wrapped side effect
+        # Step 1: Resolve the action label once (an operator pin wins), then
+        # enforce the MACI boundary on it before any wrapped side effect.
+        # MACI, the engine context and the CDP record all use this value.
+        governance_action = self._resolve_governance_action(governance_action)
         self._check_maci(governance_action)
         execution_kwargs, governance_kwargs = self._prepare_execution_kwargs(kwargs)
 
