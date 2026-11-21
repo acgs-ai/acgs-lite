@@ -1,3 +1,4 @@
+# requires: acgs-lite[otel] (opentelemetry-api)
 """Example-local context manager: creates acgs.governed_execution parent span.
 
 Wraps a per-call invocation of a `GovernedCallable`-decorated tool function so

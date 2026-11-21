@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# requires: Lean 4 / lake toolchain, ACGS_LEAN_WORKDIR, <lean-file> arg
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
