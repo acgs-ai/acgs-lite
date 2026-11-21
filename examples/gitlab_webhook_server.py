@@ -1,3 +1,4 @@
+# requires: acgs-lite[gitlab], starlette, uvicorn, GITLAB_TOKEN, GITLAB_PROJECT_ID, server
 """
 Example: GitLab Webhook Server for ACGS Governance
 

@@ -23,10 +23,11 @@ LLM reasoning → constitutional check → decision receipt → governed executi
 
 ### Current status & non-claims
 
-- **Public package:** v3.0.1 on PyPI. Apache-2.0. Beta.
-- **Unreleased source hardening:** the production execution-grant, trusted-context,
-  durable-audit, and recovery contracts described below are present in this source
-  candidate. They are not present in the published v3.0.1 wheel.
+- **Package:** `acgs-lite` on PyPI. This README describes 4.0.0. Apache-2.0. Beta.
+- **4.0.0 hardening:** the production execution-grant, trusted-context,
+  durable-audit, and recovery contracts described below first ship in 4.0.0, a
+  breaking release. They are not present in the v3.0.1 wheel. See the
+  [4.0 upgrade guide](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/upgrade-v4.0.md).
 - **Local proofs exist.** Receipt-gated execution, MACI role checks, and an
   in-process SHA-256 audit chain are implemented and tested.
 - **No independently confirmed production users yet.**
@@ -34,11 +35,11 @@ LLM reasoning → constitutional check → decision receipt → governed executi
   *your* constitution, storage, authentication, and operational controls.
 - **`pip install` does not ship `examples/`.** Do not run a repo path after
   install. Use the minimal snippet below, or the
-  [5-minute membrane page](docs/guides/five-minute-membrane.md).
+  [5-minute membrane page](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/guides/five-minute-membrane.md).
 
 ### Minimal quickstart
 
-Works after `pip install acgs-lite==3.0.1`. Default engine is fail-closed: the
+Works after `pip install acgs-lite==4.0.0`. Default engine is fail-closed: the
 last line **raises**.
 
 <!-- doc-test: published-engine-check -->
@@ -62,16 +63,19 @@ True
 ConstitutionalViolationError: Action blocked by rule no-wire: Block unauthorized wires
 ```
 
-That is the check. The [5-minute membrane](docs/guides/five-minute-membrane.md)
+That is the check. The [5-minute membrane](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/guides/five-minute-membrane.md)
 is the executor gate: ALLOW with a receipt, TRANSFORM (PII redaction), DENY of a
 wire, and refusal of a missing receipt
 (`No legitimacy receipt, no execution`).
 
-### Unreleased local production profile
+### Production profile (4.0.0)
 
-The following source-candidate API binds a host-supplied actor/tenant context,
+The production profile binds a host-supplied actor/tenant context,
 the exact call and policy, single consumption in one wrapper instance, and a
-confirmed JSONL authorization record before the callable starts. The host must
+confirmed JSONL authorization record before the callable starts. The production
+profile requires the `crypto` extra and a persistent Ed25519 signer whose public
+key is pinned for execution scope; every grant carries an execution-scope
+signature that expires after 300 seconds by default. The host must
 authenticate the actor and tenant before constructing the context and must not
 expose `issue_grant()` to untrusted callers. This does not isolate malicious
 same-process code or provide restart recovery, distributed exclusion, or a
@@ -87,9 +91,18 @@ from acgs_lite.audit import AuditLog, JSONLAuditBackend
 from acgs_lite.governed import GovernedCallable
 from acgs_lite.legitimacy import (
     AuthorizationProfile,
+    Ed25519ReceiptSigner,
     LegitimacyInvariantError,
     TrustedExecutionContext,
 )
+
+# Load the signing key from your secret store; this fixed seed is for the demo only.
+# Per-process keys from Ed25519ReceiptSigner.generate() are refused in production.
+signer = Ed25519ReceiptSigner.from_seed(bytes(range(32)), key_id="membrane-1")
+# Pin the verifying key from deployment config, not from the signer object.
+PINNED_EXECUTION_KEYS = {
+    "membrane-1": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+}
 
 calls = []
 with TemporaryDirectory() as directory:
@@ -97,6 +110,8 @@ with TemporaryDirectory() as directory:
     guard = GovernedCallable(
         Constitution.default(),
         authorization_profile=AuthorizationProfile.PRODUCTION,
+        receipt_signer=signer,
+        trusted_execution_keys=PINNED_EXECUTION_KEYS,
         audit_log=audit,
         require_durable_audit=True,
         trusted_execution_context=TrustedExecutionContext(
@@ -115,6 +130,7 @@ with TemporaryDirectory() as directory:
     grant = inspect_account.issue_grant(
         "safe", scope="tenant-a", subjects=("account-1",)
     )
+    assert grant.signed_receipt.verify(PINNED_EXECUTION_KEYS["membrane-1"])
     assert inspect_account(
         "safe",
         scope="tenant-a",
@@ -198,9 +214,9 @@ default. The historical compatibility receipt path does not provide general
 trusted verification for arbitrary named controls; use the production grant
 profile, which refuses unverifiable control carriers, for a side-effect boundary.
 
-Start with [GOAL.md](./GOAL.md) for the product boundary and
-[ROADMAP.md](./ROADMAP.md) for milestones. The Runtime Legitimacy Kernel is
-documented in [`docs/api/legitimacy.md`](./docs/api/legitimacy.md).
+Start with [GOAL.md](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/GOAL.md) for the product boundary and
+[ROADMAP.md](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/ROADMAP.md) for milestones. The Runtime Legitimacy Kernel is
+documented in [`docs/api/legitimacy.md`](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/api/legitimacy.md).
 
 Non-goals:
 
@@ -216,29 +232,29 @@ Non-goals:
 Please report suspected ACGS-Lite governance or security vulnerabilities
 privately to `security@acgs.ai` instead of opening a public issue. The canonical
 supported-version, scope, and disclosure-window policy is in
-[`SECURITY.md`](./SECURITY.md), with a mirrored docs page at
-[`docs/security.md`](./docs/security.md).
+[`SECURITY.md`](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/SECURITY.md), with a mirrored docs page at
+[`docs/security.md`](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/security.md).
 
 ## Recommended starting points
 
 **After `pip install` (no clone):**
 
 - **Minimal fail-closed check** — the snippet above
-- **5-minute membrane** — [docs/guides/five-minute-membrane.md](docs/guides/five-minute-membrane.md)
+- **5-minute membrane** — [docs/guides/five-minute-membrane.md](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/guides/five-minute-membrane.md)
   (ALLOW / TRANSFORM / DENY / missing-receipt refusal + audit chain)
 
 **After cloning this repo:**
 
 - **Pip-only script in-tree** — `python examples/membrane_5min.py`
-- **Richer membrane walkthrough** — [`examples/governed_execution_membrane.py`](./examples/governed_execution_membrane.py)
-- **Contributor validation** — `make verify` (see [contributor setup](CONTRIBUTING.md))
-- **Self-verifying install** — [`examples/agent_quickstart/`](./examples/agent_quickstart/)
-- **Audit trail demo** — [`examples/audit_trail/`](./examples/audit_trail/)
-- **Shared infrastructure path** — [`examples/mcp_agent_client.py`](./examples/mcp_agent_client.py)
+- **Richer membrane walkthrough** — [`examples/governed_execution_membrane.py`](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/examples/governed_execution_membrane.py)
+- **Contributor validation** — `make verify` (see [contributor setup](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/CONTRIBUTING.md))
+- **Self-verifying install** — [`examples/agent_quickstart/`](https://github.com/acgs-ai/acgs-lite/tree/v4.0.0/examples/agent_quickstart)
+- **Audit trail demo** — [`examples/audit_trail/`](https://github.com/acgs-ai/acgs-lite/tree/v4.0.0/examples/audit_trail)
+- **Shared infrastructure path** — [`examples/mcp_agent_client.py`](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/examples/mcp_agent_client.py)
 - **Self-assessed compliance mapping** — `acgs assess --framework eu-ai-act` (mapping only; not certification)
 
 The Phoenix example under
-[`examples/phoenix_acgs_governed_agent/`](./examples/phoenix_acgs_governed_agent/)
+[`examples/phoenix_acgs_governed_agent/`](https://github.com/acgs-ai/acgs-lite/tree/v4.0.0/examples/phoenix_acgs_governed_agent)
 shows `request -> decision -> receipt -> bounded execution` telemetry; its
 `governance.decision.*` span attributes are experimental.
 
@@ -342,7 +358,7 @@ TASK: Install and verify ACGS-Lite constitutional AI governance.
 
 STEPS:
 1. Install the package:
-   pip install acgs-lite==3.0.1
+   pip install acgs-lite==4.0.0
 
 2. Pip-only proof (no clone). Paste and run the minimal README snippet.
    The last line must raise ConstitutionalViolationError for "wire transfer $1000".
@@ -560,69 +576,11 @@ replay-verification API.
 
 ---
 
-## 🌉 gove-zone kernel bridge (Experimental)
-
-`acgs_lite.gove` lets a `GovernanceEngine` constitution act as a
-[gove-zone](https://pypi.org/project/gove-zone/) `Policy`, so an existing
-constitution can gate calls through gove-zone's signed `execute_with_receipt`
-executor. This bridge is **Experimental**: it is a new adapter seam, not a
-replacement for the legitimacy receipt pipeline above, and it has not been
-run in production.
-
-Install (Python >= 3.11 only). The optional experimental bridge is qualified
-against the published pre-release `gove-zone==1.0.0rc2`:
-
-```bash
-pip install "acgs-lite[gove]"
-```
-
-Minimal usage — a real constitution evaluating a `gove_zone.tool.ToolCall`:
-
-```python
-from acgs_lite import Constitution, GovernanceEngine
-from acgs_lite.gove.policy import ConstitutionPolicy
-from gove_zone.tool import ToolCall
-
-policy = ConstitutionPolicy(GovernanceEngine(Constitution.default(), strict=False), version="1.0.0")
-record = policy.evaluate(ToolCall(name="deploy_feature", args={"env": "staging"}, goal="deploy to staging", actor="agent-1"))
-```
-
-`record` is a `gove_zone.decision.DecisionRecord`; hand it to gove-zone's own
-`ChainHashAuditStore` / `DecisionReceipt.from_record` / `execute_with_receipt`
-to reach a signed, gated execution — see
-[`tests/gove/test_conformance_e2e.py`](https://github.com/acgs-ai/acgs-lite/blob/main/tests/gove/test_conformance_e2e.py)
-for the full, working chain.
-
-Honest limitations:
-
-- **Legacy `legitimacy` receipts and gove-zone receipts are distinct formats
-  with incompatible canonicalizations.** They are not interchangeable and the
-  bridge does not convert between them.
-- **The bridge does not translate old evidence.** Legitimacy `DecisionReceipt`
-  records already on disk are not migrated or replayed into gove-zone's audit
-  chain; each governance pipeline keeps its own history.
-- **Single-use / expiry enforcement comes from gove-zone's own ledger, not
-  from `ExecutionBoundary.single_use`.** The legacy `ExecutionBoundary`
-  dataclass's `single_use` field is not read or enforced anywhere in this
-  bridge; replay/expiry protection for gove-zone-gated calls is entirely
-  gove-zone's responsibility.
-- The 8-state acgs-lite decision taxonomy is projected onto gove-zone's 4
-  verdicts (`decision_state_to_gove`); the original state is preserved as a
-  `reason` prefix, not as a first-class gove-zone field.
-- `ConstitutionPolicy` matches on a deterministic text projection of the
-  `ToolCall` (`name` + canonical JSON of `args` + `goal`), not on the
-  structured arguments directly — constitutions authored for prose actions
-  should target tool names and argument keys to match reliably.
-- `gove-zone` itself is pre-1.0 (`1.0.0rc2`); its API may change before a
-  stable release.
-
----
-
 ## 🔒 Safety Defaults
 
 The default strict `GovernanceEngine` blocks matching rules. Execution guarantees
 depend on the selected entry point and profile; compatibility receipts and
-best-effort audit writes provide weaker guarantees than the source candidate's
+best-effort audit writes provide weaker guarantees than the
 configured production grant path.
 
 | Guarantee | Behavior |
@@ -673,11 +631,10 @@ Not all layers are equally hardened. Use this table to calibrate trust in each a
 | Z3 constraint verifier | 🧪 **Experimental** | Useful for high-risk scenarios; requires separate Z3 install |
 | Lean 4 / Leanstral proof certificates | 🧪 **Experimental** | Requires `mistralai` extra and external Lean kernel |
 | Newer framework adapters (Agno, A2A, LiteLLM, Mistral) | 🧪 **Experimental** | Community-contributed; test coverage varies |
-| `acgs_lite.gove` — gove-zone kernel bridge | 🧪 **Experimental** | Optional `gove` extra (Python >= 3.11), qualified with published pre-release `gove-zone==1.0.0rc2`; distinct receipt format from `legitimacy`, not translated |
 
 ---
 
-## Stable surfaces today (3.0.1 published)
+## Stable surfaces today
 
 This table describes library surfaces with stable APIs and test coverage. It is
 not a blanket production-readiness claim for every deployment.
@@ -859,8 +816,27 @@ acgs audit --verify-chain
 acgs serve --port 8080
 
 # EU AI Act Art. 14(4)(e) kill switch
-acgs halt --agent-id agent-01 --reason "anomalous behaviour detected"
-acgs resume --agent-id agent-01
+# Halt and check must share a signal dir. Set ACGS_HALT_SIGNAL_DIR (or pass
+# --signal-dir) when agents may run with a different TMPDIR than the operator.
+# GovernedAgent builds a default breaker only when ACGS_HALT_SIGNAL_DIR or
+# ACGS_HALT_WEBHOOK_URL is set (opt-in); otherwise pass circuit_breaker=.
+# GovernedCallable also honors ACGS_HALT_SIGNAL_DIR or circuit_breaker=.
+# Pre-create the trusted directory before starting agents: a missing or
+# untrusted directory fails closed on every operation, including async calls.
+# If agents run as a different user than the operator, pre-create the dir so
+# both can read it (acgs halt creates new dirs as 0700, and an agent that cannot
+# read the dir treats itself as halted until access is fixed):
+#   sudo install -d -o root -g acgs -m 0750 /var/run/acgs
+# Trusted owners of the signal dir, its ancestors and halt files are this user
+# and root. ACGS_HALT_TRUSTED_UIDS (comma-separated, e.g. 65534 inside a
+# user-namespace sandbox) adds uids; every listed uid can both create AND lift
+# halts, so list only uids you trust to operate the kill switch.
+# Inside a user namespace, 65534 aliases every unmapped host uid; trust it only
+# when no untrusted host user can reach the signal path.
+export ACGS_HALT_SIGNAL_DIR=/var/run/acgs
+acgs halt --system-id agent-01 --reason "anomalous behaviour detected"
+acgs breaker-status --system-id agent-01   # exit 1 while halted
+acgs resume --system-id agent-01
 ```
 
 ---
@@ -871,7 +847,7 @@ acgs resume --agent-id agent-01
 |-------|-------------|
 | [Examples](https://github.com/acgs-ai/acgs-lite/blob/main/examples/README.md) | Canonical demo path: block, audit, then MCP |
 | [Constitution Templates](https://github.com/acgs-ai/acgs-lite/blob/main/examples/constitutions/README.md) | Reusable constitutions for content moderation, customer service, healthcare, hiring, and lending |
-| [5-minute membrane](docs/guides/five-minute-membrane.md) | Pip-only ALLOW / TRANSFORM / DENY + receipt refusal |
+| [5-minute membrane](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/guides/five-minute-membrane.md) | Pip-only ALLOW / TRANSFORM / DENY + receipt refusal |
 | [Quickstart](https://acgs.ai/docs/quickstart) | Install, wrap a callable, then inspect examples after a clone |
 | [Architecture](https://acgs.ai/docs/architecture) | Engine internals, MACI deep dive |
 | [Integrations](https://acgs.ai/docs/integrations) | OpenAI, Anthropic, LangChain, MCP, A2A |
@@ -887,7 +863,7 @@ acgs resume --agent-id agent-01
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](https://github.com/acgs-ai/acgs-lite/blob/main/CONTRIBUTING.md) for guidelines, the [community guide](docs/community.md) for support and participation routes, and the [installation guide](docs/installation.md) for package, container, and documentation-site distribution paths.
+We welcome contributions! See [CONTRIBUTING.md](https://github.com/acgs-ai/acgs-lite/blob/main/CONTRIBUTING.md) for guidelines, the [community guide](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/community.md) for support and participation routes, and the [installation guide](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/installation.md) for package, container, and documentation-site distribution paths.
 
 ```bash
 git clone https://github.com/acgs-ai/acgs-lite.git

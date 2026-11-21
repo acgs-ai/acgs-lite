@@ -9,7 +9,7 @@ Optional SDKs may impose stricter Python and platform requirements.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install acgs-lite==3.0.1
+python -m pip install acgs-lite==4.0.0
 python -m pip check
 acgs --help
 ```
@@ -18,11 +18,18 @@ On Windows, activate with `.venv\Scripts\Activate.ps1` in PowerShell.
 Use the [5-minute membrane](guides/five-minute-membrane.md) for a pip-only example.
 The wheel does not include the repository's `examples/` directory.
 
-!!! warning "Source-only hardening"
-    The source candidate includes execution-grant, trusted-context, durable-audit,
-    and recovery changes absent from the published **3.0.1** wheel. Installing
-    `acgs-lite==3.0.1` does not install those changes. Source metadata still reports
-    3.0.1; record the Git commit when reproducing source behavior.
+!!! warning "Changes that need 4.0.0"
+    The signed production execution grants, the JSON-only governed-payload contract,
+    `GovernedAgent(governance_context=...)`, and the halt-signal and recovery hardening
+    listed in the [changelog](changelog.md) first ship in **4.0.0**. The 3.0.1 wheel
+    does not contain them. To use them, install `acgs-lite>=4.0.0`
+    (or work from a source checkout), and read the
+    [4.0 upgrade guide](upgrade-v4.0.md) first: 4.0.0 is a breaking release.
+    Check what you have installed with
+    `python -c "import acgs_lite; print(acgs_lite.__version__)"` or
+    `python -m pip show acgs-lite`. A source checkout reports its `pyproject.toml`
+    version even before that version is published, so record the Git commit
+    (`git rev-parse HEAD`) when you reproduce source behavior.
 
 ## Work from the repository
 
@@ -46,7 +53,7 @@ See [Contributing](contributing.md) for validation and optional-test setup.
 For a published artifact, append an extra before the version pin:
 
 ```bash
-python -m pip install "acgs-lite[openai,crypto]==3.0.1"
+python -m pip install "acgs-lite[openai,crypto]==4.0.0"
 ```
 
 For the current source checkout, use an editable install:
@@ -71,7 +78,6 @@ compatible. Let the resolver check the selected extras together, then run
 | `litellm` | LiteLLM router | `litellm>=1.0` |
 | `google` | Google GenAI SDK | `google-genai>=1.0` |
 | `llamaindex` | LlamaIndex engines | `llama-index-core>=0.10` |
-| `gove` | Gove bridge; dependency only installed on Python 3.11+ | `gove-zone>=0.1.0a1; python_version >= '3.11'` |
 | `autogen` | AutoGen Core and AgentChat APIs | `autogen-core>=0.4`<br>`autogen-agentchat>=0.4` |
 | `mcp` | MCP server; bounded SDK major version | `mcp>=2.2,<3`<br>`jsonschema>=4.20`<br>`structlog>=21.0` |
 | `crewai` | CrewAI wrappers | `crewai>=0.30` |
@@ -94,14 +100,13 @@ compatible. Let the resolver check the selected extras together, then run
 ### What `all` includes
 
 `all` selects the integration names listed in its table row. It does **not** select
-`server`, `postgres`, `gove`, `docs`, or `dev`. It also does not install every
+`server`, `postgres`, `docs`, or `dev`. It also does not install every
 third-party framework for which an adapter module exists. For example,
 PydanticAI needs a separate `pydantic-ai` installation; there is no `pydantic-ai`
 extra in this manifest. See the [adapter catalog](integrations.md).
 
-`gove` has an explicit Python 3.11+ dependency marker: requesting that extra on
-Python 3.10 does not install `gove-zone`. Other SDKs may further restrict Python
-versions. An extras name is a dependency selection, not an activation or
+There is no `gove` extra. The Gove bridge needs `gove-zone`, which you install
+separately (Python 3.11+). Some SDKs restrict Python versions further. An extras name is a dependency selection, not an activation or
 production-readiness guarantee.
 
 ## Distribution surfaces
@@ -120,6 +125,7 @@ run the strict MkDocs build, `npm run preview` as `wrangler dev`, and
 uploads a Worker version; it does not activate that version for live traffic.
 Treat upload, activation, and verification of the served route as separate steps.
 
+Maintainers publish releases by following the [release runbook](releasing.md).
 Release sources: [candidate qualification workflow](https://github.com/acgs-ai/acgs-lite/blob/main/.github/workflows/release-candidate.yml),
 [PyPI publication workflow](https://github.com/acgs-ai/acgs-lite/blob/main/.github/workflows/publish.yml),
 [Rust artifact workflow](https://github.com/acgs-ai/acgs-lite/blob/main/.github/workflows/wheels.yml),

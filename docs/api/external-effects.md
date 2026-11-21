@@ -88,3 +88,39 @@ conformance, provider attestations, signed delivery evidence and A5 composition 
 approval/revocation with external effects remain separate work. Simulated-provider tests
 demonstrate the local boundary and fencing model only. Neo4j is optional and is
 not a runtime dependency.
+
+## Contract-gated dispatch and signed outcome evidence
+
+Use `ContractedEffectStore` for contract-gated dispatch. Register a pinned
+`ProviderContract` in `ProviderContractRegistry`; only `FENCEABLE` contracts are
+dispatchable. The wrapper stores the contract digest before provider I/O and
+requires the same digest for reconciliation and outcome receipts. Calling the raw
+`EffectStore.send` bypasses this contract gate and cannot produce linked outcome
+evidence through the factory below.
+
+After the trusted host authenticates and consumes the execution grant, reserve
+with `grant_identity=local_grant_identity(grant)` and send with that same grant:
+
+```python
+from acgs_lite.legitimacy import ContractedEffectStore, outcome_from_record, sign_outcome
+
+contracted = ContractedEffectStore(store, registry)
+record = contracted.send(effect.key, provider, grant=grant)
+outcome = outcome_from_record(record, store=contracted, provider=provider, grant=grant)
+signed = sign_outcome(outcome, signer)
+assert signed.verify(trusted_outcome_public_key)
+```
+
+The receipt contains the grant reference, decision receipt identity, effect key,
+provider, pinned contract digest and terminal outcome. The decision identity is
+persisted before dispatch and cannot be substituted later, even by another
+receipt with the same grant ID. The factory checks the supplied record against
+durable state; pending or `UNKNOWN` records cannot produce receipts. Dispatches
+without a grant have no decision binding and cannot acquire one after dispatch.
+The host must retain the original authenticated grant; neither a grant reference
+nor this evidence factory authenticates or authorizes execution.
+
+Consumers must deduplicate by `effect_key`: repeated receipt creation or signing
+can produce multiple receipts for one effect. Outcome signatures authenticate
+the host's evidence, not an independent provider attestation. The provider's
+deduplication and fencing guarantees still require separate conformance evidence.

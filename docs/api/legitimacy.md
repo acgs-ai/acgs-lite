@@ -49,7 +49,8 @@ execution authority and add no storage or Neo4j dependency.
 
 - Policy: `acgs:policy:v1:sha256:<full digest>` uses the PolicyBinding digest,
   not its display/version label.
-- Receipt: `acgs:receipt:v1:sha256:<existing receipt hash>` preserves the
+- Receipt: `acgs:receipt:v1:sha256:<receipt hash>` for v1 receipts and
+  `acgs:receipt:v2:sha256:<receipt hash>` for schema v2 receipts. It preserves the
   existing commitment and checks payload/hash consistency.
 - Signed envelope: `acgs:signed-envelope:v1:sha256:<digest>` hashes
   `b"acgs-signed-envelope-identity-v1\x00"` (including one trailing NUL byte)
@@ -66,7 +67,8 @@ execution authority and add no storage or Neo4j dependency.
 
 Digest and signature hex must be full-length lowercase hex. Unsupported policy
 algorithms, signature algorithms/scopes and malformed identifiers fail closed.
-Existing receipt/grant dataclasses, serializers and signed payloads are unchanged.
+The identity helpers do not change receipt/grant dataclasses, serializers or
+signed payloads. Receipt schema v2 is described under [Receipt Fields](#receipt-fields).
 
 ## Decision Taxonomy
 
@@ -130,6 +132,30 @@ Required receipt fields:
 Create receipts with `DecisionReceipt.create(...)`; direct construction is
 reserved for deserialization paths that must still satisfy the same invariants.
 
+### Receipt schema v2
+
+`GovernedCallable.issue_grant` mints schema v2 receipts only. A v2 receipt adds:
+
+| Field | Purpose |
+| --- | --- |
+| `schema_version` | `2`. A missing or `null` value always means v1; v2 is never inferred. |
+| `grant_id` | Random server-side id from `ExecutionAuthority.allocate_grant_id()`, committed before the grant is minted. Callers cannot supply one. |
+| `policy_digest` | Full `PolicyBinding.digest` of the policy that decided. |
+| `method_id` | Identity of the bound callable. |
+| `argument_digest` | Digest of the canonical bound arguments. |
+| `context_digest` | Trusted-context digest, or absent when no trusted context is bound. |
+
+v2 hashes are domain-separated: SHA-256 over `RECEIPT_HASH_DOMAIN_V2`
+(`b"acgs-receipt-v2\x00"`) followed by the canonical JSON of the v1 keys,
+`schema_version` and the non-null v2 keys. v1 receipts keep their byte-identical
+hash and wire shape, and no v1 bytes verify as v2 or vice versa. v2 fields on a
+v1 receipt, or v2 keys on the wire without `schema_version: 2`, are refused.
+The v2 wire schema is closed: unknown receipt or `execution_boundary` keys are
+refused, while v1 parsing keeps ignoring extra keys. One receipt mints at most
+one grant. `build_issue_receipt` takes the engine decision as a required
+keyword-only `decision` argument, and receipts record that decision rather than
+a fixed stamp. `RECEIPT_HASH_DOMAIN_V2` is exported from `acgs_lite.legitimacy`.
+
 ## Execution Boundary Binding
 
 Before a wrapped callable executes, `GovernedCallable` removes authorization
@@ -150,8 +176,53 @@ arguments are also bound to the wrapped function signature so common subject
 parameters such as `customer_id`, `account_id`, `subject_id`, `resource_id`, and
 `user_id` cannot bypass the boundary by being passed positionally.
 
-`authorization_profile="production"` requires an `ExecutionGrant` issued by
-that exact `GovernedCallable` instance. The grant binds the current policy
+`authorization_profile="production"` requires an Ed25519 execution signer at
+construction (`crypto` extra) and an `ExecutionGrant` issued by that exact
+`GovernedCallable` instance.
+
+| Constructor argument | Meaning |
+|---|---|
+| `receipt_signer` | Required. A non-ephemeral Ed25519 `ReceiptSigner`. Keys from `Ed25519ReceiptSigner.generate()` are refused; load a persistent key with `from_private_bytes()` (or `from_seed()` for fixtures), or back the protocol with a KMS/HSM. Only `generate()` is detected as ephemeral: a key object cannot prove where its bytes came from, so provisioning the key and its pin out of band is the operator's responsibility. |
+| `trusted_execution_keys` | Required. `key_id -> public key hex` pinned with execution scope, supplied from outside the signer. The signer's key must be pinned here. `trusted_issuer_keys` never authorizes execution. |
+| `grant_ttl_seconds` | Signed grant lifetime, default 300. Must be positive and finite. |
+
+Missing, ephemeral, unpinned, or non-Ed25519 signers raise
+`LegitimacyInvariantError`, and so does any of these arguments under the
+compatibility profile. Every production grant carries `grant.signed_receipt`: a
+v2 receipt signed with execution scope over an envelope that commits the method,
+argument, policy and trusted-context digests, scope, subjects, grant id and
+expiry. Before the ledger consume, both the `execution_grant=` and the
+`signed_receipt=` carriers are verified against the live call: the key must be
+pinned in `trusted_execution_keys`, the signature valid, the receipt v2 with an
+`ALLOW` or `ALLOW_WITH_CONTROLS` decision, unexpired on both the wall clock and a
+monotonic deadline, issued by this instance for this exact callable, and every
+envelope and receipt binding equal to the call. The grant id is not a secret:
+each issued grant id is bound to the exact receipt hash and the key that signed
+it, so a receipt signed by another pinned key, or a different receipt reusing a
+live grant id, is refused and never consumes the real grant. A receipt-scope
+signature, an unpinned key, a denied decision, an expired or mismatched
+envelope, and a second use all deny before the callable runs.
+
+Expiry blocks new executions only. Retrying with the same grant and the
+`execution_attempt_id` the ledger already recorded for it is answered from the
+ledger after expiry (the completed result, or the recorded status) and never
+runs the callable again; the signature, key pin and bindings are still checked.
+
+Governed arguments and return values must be JSON-native: exact `dict` with `str`
+keys, `list`, `tuple`, `str`, `int`, `bool`, finite `float`, `None`, and
+`bytes`/`bytearray` that decode as strict UTF-8. Text and dictionary keys containing
+C0 controls other than tab, newline and carriage return are rejected, because JSON
+escaping would conceal those characters from rule matching. The governance
+projector, the argument digest and the output digest admit exactly these values,
+matched by exact type. Anything else (`Enum` members, dataclasses, pydantic
+models, `datetime`, `UUID`, paths, `Decimal`, sets, subclasses of the accepted
+types, non-`str` keys, NaN and infinities) denies with
+`GOVERNANCE-PAYLOAD-UNEVALUABLE` or `ArgumentNotDigestible` before the call, and
+after the call for a return value (attempt `PARTIAL`, result withheld). Convert
+rich objects before the call, for example `model.model_dump(mode="json")`,
+`value.isoformat()` or `str(uuid)`.
+
+The grant binds the current policy
 digest, canonical arguments, method identifier, and exact callable object. It
 is single-use through the instance's in-process ledger. An attempt identifier
 cannot be reused for a different grant, and a terminal or cancelled attempt is
@@ -161,8 +232,14 @@ Completed result recovery verifies the recorded output digest; later mutation
 also changes the attempt to `PARTIAL` instead of returning unverifiable success.
 The grant retains its exact callable, whose process-local identity is covered
 by the MAC. Arbitrary `functools.wraps` layers are not removed for authorization.
-Discarded unused grants are not retained by the issuer. Consumed attempt records
-and recovery results remain in the instance ledger to prevent replay; this is
+The issuer's signed-grant registry is pruned whenever a new production grant is
+issued: a never-consumed grant is dropped once it expires, and a consumed grant
+whose attempt has settled is dropped once one further `grant_ttl_seconds` has
+passed after the later of its deadline and the attempt's settlement (monotonic
+clock), so an attempt that outlives its grant stays recoverable for a full TTL
+after it finishes. A grant whose attempt is still running is never dropped. After a consumed grant is pruned, a recovery retry with it is refused,
+never re-executed. Consumed attempt records and recovery results in the instance
+ledger are never pruned, which is what keeps every reuse refused; the ledger is
 not an automatically bounded or durable history store.
 
 `TrustedExecutionContext(actor_id, scope, allowed_subjects)` optionally binds a
@@ -195,10 +272,12 @@ in production. Actual bound or descriptor receiver methods are refused.
 This ledger has process-instance scope. It does not provide restart recovery,
 distributed exclusion, or general exactly-once delivery to external APIs.
 `require_durable_execution=True` and `require_restart_recovery=True` therefore
-fail closed instead of implying those guarantees. A plain or signed
+fail closed instead of implying those guarantees. A receipt-scope
 `SignedReceipt` is evidence that can be independently verified, but the
-production executor refuses it because this package has no durable single-use
-consumption contract for that carrier.
+production executor refuses it. An execution-scope `SignedReceipt` executes only
+on the instance that issued it, once, through the same in-process ledger as the
+grant; a different process holding the same pinned key does not share that
+ledger and refuses it.
 
 Production grants currently carry no required controls. An authorization
 carrier with controls that cannot be verified at the execution boundary is not
@@ -280,9 +359,10 @@ Boundaries (fail closed, by design):
   symmetric scheme.
 - The signing key is held in process memory. Back `Ed25519ReceiptSigner` with a
   KMS/HSM before relying on receipts for non-repudiation.
-- Signature validity alone does not provide single-use consumption. Use the
-  production `ExecutionGrant` path within its stated in-process trust domain;
-  externally signed carriers need a separately qualified consumption protocol.
+- Signature validity alone does not provide single-use consumption. The
+  production profile pairs each execution signature with its issuing instance's
+  in-process ledger; externally signed carriers need a separately qualified
+  consumption protocol.
 
 ## Failure Contract
 

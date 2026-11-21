@@ -130,7 +130,15 @@ def test_legitimacy_public_api_stable_exports() -> None:
         "execution_boundary",
         "issued_at",
         "receipt_hash",
+        # Schema v2 extension: trailing and defaulted, so positional v1 construction holds.
+        "schema_version",
+        "grant_id",
+        "policy_digest",
+        "method_id",
+        "argument_digest",
+        "context_digest",
     )
+    assert all(field.default is None for field in dataclasses.fields(DecisionReceipt)[13:])
     assert tuple(field.name for field in dataclasses.fields(ExecutionBoundary)) == (
         "allowed_method",
         "allowed_scope",

@@ -102,8 +102,14 @@ def normalize_actual_call(
     return ActualCall(method=method, scope=scope, subjects=subjects)
 
 
-def call_matches(boundary: ExecutionBoundary, actual_call: ActualCall) -> bool:
-    """Return whether the normalized actual call stays inside the receipt boundary."""
+def call_matches(
+    boundary: ExecutionBoundary, actual_call: ActualCall, *, enforce_expiry: bool = True
+) -> bool:
+    """Return whether the normalized actual call stays inside the receipt boundary.
+
+    ``enforce_expiry=False`` skips only the clock comparison (recovery of a recorded
+    attempt); a malformed ``expires_at`` still fails.
+    """
     if boundary.allowed_method is not None and boundary.allowed_method != actual_call.method:
         return False
     if boundary.allowed_scope is not None and boundary.allowed_scope != actual_call.scope:
@@ -121,7 +127,7 @@ def call_matches(boundary: ExecutionBoundary, actual_call: ActualCall) -> bool:
             return False
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if datetime.now(timezone.utc) > expires_at:
+        if enforce_expiry and datetime.now(timezone.utc) > expires_at:
             return False
     return True
 
@@ -132,6 +138,7 @@ def validate_receipt_for_execution(
     actual_call: ActualCall | None = None,
     human_approval: dict[str, Any] | None = None,
     audit_log: Any | None = None,
+    enforce_expiry: bool = True,
 ) -> None:
     """Fail closed unless receipt integrity and runtime invariants hold."""
     if receipt is None:
@@ -164,7 +171,9 @@ def validate_receipt_for_execution(
         raise LegitimacyInvariantError(f"Decision {decision_type} does not permit execution")
     if _requires_human_approval(receipt) and not _has_structured_human_approval(human_approval):
         raise LegitimacyInvariantError("Human approval requires structured approval fields")
-    if actual_call is not None and not call_matches(receipt.execution_boundary, actual_call):
+    if actual_call is not None and not call_matches(
+        receipt.execution_boundary, actual_call, enforce_expiry=enforce_expiry
+    ):
         raise LegitimacyInvariantError("Execution boundary mismatch blocks completion")
 
 

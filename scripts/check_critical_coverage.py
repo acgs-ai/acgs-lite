@@ -31,6 +31,7 @@ CRITICAL_FILES = frozenset(
         "constitution/lifecycle_router.py",
         "constitution/sqlite_bundle_store.py",
     }
+    | _package_files("control_plane")
     | _package_files("engine")
     | _package_files("formal")
     | _package_files("legitimacy")

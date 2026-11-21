@@ -40,9 +40,7 @@ def test_ignored_document_bad_links_are_not_published(published_repo: Path) -> N
         "https://github.com/acgs-ai/acgs-lite/blob/main/private.md",
     ],
 )
-def test_public_link_to_ignored_local_document_fails(
-    published_repo: Path, target: str
-) -> None:
+def test_public_link_to_ignored_local_document_fails(published_repo: Path, target: str) -> None:
     (published_repo / "README.md").write_text(f"[Private]({target})\n", encoding="utf-8")
     assert (published_repo / "private.md").is_file()
 

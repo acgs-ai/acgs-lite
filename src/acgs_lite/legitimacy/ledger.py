@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -70,6 +71,9 @@ class InProcessGrantLedger:
             str,
             tuple[str, str, str, str, str | None, tuple[str, ...], str | None],
         ] = {}
+        self._receipt_grant: dict[str, str] = {}
+        # Attempt id -> monotonic time its terminal status was last written.
+        self._settled_at: dict[str, float] = {}
 
     def consume(
         self,
@@ -92,6 +96,9 @@ class InProcessGrantLedger:
             context_digest,
         )
         with self._lock:
+            bound_grant = self._receipt_grant.get(receipt_hash)
+            if bound_grant is not None and bound_grant != grant_id:
+                raise LegitimacyInvariantError("receipt already bound to a different grant")
             existing = self._grant_attempt.get(grant_id)
             if existing is None:
                 attempt_owner = self._attempts.get(attempt_id)
@@ -117,6 +124,7 @@ class InProcessGrantLedger:
                 self._grant_attempt[grant_id] = attempt_id
                 self._attempts[attempt_id] = record
                 self._bindings[grant_id] = binding
+                self._receipt_grant[receipt_hash] = grant_id
                 return ConsumeDecision(mode="proceed", record=record)
 
             if existing != attempt_id:
@@ -133,6 +141,27 @@ class InProcessGrantLedger:
                     result=self._results.get(existing),
                 )
             return ConsumeDecision(mode="recover", record=record, result=None)
+
+    def attempt_for_grant(self, grant_id: str) -> str | None:
+        """The attempt id this grant was consumed by, or ``None`` if never consumed.
+
+        Once a grant has an attempt, :meth:`consume` never returns ``proceed`` for it
+        again, so a caller that sees a match here can only recover or be refused.
+        """
+        with self._lock:
+            return self._grant_attempt.get(grant_id)
+
+    def attempt_status_for_grant(self, grant_id: str) -> AttemptStatus | None:
+        """Status of the attempt that consumed this grant, or ``None`` if never consumed."""
+        with self._lock:
+            attempt_id = self._grant_attempt.get(grant_id)
+            return None if attempt_id is None else self._attempts[attempt_id].status
+
+    def settled_at_for_grant(self, grant_id: str) -> float | None:
+        """Monotonic time this grant's attempt last settled, or ``None`` if not settled."""
+        with self._lock:
+            attempt_id = self._grant_attempt.get(grant_id)
+            return None if attempt_id is None else self._settled_at.get(attempt_id)
 
     def finalize(
         self,
@@ -156,6 +185,7 @@ class InProcessGrantLedger:
             record.error_code = error_code
             record.output_sha256 = output_sha256
             record.finished_at = datetime.now(timezone.utc).isoformat()
+            self._settled_at[attempt_id] = time.monotonic()
             if status is AttemptStatus.COMPLETED:
                 self._results[attempt_id] = result
             return record
@@ -170,12 +200,19 @@ class InProcessGrantLedger:
             record.error_code = error_code
             record.output_sha256 = None
             record.finished_at = datetime.now(timezone.utc).isoformat()
+            self._settled_at[attempt_id] = time.monotonic()
             self._results.pop(attempt_id, None)
             return record
 
 
 def digest_output(value: Any) -> str | None:
-    """Digest the supported canonical value domain; reject opaque objects."""
+    """Digest a JSON-native output; ``None`` for anything outside that contract.
+
+    Admits the same values as the governance projector and the invocation binder
+    (see :func:`acgs_lite.legitimacy.invocation._canonical_json`), so an output that
+    can be evaluated can be digested and an Enum, dataclass, model or other rich
+    object cannot be stored for recovery replay.
+    """
     try:
         payload = _dumps(_canonical_json(value)).encode("utf-8")
     except Exception:
