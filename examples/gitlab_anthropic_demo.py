@@ -807,11 +807,16 @@ def main() -> None:
         default=int(os.environ.get("GITLAB_MR_IID", "42")),
         help="Merge request IID for live validation (env: GITLAB_MR_IID)",
     )
+    parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Force offline simulation mode even when API keys are set in the environment",
+    )
     args = parser.parse_args()
 
-    has_anthropic = args.anthropic_key is not None
-    has_gitlab = args.gitlab_token is not None and args.project_id > 0
-    simulation = not has_anthropic
+    has_anthropic = args.anthropic_key is not None and not args.simulate
+    has_gitlab = args.gitlab_token is not None and args.project_id > 0 and not args.simulate
+    simulation = args.simulate or not has_anthropic
 
     # -- Banner --
     _banner("ACGS: Anthropic + GitLab Governance Demo")
@@ -838,7 +843,7 @@ def main() -> None:
     _info(f"Constitutional hash: {_c(constitution.hash, 'cyan', 'bold')}")
     _info(f"Rules: {len(constitution.rules)}")
 
-    engine = GovernanceEngine(constitution, strict=False)
+    engine = GovernanceEngine(constitution, strict=False, audit_mode="full")
 
     # -- Prompts that demonstrate different outcomes --
     demo_prompts = [
@@ -1009,7 +1014,9 @@ def main() -> None:
     stats = engine.stats
     _section(5, "Governance Stats")
     _info(f"Total validations:  {stats['total_validations']}")
-    _info(f"Compliance rate:    {stats['compliance_rate']:.0%}")
+    rate = stats.get("compliance_rate")
+    rate_str = f"{rate:.0%}" if rate is not None else "n/a"
+    _info(f"Compliance rate:    {rate_str}")
     _info(f"Rules loaded:       {stats['rules_count']}")
     _info(f"Constitutional hash: {stats['constitutional_hash']}")
 
@@ -1017,7 +1024,7 @@ def main() -> None:
     _banner("Demo Complete")
     print()
     _info("Three layers of constitutional governance, zero violations in production.")
-    _info("Learn more: packages/acgs-lite/README.md")
+    _info("Learn more: README.md")
     print()
 
 

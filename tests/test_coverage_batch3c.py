@@ -1294,6 +1294,19 @@ class TestGovernanceNotificationBus:
         assert len(results) == 3
         assert len(received) == 3
 
+    def test_publish_batch_unique_ids_same_millisecond(self) -> None:
+        received: list[GovernanceNotification] = []
+        bus = GovernanceNotificationBus()
+        bus.subscribe(Subscriber("s1", received.append))
+        notifs = [
+            GovernanceNotification(topic="t", payload={"i": i}, created_at=1700000000.0)
+            for i in range(500)
+        ]
+        results = bus.publish_batch(notifs)
+        assert len(results) == 500
+        assert len(received) == 500
+        assert len({n.notification_id for n in notifs}) == 500
+
     def test_replay(self) -> None:
         bus = GovernanceNotificationBus()
         bus.subscribe(Subscriber("s1", lambda n: None))
