@@ -239,6 +239,7 @@ class TestDispatcherChecksBothSwitches:
                 permissions=permissions,
                 tool_tiers={"write": ActionTier.T1},
                 kill_switch=dispatcher_switch,
+                trust_host_identity=True,
             )
             d.register(
                 "write", lambda path: calls.append(path), path_params={"path"}, merge_capable=False
