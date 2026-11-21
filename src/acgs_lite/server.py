@@ -322,7 +322,8 @@ def create_governance_app(
       for local development).
 
     When ``include_openshell_governance`` is true, the app also mounts the
-    stable OpenShell/OpenClaw governance router under ``/governance``.
+    stable OpenShell/OpenClaw governance router under ``/governance``, behind
+    the same ``X-API-Key`` check as the routes above.
 
     When ``audit_store`` is omitted, the server uses the legacy in-memory
     ``AuditLog`` by default.
@@ -361,7 +362,8 @@ def create_governance_app(
         logger.warning(
             "acgs-lite governance app is starting WITHOUT API-key authentication. "
             "All endpoints are publicly reachable. Set api_key=... or "
-            "ACGS_API_KEY=... to protect /validate, /rules/*, /audit/*, /cdp/*. "
+            "ACGS_API_KEY=... to protect /validate, /rules/*, /audit/*, /cdp/*, "
+            "/governance/*. "
             "Pass require_auth=False to silence this warning, or require_auth=True "
             "to fail closed (default since v2.10.0)."
         )
@@ -798,7 +800,8 @@ def create_governance_app(
                 audit_log=cast(Any, audit_log),
                 observability_hook=openshell_observability_hook,
                 state_backend=state_backend,
-            )
+            ),
+            dependencies=auth_deps,
         )
 
     if include_autonoma:

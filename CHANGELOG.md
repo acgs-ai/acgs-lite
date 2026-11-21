@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `create_governance_app` now applies the `X-API-Key` check to the OpenShell
+  governance router. With `api_key` / `ACGS_API_KEY` set, every `/governance/*`
+  route returns 401 without the key; before, those routes were served without
+  it. Clients that call `/governance/*` must send the same `X-API-Key` header as
+  for `/validate`. Apps started with `require_auth=False` and no key are
+  unchanged.
+
 ## [4.0.0] - 2026-11-10
 
 Upgrading from 3.0.x: follow the
