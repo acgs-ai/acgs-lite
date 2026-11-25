@@ -1928,3 +1928,39 @@ class TestEnforcementAndRustParityHardening:
             "safe action", [("action_detail", "perform production access now")]
         )
         assert dec_full == _rust.ALLOW and viols_full == []
+
+    def test_governance_engine_slots_cover_all_init_attributes_without_dead_halt_slot(self) -> None:
+        """GovernanceEngine.__slots__ must include _has_elevated_workflow_rules and drop dead _has_halt_rules."""
+        assert "_has_elevated_workflow_rules" in GovernanceEngine.__slots__
+        assert "_has_halt_rules" not in GovernanceEngine.__slots__
+
+        constitution = Constitution(
+            name="slots-check",
+            rules=[
+                Rule(
+                    id="S-1",
+                    text="Block secret leak",
+                    severity=Severity.CRITICAL,
+                    keywords=["leak"],
+                ),
+                Rule(
+                    id="S-2",
+                    text="Halt on compromise",
+                    severity=Severity.HIGH,
+                    keywords=["compromise"],
+                    workflow_action=ViolationAction.HALT,
+                ),
+            ],
+        )
+        for mode in ("fast", "full"):
+            eng = GovernanceEngine(
+                constitution,
+                strict=False,
+                audit_mode=mode,  # type: ignore[arg-type]
+                warmup=False,
+                freeze_gc=False,
+            )
+            assert eng._has_elevated_workflow_rules is True
+            assert not hasattr(eng, "_has_halt_rules")
+            # Every attribute initialized on GovernanceEngine should live in __slots__, not __dict__.
+            assert getattr(eng, "__dict__", {}) == {}

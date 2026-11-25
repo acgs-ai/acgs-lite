@@ -388,7 +388,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         "_kw_gate",
         "_neg_kw_gate",
         "_ac_iter",
-        "_has_halt_rules",
+        "_has_elevated_workflow_rules",
         "_has_high_rules",
         "_hot",
         "_rust_validator",
@@ -437,9 +437,6 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         )
         self._rules_count: int = len(self._active_rules)
         _C = Severity.CRITICAL
-        self._has_halt_rules: bool = any(
-            rule.workflow_action is ViolationAction.HALT for rule in self._active_rules
-        )
         self._has_elevated_workflow_rules: bool = any(
             rule.workflow_action not in (ViolationAction.WARN, ViolationAction.BLOCK)
             for rule in self._active_rules
