@@ -24,7 +24,6 @@ CRITICAL_FILES = frozenset(
         "audit.py",
         "governed.py",
         "lean_verify.py",
-        "maci.py",
         "server.py",
         "trajectory.py",
         "constitution/lifecycle_service.py",

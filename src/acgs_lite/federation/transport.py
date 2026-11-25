@@ -5,6 +5,7 @@ Constitutional Hash: 608508a9bd224290
 
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Annotated
 
@@ -41,7 +42,7 @@ def _require_federation_auth(
         return
 
     expected_value = f"Bearer {expected_token}"
-    if authorization != expected_value:
+    if authorization is None or not hmac.compare_digest(authorization, expected_value):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized federation request",

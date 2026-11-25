@@ -23,14 +23,12 @@ from acgs_lite.constitution import Constitution
 from acgs_lite.engine import GovernanceEngine
 from acgs_lite.errors import ConstitutionalViolationError
 from acgs_lite.events import GovernanceEvent, get_event_bus
-from acgs_lite.federation import federation_router
 from acgs_lite.integrations.openshell_governance import (
     GovernanceStateBackend,
     GovernanceStateObservabilityHook,
     JsonFileGovernanceStateBackend,
     create_openshell_governance_router,
 )
-from acgs_lite.integrations.telegram_webhook import create_telegram_webhook_router
 
 logger = logging.getLogger(__name__)
 
@@ -813,6 +811,8 @@ def create_governance_app(
     if include_telegram:
         if telegram_webhook_path_secret is None:
             raise ValueError("telegram_webhook_path_secret is required when include_telegram=True")
+        from acgs_lite.integrations.telegram_webhook import create_telegram_webhook_router
+
         app.include_router(
             create_telegram_webhook_router(
                 engine_getter=lambda: engine,
@@ -830,6 +830,8 @@ def create_governance_app(
         app.include_router(create_lifecycle_router(api_key=lifecycle_api_key))
 
     if os.getenv("ACGS_FEDERATION_ENABLED"):
+        from acgs_lite.federation import federation_router
+
         app.include_router(federation_router, prefix="/v1/federation")
 
     if os.getenv("ACGS_EVENTS_ENABLED"):

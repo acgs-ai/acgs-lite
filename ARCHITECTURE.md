@@ -26,7 +26,7 @@ GovernanceEngine.validate()            src/acgs_lite/engine/
 ALLOW / DENY / TRANSFORM  ──► decision receipt (bound to method, scope, subjects,
    │                          policy version, execution boundary)
    ▼
-MACI role check (Proposer ≠ Validator ≠ Executor)   src/acgs_lite/maci.py
+MACI role check (Proposer ≠ Validator ≠ Executor)   src/acgs_lite/maci/
    │
    ▼
 Governed execution  ──► tamper-evident audit entry   src/acgs_lite/audit.py
@@ -42,7 +42,7 @@ validation result in non-strict flows and may raise `ConstitutionalViolationErro
 | --- | --- |
 | `src/acgs_lite/constitution/` | Rules, lifecycle, bundle store, HTTP lifecycle router |
 | `src/acgs_lite/engine/` | Validation engine + bundle binding |
-| `src/acgs_lite/maci.py` | MACI separation-of-powers enforcement |
+| `src/acgs_lite/maci/` | MACI separation-of-powers enforcement |
 | `src/acgs_lite/audit.py` | Tamper-evident, replay-verifiable audit trail |
 | `src/acgs_lite/governed.py` | Drop-in governed wrappers around agent execution |
 | `src/acgs_lite/agents/` | Agent **discovery**: capability profiles, registry, governed selector |
