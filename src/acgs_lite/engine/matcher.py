@@ -149,6 +149,8 @@ class GovernanceMatcherMixin:
         _merged_bm = 0
         _has_critical = False
         _crit_idx = -1
+        _unknown_critical = False
+        _n_rules = len(self._rule_data)
         if decision == _RUST_DENY_CRITICAL:
             _crit_idx = data
             _has_critical = True
@@ -165,34 +167,22 @@ class GovernanceMatcherMixin:
                     if not _has_critical:
                         _crit_idx = _ctx_data
                         _has_critical = True
-                    elif 0 <= _ctx_data < len(self._rule_data):
+                    elif 0 <= _ctx_data < _n_rules:
                         _merged_bm |= 1 << _ctx_data
+                    else:
+                        _unknown_critical = True
                 elif _ctx_dec == _RUST_DENY:
                     _merged_bm |= _ctx_data
         if _has_critical:
-            if not (0 <= _crit_idx < len(rule_excs)):
-                fast_records.append(None)
-                if raise_on_critical:
+            if raise_on_critical:
+                if not (0 <= _crit_idx < len(rule_excs)):
+                    fast_records.append(None)
                     raise ConstitutionalViolationError(
                         "Critical rule violation (index out of range)",
                         rule_id="UNKNOWN",
                         severity="critical",
                         action=action[:200],
                     )
-                return self._new_fast_result(
-                    valid=False,
-                    violations=[
-                        Violation(
-                            "UNKNOWN",
-                            "Critical rule violation",
-                            Severity.CRITICAL,
-                            action[:200],
-                            "",
-                        )
-                    ],
-                    action=action,
-                )
-            if raise_on_critical:
                 _e_src = rule_excs[_crit_idx]
                 fast_records.append(None)
                 raise ConstitutionalViolationError(
@@ -201,8 +191,11 @@ class GovernanceMatcherMixin:
                     severity=_e_src.severity,
                     action=action[:200],
                 )
-            _merged_bm |= 1 << _crit_idx
-        if _merged_bm:
+            if 0 <= _crit_idx < _n_rules:
+                _merged_bm |= 1 << _crit_idx
+            else:
+                _unknown_critical = True
+        if _merged_bm or _unknown_critical:
             _a200 = action[:200]
             _vlist: list[Violation] = []
             _bv_ctx: Violation | None = None
@@ -222,6 +215,17 @@ class GovernanceMatcherMixin:
                     and _vwa_ctx is not ViolationAction.WARN
                 ):
                     _bv_ctx = _v
+            if _unknown_critical:
+                _unk = Violation(
+                    "UNKNOWN",
+                    "Critical rule violation",
+                    Severity.CRITICAL,
+                    _a200,
+                    "",
+                )
+                _vlist.append(_unk)
+                if _bv_ctx is None:
+                    _bv_ctx = _unk
             if _bv_ctx is not None and effective_strict and not _has_halt:
                 raise ConstitutionalViolationError(
                     f"Action blocked by rule {_bv_ctx.rule_id}: {_bv_ctx.rule_text}",
@@ -341,11 +345,26 @@ class GovernanceMatcherMixin:
                 Violation(rid, rtxt, _SEV(sev), _a200, cat)
                 for rid, rtxt, sev, _, cat in _violations
             ]
-            _has_halt = any(
-                self._rule_id_to_wa.get(v.rule_id) is ViolationAction.HALT for v in _vlist
-            )
-            if _blocking and strict and not _has_halt:
-                _bv = next((v for v in _vlist if v.severity.blocks()), _vlist[0])
+            _wa_lkup = self._rule_id_to_wa
+            _has_halt = False
+            _bv: Violation | None = None
+            for _v in _vlist:
+                _vwa = _wa_lkup.get(_v.rule_id, ViolationAction.BLOCK)
+                if _vwa is ViolationAction.HALT:
+                    _has_halt = True
+                elif _bv is None and _v.severity.blocks() and _vwa is not ViolationAction.WARN:
+                    _bv = _v
+            if _bv is None and _blocking:
+                _bv = next(
+                    (
+                        v
+                        for v in _vlist
+                        if _wa_lkup.get(v.rule_id, ViolationAction.BLOCK)
+                        not in (ViolationAction.WARN, ViolationAction.HALT)
+                    ),
+                    None,
+                )
+            if _bv is not None and strict and not _has_halt:
                 _exc_idx = self._rule_id_to_exc_idx.get(_bv.rule_id, -1)
                 if _exc_idx >= 0:
                     _e_src = rule_excs[_exc_idx]
@@ -364,7 +383,7 @@ class GovernanceMatcherMixin:
             if fast_records is not None:
                 fast_records.append(None)
                 return self._new_fast_result(
-                    valid=not (_blocking or _has_halt),
+                    valid=not (_bv is not None or _has_halt),
                     violations=_vlist,
                     action=action,
                 )

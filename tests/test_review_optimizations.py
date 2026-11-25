@@ -565,6 +565,17 @@ def test_federation_transport_handles_non_ascii_header_and_token(
         _require_federation_auth("Bearer s\u00e9cret-other")
     assert exc_info2.value.status_code == 401
 
+    # Lone surrogates (e.g. non-UTF-8 Linux env vars decoded via surrogateescape)
+    # must never raise UnicodeEncodeError / HTTP 500.
+    monkeypatch.setenv("ACGS_FEDERATION_TOKEN", "surrogate-\udc80-tok")
+    _require_federation_auth("Bearer surrogate-\udc80-tok")
+    with pytest.raises(HTTPException) as exc_info3:
+        _require_federation_auth("Bearer wrong")
+    assert exc_info3.value.status_code == 401
+    with pytest.raises(HTTPException) as exc_info4:
+        _require_federation_auth("Bearer \ud800")
+    assert exc_info4.value.status_code == 401
+
 
 # ── 7. Hardening regressions (re-entrant rollback, Rust/HALT parity, lazy proxy, streaming) ──
 
@@ -881,6 +892,49 @@ class TestEngineHaltRustParityAndFallbacks:
         assert [v.rule_id for v in res_oor.violations] == ["UNKNOWN"]
         assert recs_oor == [None]
 
+        # Out-of-range critical match must NOT drop concurrent in-range violations.
+        host._rust_validator.hot["detail-oor"] = (_RUST_DENY_CRITICAL, 99)
+        res_high_plus_oor = host._validate_rust_gov_context(
+            "act",
+            _RUST_DENY,
+            0b010,
+            {"action_detail": "detail-oor"},
+            host._rule_excs,
+            [],
+            strict=False,
+        )
+        assert res_high_plus_oor is not None and res_high_plus_oor.valid is False
+        assert {v.rule_id for v in res_high_plus_oor.violations} == {"R-HIGH-1", "UNKNOWN"}
+
+        res_crit_plus_oor = host._validate_rust_gov_context(
+            "act",
+            _RUST_DENY_CRITICAL,
+            0,
+            {"action_detail": "detail-oor"},
+            host._rule_excs,
+            [],
+            strict=False,
+        )
+        assert res_crit_plus_oor is not None and res_crit_plus_oor.valid is False
+        assert {v.rule_id for v in res_crit_plus_oor.violations} == {"R-CRIT-0", "UNKNOWN"}
+
+        # Critical index valid in rule_excs but past _rule_data falls back to UNKNOWN without IndexError.
+        longer_excs = [
+            *host._rule_excs,
+            ConstitutionalViolationError("extra", rule_id="R-EXTRA", severity="critical"),
+        ]
+        res_mismatch_len = host._validate_rust_gov_context(
+            "act",
+            _RUST_DENY_CRITICAL,
+            3,
+            {"action_detail": "ok"},
+            longer_excs,
+            [],
+            strict=False,
+        )
+        assert res_mismatch_len is not None and res_mismatch_len.valid is False
+        assert [v.rule_id for v in res_mismatch_len.violations] == ["UNKNOWN"]
+
         # Same critical paths with strict=True still raise ConstitutionalViolationError.
         with pytest.raises(ConstitutionalViolationError, match="crit0"):
             host._validate_rust_gov_context(
@@ -902,6 +956,67 @@ class TestEngineHaltRustParityAndFallbacks:
                 [],
                 strict=True,
             )
+
+    def test_validate_rust_full_respects_warn_override_on_high_severity_rule(self) -> None:
+        from acgs_lite.engine.matcher import _RUST_DENY, GovernanceMatcherMixin
+        from acgs_lite.engine.models import ValidationResult, Violation
+
+        class _FakeRust:
+            def validate_full(
+                self, _text: str, _pairs: list[tuple[str, str]]
+            ) -> tuple[int, list[tuple[str, str, str, str, str]], bool]:
+                # Rust flags _blocking=True from severity=high alone (unaware of WARN).
+                return (_RUST_DENY, [("R-WARN-HIGH", "warn only", "high", "", "sec")], True)
+
+        class _Host(GovernanceMatcherMixin):
+            def __init__(self) -> None:
+                self._rule_data = [
+                    ("R-WARN-HIGH", "warn only", Severity.HIGH, "high", "sec", False, "warn")
+                ]
+                self._rule_excs = [None]
+                self._rule_id_to_exc_idx = {}
+                self._rule_id_to_wa = {"R-WARN-HIGH": ViolationAction.WARN}
+                self._rust_validator = _FakeRust()
+                self.strict = True
+
+            def _new_fast_allow_result(self) -> ValidationResult:
+                return ValidationResult(True, "h")
+
+            def _new_fast_result(
+                self, *, valid: bool, violations: list[Violation], action: str
+            ) -> ValidationResult:
+                return ValidationResult(valid, "h", violations, action=action)
+
+        host = _Host()
+        recs: list[Any] = []
+        res = host._validate_rust_full("trigger", True, [("action_detail", "x")], [None], recs)
+        assert res is not None and res.valid is True
+        assert [v.rule_id for v in res.violations] == ["R-WARN-HIGH"]
+        assert recs == [None]
+
+    def test_constitutions_over_63_rules_enforce_all_rules_without_rust_i64_overflow(
+        self,
+    ) -> None:
+        """Constitutions with >63 active rules must never suffer Rust i64 bitmask overflow."""
+        for count in (63, 64, 65):
+            rules = [
+                Rule(
+                    id=f"R-{i:03d}",
+                    text=f"Block rule {i}",
+                    severity=Severity.HIGH,
+                    keywords=[f"kw{i:03d}"],
+                )
+                for i in range(count)
+            ]
+            constitution = Constitution(name=f"rules-{count}", rules=rules)
+            engine = GovernanceEngine(constitution, strict=False, warmup=False, freeze_gc=False)
+            if count > 63:
+                assert engine._rust_validator is None
+            for idx in (0, 62, count - 1):
+                res = engine.validate(f"trigger kw{idx:03d}")
+                assert res.valid is False, f"count={count} idx={idx} failed open"
+                assert [v.rule_id for v in res.violations] == [f"R-{idx:03d}"]
+            assert engine.validate("completely clean action").valid is True
 
     def test_runtime_rule_filtering_receipt_reflects_post_init_rule_mutations(self) -> None:
         base_rule = Rule(
@@ -1066,3 +1181,86 @@ class TestLazySubmoduleAndStreamingHardening:
         assert observed_strict == [True]
         assert chunk_res.passed is False
         assert chunk_res.should_halt is True
+
+    def test_streaming_validator_does_not_misinterpret_inner_typeerror_with_strict_text(
+        self,
+    ) -> None:
+        from contextlib import contextmanager
+
+        from acgs_lite.engine.streaming import StreamingValidator
+
+        class _StrictCapableFailingEngine:
+            def __init__(self) -> None:
+                self.strict = True
+                self.validate_calls = 0
+                self.non_strict_entries = 0
+
+            @contextmanager
+            def non_strict(self) -> Any:
+                self.non_strict_entries += 1
+                old = self.strict
+                self.strict = False
+                try:
+                    yield
+                finally:
+                    self.strict = old
+
+            def validate(self, text: str, *, strict: bool | None = None) -> Any:
+                del text, strict
+                self.validate_calls += 1
+                raise TypeError("downstream parser failed in strict mode")
+
+        eng = _StrictCapableFailingEngine()
+        sv = StreamingValidator(eng, flush_interval_chars=5, blocking_severities={"critical"})
+        res = sv.feed("hello world")
+        assert res.passed is False
+        assert res.should_halt is True
+        assert eng.validate_calls == 1
+        assert eng.non_strict_entries == 0
+        assert eng.strict is True
+
+    def test_server_lazy_router_attributes_support_import_and_mock_patch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pytest.importorskip("fastapi")
+        from fastapi import APIRouter
+
+        import acgs_lite.server as srv
+
+        # Subprocess verifies bare import stays lazy while dir() and patch() work.
+        code = (
+            "import sys\n"
+            "from unittest.mock import patch\n"
+            "from fastapi import APIRouter\n"
+            "import acgs_lite.server as srv\n"
+            "assert 'acgs_lite.federation' not in sys.modules\n"
+            "assert 'acgs_lite.integrations.telegram_webhook' not in sys.modules\n"
+            "assert 'federation_router' in dir(srv)\n"
+            "assert 'create_telegram_webhook_router' in dir(srv)\n"
+            "fake = APIRouter()\n"
+            "@fake.get('/ping')\n"
+            "def _ping(): return {'ok': True}\n"
+            "with patch('acgs_lite.server.federation_router', fake):\n"
+            "    assert srv.federation_router is fake\n"
+        )
+        subprocess.run([sys.executable, "-c", code], check=True, timeout=30)
+
+        # In-process: patching acgs_lite.server.federation_router is honored by create_governance_app.
+        from fastapi.testclient import TestClient
+
+        fake_router = APIRouter()
+
+        @fake_router.get("/patched-probe")
+        def _patched_probe() -> dict[str, bool]:
+            return {"patched": True}
+
+        monkeypatch.setenv("ACGS_FEDERATION_ENABLED", "true")
+        with patch("acgs_lite.server.federation_router", fake_router):
+            app = srv.create_governance_app(require_auth=False)
+            resp = TestClient(app).get("/v1/federation/patched-probe")
+            assert resp.status_code == 200
+            assert resp.json() == {"patched": True}
+
+        # Unknown attribute still raises AttributeError.
+        with pytest.raises(AttributeError):
+            srv.__getattr__("nonexistent_server_router_xyz")

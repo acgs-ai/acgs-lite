@@ -39,6 +39,39 @@ _CLAUDE_CODE_READ_ONLY_TOOLS = frozenset({"Read", "Glob", "Grep", "LS"})
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
+    from acgs_lite.federation import federation_router as federation_router
+    from acgs_lite.integrations.telegram_webhook import (
+        create_telegram_webhook_router as create_telegram_webhook_router,
+    )
+
+
+_LAZY_ROUTERS: dict[str, tuple[str, str]] = {
+    "federation_router": ("acgs_lite.federation", "federation_router"),
+    "create_telegram_webhook_router": (
+        "acgs_lite.integrations.telegram_webhook",
+        "create_telegram_webhook_router",
+    ),
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_ROUTERS:
+        mod_name, attr_name = _LAZY_ROUTERS[name]
+        value = getattr(import_module(mod_name), attr_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY_ROUTERS))
+
+
+def _resolve_lazy_router(name: str) -> Any:
+    if name in globals():
+        return globals()[name]
+    return __getattr__(name)
+
 
 class _AuditStoreLike(Protocol):
     def append(self, entry: AuditEntry) -> str: ...
@@ -811,10 +844,10 @@ def create_governance_app(
     if include_telegram:
         if telegram_webhook_path_secret is None:
             raise ValueError("telegram_webhook_path_secret is required when include_telegram=True")
-        from acgs_lite.integrations.telegram_webhook import create_telegram_webhook_router
+        telegram_router_factory = _resolve_lazy_router("create_telegram_webhook_router")
 
         app.include_router(
-            create_telegram_webhook_router(
+            telegram_router_factory(
                 engine_getter=lambda: engine,
                 webhook_path_secret=telegram_webhook_path_secret,
                 secret_token=telegram_secret_token,
@@ -830,9 +863,7 @@ def create_governance_app(
         app.include_router(create_lifecycle_router(api_key=lifecycle_api_key))
 
     if os.getenv("ACGS_FEDERATION_ENABLED"):
-        from acgs_lite.federation import federation_router
-
-        app.include_router(federation_router, prefix="/v1/federation")
+        app.include_router(_resolve_lazy_router("federation_router"), prefix="/v1/federation")
 
     if os.getenv("ACGS_EVENTS_ENABLED"):
         from fastapi.responses import StreamingResponse

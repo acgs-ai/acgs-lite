@@ -584,7 +584,12 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             isinstance(self._fast_records, _NoopRecorder),
             None,
         )
-        if _HAS_RUST:
+        # Rust's validate_hot() returns (decision, fired as i64): signed 64-bit
+        # bitmasks can only represent rule indices 0..62 without sign-bit
+        # overflow (bit 63 -> negative -> IndexError) or truncation (bits >= 64
+        # -> 0 -> silent fail-open). Fall back to the arbitrary-precision Python
+        # matcher whenever more than 63 active rules are compiled.
+        if _HAS_RUST and len(self._active_rules) <= 63:
             _rust_anchor_dispatch = [
                 (anchor, [(ri, pat.pattern) for ri, pat in pats])
                 for anchor, pats in self._pat_anchor_dispatch
@@ -620,7 +625,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 )
             except ValueError:
                 # Rust's regex crate rejects look-around/backreferences and its
-                # bitmask supports <=127 rules; fall back to the Python matcher.
+                # anchor bitmask has a fixed upper bound; fall back to Python.
                 self._rust_validator = None
         else:
             self._rust_validator = None
