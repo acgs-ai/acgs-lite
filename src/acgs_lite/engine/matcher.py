@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from acgs_lite.constitution import Severity
+from acgs_lite.constitution.analytics import _POSITIVE_VERBS_SET
 from acgs_lite.constitution.rule import ViolationAction
 from acgs_lite.errors import ConstitutionalViolationError
 
@@ -53,30 +54,39 @@ class GovernanceMatcherMixin:
         bitmask: int,
         action_200: str,
     ) -> tuple[list[Violation], Violation | None, bool]:
-        """Decode a fired rule bitmask into Violations, first blocking violation, and HALT flag."""
+        """Decode a fired rule bitmask into Violations, first plain-BLOCK violation, and deferred flag.
+
+        ``has_deferred`` is True when any matched rule carries an elevated workflow
+        action (``BLOCK_AND_NOTIFY``, ``REQUIRE_HUMAN_REVIEW``, ``ESCALATE``, or
+        ``HALT``) that must be resolved by ``_post_dispatch_result`` rather than
+        early-raising with default ``ViolationAction.BLOCK``.
+        """
         vlist: list[Violation] = []
         blocking_violation: Violation | None = None
-        has_halt = False
+        has_deferred = False
         rule_data = self._rule_data
+        n_rules = len(rule_data)
         wa_lookup = self._rule_id_to_wa
+        if bitmask < 0:
+            # Guard against signed 64-bit sign extension (bit 63 in Rust i64)
+            # which would otherwise loop forever in Python two's-complement math.
+            bitmask &= (1 << 64) - 1
         while bitmask:
             idx = (bitmask & -bitmask).bit_length() - 1
             bitmask &= bitmask - 1
+            if idx >= n_rules:
+                continue
             rd = rule_data[idx]
             violation = Violation(rd[0], rd[1], rd[2], action_200, rd[4])
             vlist.append(violation)
-            # Exclude WARN and HALT from the immediate-raise path;
-            # HALT is handled by _post_dispatch_result with correct enforcement_action.
-            vwa = wa_lookup.get(rd[0], ViolationAction.BLOCK)
-            if vwa is ViolationAction.HALT:
-                has_halt = True
-            elif (
-                blocking_violation is None
-                and violation.severity.blocks()
-                and vwa is not ViolationAction.WARN
-            ):
+            vwa = wa_lookup.get(rd[0])
+            if vwa is None:
+                vwa = ViolationAction.BLOCK if violation.severity.blocks() else ViolationAction.WARN
+            if vwa not in (ViolationAction.WARN, ViolationAction.BLOCK):
+                has_deferred = True
+            elif blocking_violation is None and vwa is ViolationAction.BLOCK:
                 blocking_violation = violation
-        return vlist, blocking_violation, has_halt
+        return vlist, blocking_violation, has_deferred
 
     def _validate_rust_no_context(
         self,
@@ -173,9 +183,19 @@ class GovernanceMatcherMixin:
         _ctx_desc = context.get("action_description")
         for _cv in (_ctx_det, _ctx_desc):
             if _cv is not None and isinstance(_cv, str):
-                _ctx_dec, _ctx_data = self._rust_validator.validate_hot(
-                    _cv if _cv.islower() else _cv.lower()
-                )
+                _cv_lower = _cv if _cv.islower() else _cv.lower()
+                # Rust validate_hot only checks word 0 (space-delimited) for positive
+                # verbs, whereas Python context matching checks split()[:4]. Fall
+                # through to Python when a positive verb appears in words 1..3 or
+                # after leading/non-space whitespace.
+                _cv_words = _cv_lower.split()[:4]
+                if (
+                    _cv_words
+                    and _cv_lower.partition(" ")[0] not in _POSITIVE_VERBS_SET
+                    and any(w in _POSITIVE_VERBS_SET for w in _cv_words)
+                ):
+                    return None
+                _ctx_dec, _ctx_data = self._rust_validator.validate_hot(_cv_lower)
                 if _ctx_dec == _RUST_DENY_CRITICAL:
                     if not _has_critical:
                         _crit_idx = _ctx_data
@@ -269,18 +289,19 @@ class GovernanceMatcherMixin:
             )
         elif decision == _RUST_DENY:
             _a200 = action[:200]
-            _vlist, _bv_meta, _has_halt = self._decode_rust_bitmask(data, _a200)
+            _vlist, _bv_meta, _has_deferred = self._decode_rust_bitmask(data, _a200)
             if is_noop:
                 fast_records.append(None)
             # strict=True is guaranteed at this call site (outer validate() guard).
-            if _bv_meta is not None and not _has_halt:
+            if _bv_meta is not None and not _has_deferred:
                 raise ConstitutionalViolationError(
                     f"Action blocked by rule {_bv_meta.rule_id}: {_bv_meta.rule_text}",
                     rule_id=_bv_meta.rule_id,
                     severity=_bv_meta.severity.value,
                     action=_a200,
                 )
-            return self._new_fast_result(valid=not _has_halt, violations=_vlist, action=action)
+            _has_blocking = _bv_meta is not None or _has_deferred
+            return self._new_fast_result(valid=not _has_blocking, violations=_vlist, action=action)
         return None
 
     def _validate_rust_full(
@@ -324,25 +345,26 @@ class GovernanceMatcherMixin:
                 for rid, rtxt, sev, _, cat in _violations
             ]
             _wa_lkup = self._rule_id_to_wa
-            _has_halt = False
+            _has_deferred = False
             _bv: Violation | None = None
             for _v in _vlist:
-                _vwa = _wa_lkup.get(_v.rule_id, ViolationAction.BLOCK)
-                if _vwa is ViolationAction.HALT:
-                    _has_halt = True
-                elif _bv is None and _v.severity.blocks() and _vwa is not ViolationAction.WARN:
+                _vwa = _wa_lkup.get(_v.rule_id)
+                if _vwa is None:
+                    _vwa = ViolationAction.BLOCK if _v.severity.blocks() else ViolationAction.WARN
+                if _vwa not in (ViolationAction.WARN, ViolationAction.BLOCK):
+                    _has_deferred = True
+                elif _bv is None and _vwa is ViolationAction.BLOCK:
                     _bv = _v
-            if _bv is None and _blocking:
+            if _bv is None and _blocking and not _has_deferred:
                 _bv = next(
                     (
                         v
                         for v in _vlist
-                        if _wa_lkup.get(v.rule_id, ViolationAction.BLOCK)
-                        not in (ViolationAction.WARN, ViolationAction.HALT)
+                        if _wa_lkup.get(v.rule_id, ViolationAction.BLOCK) is ViolationAction.BLOCK
                     ),
                     None,
                 )
-            if _bv is not None and strict and not _has_halt:
+            if _bv is not None and strict and not _has_deferred:
                 _exc_idx = self._rule_id_to_exc_idx.get(_bv.rule_id, -1)
                 if _exc_idx >= 0:
                     _e_src = rule_excs[_exc_idx]
@@ -361,7 +383,7 @@ class GovernanceMatcherMixin:
             if fast_records is not None:
                 fast_records.append(None)
                 return self._new_fast_result(
-                    valid=not (_bv is not None or _has_halt),
+                    valid=not (_bv is not None or _has_deferred),
                     violations=_vlist,
                     action=action,
                 )

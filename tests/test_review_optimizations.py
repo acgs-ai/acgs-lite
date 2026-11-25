@@ -9,7 +9,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -1585,3 +1585,346 @@ class TestConstantTimeAuthAndInputHardening:
         }
         if _HAS_AHO:
             assert engine._ac_iter is not None
+
+
+# ── 9. Rust/Python enforcement parity, regex positive-verb, and crypto verify ──
+
+
+class TestEnforcementAndRustParityHardening:
+    def test_fast_and_full_audit_modes_match_across_severity_and_workflow_action_matrix(
+        self,
+    ) -> None:
+        """Every Severity x ViolationAction combination behaves identically in fast, full, and Rust paths."""
+        from acgs_lite.constitution.rule import ViolationAction
+        from acgs_lite.engine.matcher import _RUST_ALLOW, _RUST_DENY
+
+        class _MockRustSingleRule:
+            def validate_hot(self, text: str) -> tuple[int, int]:
+                return (_RUST_DENY, 1) if "trigger" in text else (_RUST_ALLOW, 0)
+
+        for sev in Severity:
+            for wa in ViolationAction:
+                rule = Rule(
+                    id=f"M-{sev.value}-{wa.value}",
+                    text="matrix rule",
+                    severity=sev,
+                    keywords=["trigger"],
+                    workflow_action=wa,
+                )
+                const = Constitution(name="matrix", rules=[rule])
+                for strict in (False, True):
+                    eng_full = GovernanceEngine(
+                        const,
+                        strict=strict,
+                        audit_mode="full",
+                        warmup=False,
+                        freeze_gc=False,
+                    )
+                    eng_fast = GovernanceEngine(
+                        const,
+                        strict=strict,
+                        audit_mode="fast",
+                        warmup=False,
+                        freeze_gc=False,
+                    )
+                    eng_rust_mock = GovernanceEngine(
+                        const,
+                        strict=strict,
+                        audit_mode="fast",
+                        warmup=False,
+                        freeze_gc=False,
+                    )
+                    hot = list(eng_rust_mock._hot)
+                    hot[10] = _MockRustSingleRule()
+                    eng_rust_mock._hot = tuple(hot)
+
+                    def _eval(eng: GovernanceEngine) -> tuple[Any, ...]:
+                        try:
+                            r = eng.validate("trigger action")
+                            return (
+                                "OK",
+                                r.valid,
+                                [v.rule_id for v in r.violations],
+                                [w.rule_id for w in r.warnings],
+                                r.action_taken,
+                                len(r.notifications),
+                                len(r.review_requests),
+                                len(r.escalations),
+                                len(r.incident_alerts),
+                            )
+                        except engine_core.ConstitutionalViolationError as exc:
+                            return ("ERR", exc.rule_id, exc.severity, exc.enforcement_action)
+
+                    expected = _eval(eng_full)
+                    assert _eval(eng_fast) == expected, (
+                        f"fast mismatch for sev={sev} wa={wa} strict={strict}"
+                    )
+                    assert _eval(eng_rust_mock) == expected, (
+                        f"rust mismatch for sev={sev} wa={wa} strict={strict}"
+                    )
+
+    def test_elevated_workflow_action_outranks_block_under_fast_and_rust_paths(self) -> None:
+        """Higher-priority workflow_action (e.g. ESCALATE) must win over CRITICAL/HIGH BLOCK."""
+        from acgs_lite.constitution.rule import ViolationAction
+        from acgs_lite.engine.matcher import _RUST_DENY
+
+        class _MockRustBoth:
+            def validate_hot(self, text: str) -> tuple[int, int]:
+                return (_RUST_DENY, 0b11)
+
+        rules = [
+            Rule(
+                id="R-CRIT-BLOCK",
+                text="Critical block",
+                severity=Severity.CRITICAL,
+                keywords=["alpha"],
+                workflow_action=ViolationAction.BLOCK,
+            ),
+            Rule(
+                id="R-MED-ESCALATE",
+                text="Medium escalate",
+                severity=Severity.MEDIUM,
+                keywords=["beta"],
+                workflow_action=ViolationAction.ESCALATE,
+            ),
+        ]
+        const = Constitution(name="prio", rules=rules)
+        for audit_mode in ("full", "fast"):
+            eng = GovernanceEngine(
+                const, strict=True, audit_mode=audit_mode, warmup=False, freeze_gc=False
+            )
+            with pytest.raises(engine_core.ConstitutionalViolationError) as exc_info:
+                eng.validate("alpha beta")
+            assert exc_info.value.rule_id == "R-MED-ESCALATE"
+            assert exc_info.value.enforcement_action is ViolationAction.ESCALATE
+
+        eng_rust = GovernanceEngine(
+            const, strict=True, audit_mode="fast", warmup=False, freeze_gc=False
+        )
+        hot = list(eng_rust._hot)
+        hot[10] = _MockRustBoth()
+        eng_rust._hot = tuple(hot)
+        with pytest.raises(engine_core.ConstitutionalViolationError) as exc_info:
+            eng_rust.validate("alpha beta")
+        assert exc_info.value.rule_id == "R-MED-ESCALATE"
+        assert exc_info.value.enforcement_action is ViolationAction.ESCALATE
+
+    def test_decode_rust_bitmask_handles_negative_and_oob_bits_without_hanging(self) -> None:
+        """A negative i64 bitmask (bit 63 set) or OOB bit must never infinite-loop or crash."""
+        const = Constitution(
+            name="bm-guard",
+            rules=[Rule(id="R-0", text="Rule 0", severity=Severity.HIGH, keywords=["bad"])],
+        )
+        eng = GovernanceEngine(const, strict=False, warmup=False, freeze_gc=False)
+        # Signed i64 with bit 63 set (-2**63) plus bit 0 set: only bit 0 is in range.
+        vlist, bv, has_deferred = eng._decode_rust_bitmask(-(1 << 63) + 1, "bad")
+        assert [v.rule_id for v in vlist] == ["R-0"]
+        assert bv is not None and bv.rule_id == "R-0"
+        assert has_deferred is False
+
+    def test_python_regex_fallback_applies_positive_verb_exemption_without_neg_keywords(
+        self,
+    ) -> None:
+        """Pure-Python regex matcher must honor positive verbs even when _neg_findall is None."""
+        const = Constitution(
+            name="pos-only",
+            rules=[
+                Rule(id="AUD-1", text="Audit keyword", severity=Severity.HIGH, keywords=["audit"]),
+                Rule(
+                    id="PAT-1",
+                    text="Secret pattern",
+                    severity=Severity.HIGH,
+                    patterns=[r"\b\d{3}-\d{2}-\d{4}\b"],
+                ),
+            ],
+        )
+        eng = GovernanceEngine(const, strict=False, warmup=False, freeze_gc=False)
+        # Force the pure-Python regex fallback path (_has_ac=False, _rv=None).
+        eng._rust_validator = None
+        eng._ac_iter = None
+        hot = list(eng._hot)
+        hot[0] = None
+        hot[8] = False
+        hot[10] = None
+        eng._hot = tuple(hot)
+        assert eng._neg_findall is None
+
+        assert eng.validate("run audit checks").valid is True
+        assert eng.validate("perform audit checks").valid is True
+        assert eng.validate("audit without review").valid is False
+        assert eng.validate("run audit without review").valid is False
+        # Patterns must still fire even under leading positive verb.
+        pat_res = eng.validate("run audit 123-45-6789")
+        assert pat_res.valid is False
+        assert [v.rule_id for v in pat_res.violations] == ["PAT-1"]
+
+    def test_rust_gov_context_falls_through_on_words_2_to_4_positive_verbs(self) -> None:
+        """Context strings with positive verbs in words 2..4 or leading spaces match Python parity."""
+        from acgs_lite.engine.matcher import _RUST_ALLOW, _RUST_DENY
+
+        class _Word0OnlyRust:
+            def validate_hot(self, text: str) -> tuple[int, int]:
+                # Mimics Rust validate_hot: only checks word 0 via space partition.
+                first = text.partition(" ")[0]
+                if "audit" in text and first not in {"run", "perform"}:
+                    return (_RUST_DENY, 1)
+                return (_RUST_ALLOW, 0)
+
+        const = Constitution(
+            name="ctx-pos",
+            rules=[Rule(id="AUD-1", text="Audit", severity=Severity.HIGH, keywords=["audit"])],
+        )
+        eng = GovernanceEngine(const, strict=True, audit_mode="fast", warmup=False, freeze_gc=False)
+        eng._rust_validator = _Word0OnlyRust()
+        hot = list(eng._hot)
+        hot[10] = eng._rust_validator
+        eng._hot = tuple(hot)
+
+        # Words 2..4 positive verbs and leading whitespace must be allowed (matching Python).
+        assert eng.validate("check status", context={"action_detail": "please run audit"}).valid
+        assert eng.validate(
+            "check status", context={"action_description": "we will perform audit"}
+        ).valid
+        assert eng.validate("check status", context={"action_detail": "  run audit"}).valid
+        # Negative verb still blocks.
+        with pytest.raises(engine_core.ConstitutionalViolationError):
+            eng.validate(
+                "check status", context={"action_detail": "please run audit without review"}
+            )
+
+    def test_batch_report_handles_low_block_high_warn_mixed_and_invalid_empty(self) -> None:
+        """validate_batch_report classifies LOW+BLOCK, HIGH+WARN, mixed, and invalid-empty accurately."""
+        from acgs_lite.constitution.rule import ViolationAction
+
+        rules = [
+            Rule(
+                id="LOW-BLOCK",
+                text="Low block",
+                severity=Severity.LOW,
+                keywords=["beta"],
+                workflow_action=ViolationAction.BLOCK,
+            ),
+            Rule(
+                id="HIGH-WARN",
+                text="High warn",
+                severity=Severity.HIGH,
+                keywords=["gamma"],
+                workflow_action=ViolationAction.WARN,
+            ),
+            Rule(
+                id="HIGH-BLOCK",
+                text="High block",
+                severity=Severity.HIGH,
+                keywords=["delta"],
+                workflow_action=ViolationAction.BLOCK,
+            ),
+        ]
+        eng = GovernanceEngine(
+            Constitution(name="batch-edge", rules=rules),
+            strict=True,
+            audit_mode="fast",
+            warmup=False,
+            freeze_gc=False,
+        )
+        report = eng.validate_batch_report(["clean", "beta", "gamma", "gamma delta"])
+        assert report.total == 4
+        assert report.allowed == 1
+        assert report.denied == 2
+        assert report.escalated == 1
+        assert set(report.critical_rule_ids) == {"LOW-BLOCK", "HIGH-BLOCK"}
+
+    def test_crypto_and_receipt_verifiers_fail_closed_on_non_ascii_signatures(self) -> None:
+        """Non-ASCII signatures/keys must return False/invalid rather than raising TypeError."""
+        from dataclasses import replace
+
+        from acgs_lite.constitution.attestation import AttestationRegistry, GovernanceAttestation
+        from acgs_lite.constitution.certificate import CertificateAuthority
+        from acgs_lite.constitution.delegation_token import (
+            DelegationScope,
+            DelegationTokenAuthority,
+            TokenStatus,
+        )
+        from acgs_lite.legitimacy.signing import SignedReceipt
+        from acgs_lite.pqc import InMemoryPQCSigner
+
+        assert InMemoryPQCSigner().verify(b"payload", "cl\xe9-non-ascii") is False
+
+        att_reg = AttestationRegistry(signing_key="test-key")
+        att = GovernanceAttestation(
+            attestation_id="ATT-1",
+            action_hash="h",
+            action_preview="p",
+            constitution_hash="ch",
+            decision="allow",
+            rule_ids_evaluated=[],
+            violations_found=[],
+            timestamp="2026-01-01T00:00:00Z",
+            signature="cl\xe9-non-ascii",
+        )
+        assert att_reg.verify(att) is False
+
+        ca = CertificateAuthority(issuer="acgs-test", secret="cert-secret")
+        cert = ca.issue_certificate(
+            subject="agent-1",
+            framework="soc2",
+            compliance_score=1.0,
+            rules_evaluated=1,
+            rules_passed=1,
+            constitution_hash="abc",
+        )
+        tampered_cert = replace(cert, signature="cl\xe9-non-ascii")
+        assert ca.verify_signature(tampered_cert) is False
+
+        ta = DelegationTokenAuthority(signing_key="tok-secret")
+        tok = ta.issue(
+            issuer="root",
+            subject="agent-1",
+            scope=DelegationScope(permissions={"read"}),
+        )
+        tok.signature = "cl\xe9-non-ascii"
+        assert ta.verify(tok).status is TokenStatus.INVALID_SIGNATURE
+
+        bad_receipt = SignedReceipt(
+            receipt=cast(Any, None),
+            algorithm="ed25519",
+            key_id="k1",
+            public_key="cl\xe9-non-ascii",
+            signature="00",
+            signed_at="2026-01-01T00:00:00Z",
+        )
+        assert bad_receipt.verify("expected-hex-key") is False
+
+    def test_live_rust_extension_u128_and_perform_context_parity(self) -> None:
+        """When acgs_lite_rust is installed, verify validate_hot_u128 and 'perform' context parity."""
+        from acgs_lite.engine.matcher import _HAS_RUST, _rust
+
+        if not _HAS_RUST or _rust is None:
+            pytest.skip("acgs_lite_rust not installed")
+
+        # 1. validate_hot_u128 preserves bits >= 64 without truncation or sign overflow.
+        kw = {f"kw{i:03d}": [(i, False)] for i in range(75)}
+        rules = [(f"R-{i:03d}", f"Rule {i}", "high", "sec", False) for i in range(75)]
+        validator = _rust.GovernanceValidator(kw, [], [], rules, ["perform", "run"], False, [], "")
+        if hasattr(validator, "validate_hot_u128"):
+            dec, mask = validator.validate_hot_u128("trigger kw000 kw063 kw070")
+            assert dec == _rust.DENY
+            assert mask == ((1 << 0) | (1 << 63) | (1 << 70))
+
+        # 2. 'perform' in action_detail context matches Python positive-verb exemption.
+        c = Constitution(
+            name="rust-ctx-perform",
+            rules=[
+                Rule(
+                    id="P-1",
+                    text="Require approval",
+                    severity=Severity.HIGH,
+                    keywords=["production access"],
+                )
+            ],
+        )
+        eng = GovernanceEngine(c, strict=False, audit_mode="fast", warmup=False, freeze_gc=False)
+        assert eng._rust_validator is not None
+        dec_full, viols_full, _ = eng._rust_validator.validate_full(
+            "safe action", [("action_detail", "perform production access now")]
+        )
+        assert dec_full == _rust.ALLOW and viols_full == []

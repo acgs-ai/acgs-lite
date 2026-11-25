@@ -180,8 +180,17 @@ impl WasmValidator {
     /// Quick hot-path validation (returns decision code and bitmask).
     ///
     /// Returns: `[decision_code, data]` as a JSON array.
+    /// Note: JavaScript `JSON.parse()` loses integer precision above `2^53 - 1`
+    /// (rule index >= 53); use `validate_hot_hex` when >53 rules are compiled.
     pub fn validate_hot(&self, text_lower: &str) -> String {
         let (decision, data) = self.inner.validate_hot_u128(text_lower);
         format!("[{},{}]", decision, data)
+    }
+
+    /// Lossless hot-path validation for >53 rules: returns `[decision_code,"<hex>"]`
+    /// so JavaScript callers can decode the full 128-bit mask with `BigInt("0x" + hex)`.
+    pub fn validate_hot_hex(&self, text_lower: &str) -> String {
+        let (decision, data) = self.inner.validate_hot_u128(text_lower);
+        format!("[{},\"{:x}\"]", decision, data)
     }
 }

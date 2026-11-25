@@ -159,6 +159,18 @@ mod tests {
     }
 
     #[test]
+    fn test_perform_positive_verb_in_context() {
+        let rules = vec![make_rule(&["production access"], &[])];
+        let pairs = vec![(
+            "action_detail".into(),
+            "perform production access now".into(),
+        )];
+        let v = process_context(&pairs, &rules);
+        // "perform" is a positive verb (Python parity) and keyword has no negative -> skipped
+        assert_eq!(v.len(), 0);
+    }
+
+    #[test]
     fn test_multibyte_utf8_context_truncation() {
         let rules = vec![make_rule(&["bypass"], &[])];
         let long_utf8 = format!("bypass {}", "é".repeat(120));

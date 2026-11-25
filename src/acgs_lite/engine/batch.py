@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from acgs_lite.constitution import Severity
+from acgs_lite.constitution.rule import ViolationAction
 
 if TYPE_CHECKING:
     from .models import ValidationResult
@@ -78,6 +79,7 @@ class BatchValidationMixin:
     # Type stubs for attributes provided by GovernanceEngine (the concrete host class).
     strict: bool
     _const_hash: str
+    _rule_id_to_wa: dict[str, ViolationAction]
 
     def validate(
         self,
@@ -180,14 +182,22 @@ class BatchValidationMixin:
         escalated = 0
         critical_ids: set[str] = set()
 
+        wa_lookup = getattr(self, "_rule_id_to_wa", {})
         for r in individual:
-            if not r.violations and not r.warnings:
+            if r.valid and not r.violations and not r.warnings:
                 allowed += 1
-            elif r.violations and (not r.valid or any(v.severity.blocks() for v in r.violations)):
+            elif not r.valid or any(v.severity.blocks() for v in r.violations):
                 denied += 1
-                for v in r.violations:
-                    if v.severity.blocks() or not r.valid:
-                        critical_ids.add(v.rule_id)
+                blocking_ids = [
+                    v.rule_id
+                    for v in r.violations
+                    if v.severity.blocks()
+                    or wa_lookup.get(v.rule_id, ViolationAction.WARN) is not ViolationAction.WARN
+                ]
+                if blocking_ids:
+                    critical_ids.update(blocking_ids)
+                elif not r.valid:
+                    critical_ids.update(v.rule_id for v in r.violations)
             else:
                 escalated += 1
 

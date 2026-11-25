@@ -33,10 +33,10 @@ re-validated (unless ``require_external_evidence=True``).
 
 from __future__ import annotations
 
-import hmac
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from acgs_lite._compat import constant_time_compare
 from acgs_lite.control_plane.evidence import (
     DEFAULT_EVIDENCE_POLICY,
     EvidencePolicy,
@@ -96,7 +96,7 @@ def verify_receipt(
     trusted = trusted_public_keys.get(signed.key_id)
     if not isinstance(trusted, str):
         reasons.append(f"unknown signing key id {signed.key_id!r}")
-    elif not hmac.compare_digest(trusted.lower(), signed.public_key_hex):
+    elif not constant_time_compare(trusted.lower(), signed.public_key_hex):
         reasons.append("receipt public key does not match the trusted key")
     else:
         try:

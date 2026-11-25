@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
+from acgs_lite._compat import constant_time_compare
+
 
 class CertificateStatus(Enum):
     VALID = "valid"
@@ -176,7 +178,7 @@ class CertificateAuthority:
             cert.previous_certificate_id,
         )
         expected = hmac.new(self._secret, digest.encode(), hashlib.sha256).hexdigest()[:32]
-        return hmac.compare_digest(cert.signature, expected)
+        return constant_time_compare(cert.signature, expected)
 
     def get_status(self, certificate_id: str) -> CertificateStatus:
         if certificate_id in self._revoked:

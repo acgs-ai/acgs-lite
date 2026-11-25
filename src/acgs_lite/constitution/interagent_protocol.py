@@ -55,6 +55,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from acgs_lite._compat import constant_time_compare
+
 _SIGNING_KEY = secrets.token_bytes(32)
 
 
@@ -103,7 +105,7 @@ class DelegationLink:
         payload = (
             f"{self.link_id}:{self.delegator_id}:{self.delegatee_id}:{sorted(self.granted_scope)}"
         )
-        return hmac.compare_digest(self.signature, _sign(payload))
+        return constant_time_compare(self.signature, _sign(payload))
 
     def to_dict(self) -> dict[str, Any]:
         return {

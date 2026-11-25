@@ -185,9 +185,19 @@ impl PyGovernanceValidator {
 
     /// Hot-path validation. Accepts any-case text, lowercases internally.
     /// Uses a 256-byte stack buffer for short ASCII inputs to avoid heap allocation.
+    /// Legacy `i64` bitmask ABI supports up to 63 rules (indices 0..62) without
+    /// sign-bit overflow; use `validate_hot_u128` for up to 127 rules.
     fn validate_hot(&self, text: &str) -> PyResult<(i32, i64)> {
         Ok(with_lowercased(text, |lowered| {
             self.inner.validate_hot(lowered)
+        }))
+    }
+
+    /// Full-width hot-path validation returning an untruncated non-negative
+    /// 128-bit Python `int` bitmask across up to 127 rules.
+    fn validate_hot_u128(&self, text: &str) -> PyResult<(i32, u128)> {
+        Ok(with_lowercased(text, |lowered| {
+            self.inner.validate_hot_u128(lowered)
         }))
     }
 

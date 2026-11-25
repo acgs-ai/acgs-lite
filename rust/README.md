@@ -16,7 +16,7 @@ powers the PyO3 Python companion (`acgs_lite_rust`), the WASM binding
 | `core/` | `acgs-validator-core` | Pure-Rust Aho-Corasick + regex hot-path validator, context matching, and constitutional hashing |
 | `pyo3/` | `acgs_lite_rust` | PyO3 abi3 Python companion wheel built with `maturin` |
 | `wasm/` | `acgs-validator-wasm` | `wasm-bindgen` binding for edge runtimes (Cloudflare Workers) |
-| `spacetime_governance/` | `acgs-spacetime-governance` | SpacetimeDB MACI governance tables and reducers |
+| `spacetime_governance/` | `spacetime-governance` | SpacetimeDB MACI governance tables and reducers |
 
 ### Core Modules (`rust/core/src/`)
 
@@ -45,7 +45,7 @@ Run Rust unit tests and clippy checks from `rust/`:
 ```bash
 cd rust
 cargo test --locked -p acgs-validator-core
-cargo clippy --locked -p acgs-validator-core -p acgs_lite_rust -p acgs-validator-wasm -- -D warnings
+cargo clippy --locked -p acgs-validator-core -p acgs_lite_rust -p acgs-validator-wasm --all-targets -- -D warnings
 cargo fmt --check
 ```
 
@@ -81,6 +81,9 @@ validator = GovernanceValidator(
 
 decision, data = validator.validate_hot("bypass safety controls")
 assert decision == DENY and data == 0b1
+# For constitutions with 64..127 rules, use validate_hot_u128() to avoid i64 truncation:
+decision_u128, mask_u128 = validator.validate_hot_u128("bypass safety controls")
+assert decision_u128 == DENY and mask_u128 == 0b1
 ```
 
 ## Fallback Behavior

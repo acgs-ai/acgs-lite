@@ -22,12 +22,12 @@ scheme that could not honestly back a non-repudiation claim (fail closed).
 from __future__ import annotations
 
 import hashlib
-import hmac
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
+from acgs_lite._compat import constant_time_compare
 from acgs_lite.legitimacy.receipt import (
     RECEIPT_SCHEMA_V2,
     V2_EXTENSION_KEYS,
@@ -205,7 +205,7 @@ class SignedReceipt:
         AND the hash and signature both check out. For the unpinned self-consistency
         check use :meth:`verify_integrity` -- but never treat it as authenticity.
         """
-        if not hmac.compare_digest(expected_public_key, self.public_key):
+        if not constant_time_compare(expected_public_key, self.public_key):
             return False
         return self.verify_integrity()
 

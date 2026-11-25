@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from acgs_lite._compat import constant_time_compare
+
 
 class TokenStatus(Enum):
     VALID = "valid"
@@ -171,7 +173,7 @@ class DelegationTokenAuthority:
             return VerificationResult(TokenStatus.REVOKED, token.token_id)
 
         expected_sig = self._sign(token)
-        if not hmac.compare_digest(token.signature, expected_sig):
+        if not constant_time_compare(token.signature, expected_sig):
             return VerificationResult(TokenStatus.INVALID_SIGNATURE, token.token_id)
 
         if token.is_expired:

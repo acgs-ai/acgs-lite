@@ -440,6 +440,10 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         self._has_halt_rules: bool = any(
             rule.workflow_action is ViolationAction.HALT for rule in self._active_rules
         )
+        self._has_elevated_workflow_rules: bool = any(
+            rule.workflow_action not in (ViolationAction.WARN, ViolationAction.BLOCK)
+            for rule in self._active_rules
+        )
         self._rule_data: list[tuple[Any, ...]] = [
             (
                 rule.id,
@@ -447,14 +451,14 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 rule.severity,
                 rule.severity.value,
                 rule.category,
-                # is_crit: True only for CRITICAL rules that are NOT overridden to WARN,
-                # and only when no active HALT rule exists in the constitution.
-                # HALT rules have higher precedence than BLOCK and must always raise
-                # with enforcement_action=ViolationAction.HALT rather than letting an
-                # earlier CRITICAL match short-circuit with BLOCK.
+                # is_crit: True only for plain CRITICAL+BLOCK rules when no active
+                # rule has an elevated workflow_action (BLOCK_AND_NOTIFY,
+                # REQUIRE_HUMAN_REVIEW, ESCALATE, HALT). Elevated actions outrank
+                # plain BLOCK and must run through _resolve_enforcement so the
+                # exception carries the winning enforcement_action and rule_id.
                 rule.severity is _C
-                and rule.workflow_action is not ViolationAction.WARN
-                and not self._has_halt_rules,
+                and rule.workflow_action is ViolationAction.BLOCK
+                and not self._has_elevated_workflow_rules,
                 f"Action blocked by rule {rule.id}: {rule.text}",
             )
             for rule in self._active_rules
@@ -969,6 +973,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             strict=self.strict if strict is None else strict,
             action_text=action_text,
         )
+        result.valid = not bool(enforcement.blocking_violations)
         result.violations = enforcement.blocking_violations
         result.warnings = enforcement.warning_violations
         result.action_taken = enforcement.action_taken
@@ -1515,8 +1520,8 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                     violations,
                 )
             elif (
-                _first_word in _POSITIVE_VERBS_SET
-                and self._neg_findall is not None
+                (self._combined_findall is not None or self._pattern_rule_idxs)
+                and _first_word in _POSITIVE_VERBS_SET
                 and not _has_neg
             ):
                 violations = self._validate_python_regex(
