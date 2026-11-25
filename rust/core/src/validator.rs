@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use crate::context::{self, ContextRule};
 use crate::result::{Decision, ValidationResult, Violation, ViolationRecord, ViolationTuple};
 use crate::severity::{self, Severity};
+use crate::verbs;
 
 /// Payload carried by each Aho-Corasick pattern.
 #[derive(Clone)]
@@ -45,6 +46,7 @@ pub enum BuildError {
     BadRegex { pattern: String, message: String },
     TooManyRules { count: usize },
     TooManyAnchors { count: usize },
+    RuleIndexOutOfBounds { rule_idx: usize, rule_count: usize },
     AhoCorasickBuild(String),
 }
 
@@ -59,6 +61,16 @@ impl std::fmt::Display for BuildError {
             }
             BuildError::TooManyAnchors { count } => {
                 write!(f, "Anchor count {} exceeds 127 (u128 bitmask limit)", count)
+            }
+            BuildError::RuleIndexOutOfBounds {
+                rule_idx,
+                rule_count,
+            } => {
+                write!(
+                    f,
+                    "Rule index {} out of bounds for {} rules",
+                    rule_idx, rule_count
+                )
             }
             BuildError::AhoCorasickBuild(msg) => {
                 write!(f, "AC build error: {}", msg)
@@ -122,58 +134,94 @@ pub struct GovernanceValidator {
 impl GovernanceValidator {
     /// Build a new validator from plain Rust config.
     pub fn new(config: ValidatorConfig) -> Result<Self, BuildError> {
-        // Build anchor_to_idx and anchor_dispatch
-        let mut anchor_to_idx: HashMap<String, usize> = HashMap::new();
-        let mut anchor_dispatch: Vec<AnchorEntry> = Vec::new();
-        for (ai, (anchor, pats)) in config.anchor_dispatch.iter().enumerate() {
+        let rule_count = config.rule_data.len();
+        // Fail fast before compiling regexes or building the Aho-Corasick automaton:
+        // bitmask deduplication uses u128 — max 127 rules/anchors.
+        if rule_count > 127 {
+            return Err(BuildError::TooManyRules { count: rule_count });
+        }
+        if config.anchor_dispatch.len() > 127 {
+            return Err(BuildError::TooManyAnchors {
+                count: config.anchor_dispatch.len(),
+            });
+        }
+
+        // Build anchor_to_idx and anchor_dispatch (moving owned strings from config)
+        let mut anchor_to_idx: HashMap<String, usize> =
+            HashMap::with_capacity(config.anchor_dispatch.len());
+        let mut anchor_dispatch: Vec<AnchorEntry> =
+            Vec::with_capacity(config.anchor_dispatch.len());
+        for (ai, (anchor, pats)) in config.anchor_dispatch.into_iter().enumerate() {
             let mut patterns: Vec<(usize, Regex)> = Vec::with_capacity(pats.len());
             for (rule_idx, pat_str) in pats {
-                patterns.push((*rule_idx, compile_rule_pattern(pat_str)?));
+                if rule_idx >= rule_count {
+                    return Err(BuildError::RuleIndexOutOfBounds {
+                        rule_idx,
+                        rule_count,
+                    });
+                }
+                patterns.push((rule_idx, compile_rule_pattern(&pat_str)?));
             }
-            anchor_to_idx.insert(anchor.clone(), ai);
+            anchor_to_idx.insert(anchor, ai);
             anchor_dispatch.push(AnchorEntry { patterns });
         }
 
-        // Collect all words and build payloads
-        let mut all_words: Vec<String> = Vec::new();
-        let mut payloads: Vec<AcPayload> = Vec::new();
-        for (kw, idxs) in &config.kw_to_idxs {
-            if let Some(&ai) = anchor_to_idx.get(kw) {
-                all_words.push(kw.clone());
+        // Collect all words and build payloads (moving owned strings from config)
+        let capacity = config.kw_to_idxs.len() + anchor_to_idx.len();
+        let mut all_words: Vec<String> = Vec::with_capacity(capacity);
+        let mut payloads: Vec<AcPayload> = Vec::with_capacity(capacity);
+        for (kw, idxs) in config.kw_to_idxs {
+            for &(rule_idx, _) in &idxs {
+                if rule_idx >= rule_count {
+                    return Err(BuildError::RuleIndexOutOfBounds {
+                        rule_idx,
+                        rule_count,
+                    });
+                }
+            }
+            if let Some(ai) = anchor_to_idx.remove(&kw) {
+                all_words.push(kw);
                 payloads.push(AcPayload::Both {
-                    kw_data: idxs.clone(),
+                    kw_data: idxs,
                     anchor_idx: ai,
                 });
             } else {
-                all_words.push(kw.clone());
-                payloads.push(AcPayload::Keyword(idxs.clone()));
+                all_words.push(kw);
+                payloads.push(AcPayload::Keyword(idxs));
             }
         }
-        for (anchor, &ai) in &anchor_to_idx {
-            if !config.kw_to_idxs.contains_key(anchor) {
-                all_words.push(anchor.clone());
-                payloads.push(AcPayload::Anchor(ai));
-            }
+        for (anchor, ai) in anchor_to_idx {
+            all_words.push(anchor);
+            payloads.push(AcPayload::Anchor(ai));
         }
 
         // No-anchor patterns
-        let mut no_anchor_pats: Vec<(usize, Regex)> = Vec::new();
-        for (rule_idx, pat_str) in &config.no_anchor_pats {
-            no_anchor_pats.push((*rule_idx, compile_rule_pattern(pat_str)?));
+        let mut no_anchor_pats: Vec<(usize, Regex)> =
+            Vec::with_capacity(config.no_anchor_pats.len());
+        for (rule_idx, pat_str) in config.no_anchor_pats {
+            if rule_idx >= rule_count {
+                return Err(BuildError::RuleIndexOutOfBounds {
+                    rule_idx,
+                    rule_count,
+                });
+            }
+            no_anchor_pats.push((rule_idx, compile_rule_pattern(&pat_str)?));
         }
 
-        // Rule data
+        // Rule data (move owned strings without cloning)
         let rule_data: Vec<RuleData> = config
             .rule_data
-            .iter()
-            .map(|(rid, rtxt, sev_str, cat, is_crit)| RuleData {
-                rule_id: rid.clone(),
-                rule_text: rtxt.clone(),
-                severity_enum: Severity::from_label(sev_str),
-                severity: sev_str.clone(),
-                category: cat.clone(),
-                is_critical: *is_crit,
-            })
+            .into_iter()
+            .map(
+                |(rule_id, rule_text, severity, category, is_critical)| RuleData {
+                    severity_enum: Severity::from_label(&severity),
+                    rule_id,
+                    rule_text,
+                    severity,
+                    category,
+                    is_critical,
+                },
+            )
             .collect();
 
         // Build Aho-Corasick automaton
@@ -181,18 +229,6 @@ impl GovernanceValidator {
             .match_kind(MatchKind::Standard)
             .build(&all_words)
             .map_err(|e| BuildError::AhoCorasickBuild(e.to_string()))?;
-
-        // Guard: bitmask deduplication uses u128 — max 127 rules/anchors
-        if rule_data.len() > 127 {
-            return Err(BuildError::TooManyRules {
-                count: rule_data.len(),
-            });
-        }
-        if anchor_dispatch.len() > 127 {
-            return Err(BuildError::TooManyAnchors {
-                count: anchor_dispatch.len(),
-            });
-        }
 
         Ok(GovernanceValidator {
             automaton,
@@ -207,17 +243,35 @@ impl GovernanceValidator {
         })
     }
 
+    /// Full-width hot-path validation returning the untruncated 128-bit fired mask.
+    ///
+    /// Returns: `(decision_code, data)`
+    /// - `(ALLOW=0, 0)`                 — no violations
+    /// - `(DENY_CRITICAL=1, rule_idx)`  — critical violation in strict mode
+    /// - `(DENY=2, fired_bitmask)`      — bitmask across up to 127 rules
+    pub fn validate_hot_u128(&self, text_lower: &str) -> (i32, u128) {
+        let mut fired: u128 = 0;
+        if let Some(crit_idx) = self.scan_rules(text_lower, |rule_idx| {
+            fired |= 1u128 << rule_idx;
+        }) {
+            return (severity::DENY_CRITICAL, crit_idx as u128);
+        }
+        if fired == 0 {
+            (severity::ALLOW, 0)
+        } else {
+            (severity::DENY, fired)
+        }
+    }
+
     /// Legacy hot-path validation — minimal allocation.
     ///
-    /// Returns: (decision_code, data)
-    ///   (ALLOW=0, 0)              — no violations
-    ///   (DENY_CRITICAL=1, rule_idx) — critical violation
-    ///   (DENY=2, fired_bitmask)   — non-critical violations
+    /// Returns: `(decision_code, data)`
+    /// - `(ALLOW=0, 0)`                — no violations
+    /// - `(DENY_CRITICAL=1, rule_idx)` — critical violation
+    /// - `(DENY=2, fired_bitmask)`     — non-critical violations (i64 legacy ABI)
     pub fn validate_hot(&self, text_lower: &str) -> (i32, i64) {
-        // exp265: scan_hot() — bitmask-only path, skips Violation struct allocation
-        // and String cloning. For allow paths, this eliminates Vec<Violation> alloc.
-        // For deny paths, returns only the fired bitmask (Python reconstructs violations).
-        self.scan_hot(text_lower)
+        let (code, data) = self.validate_hot_u128(text_lower);
+        (code, data as i64)
     }
 
     /// Full validation with structured violation data.
@@ -326,232 +380,109 @@ impl GovernanceValidator {
         &self.const_hash
     }
 
-    /// Core scan logic — shared between validate_hot and validate_full.
-    /// Hot-path scan — returns (decision_code, data) directly as a tuple.
-    /// Unlike `scan()`, this never allocates Violation structs or clones Strings.
-    /// For Allow: returns (ALLOW, 0).
-    /// For DenyCritical: returns (DENY_CRITICAL, rule_idx).
-    /// For Deny: returns (DENY, fired_bitmask) — caller reconstructs violations from bitmask.
-    fn scan_hot(&self, text_lower: &str) -> (i32, i64) {
+    /// Unified zero-overhead scan shared between `validate_hot*` and `validate_full`.
+    ///
+    /// Invokes `on_fire(rule_idx)` once per newly fired non-short-circuited rule.
+    /// Returns `Some(rule_idx)` immediately when a critical rule fires under strict mode.
+    #[inline]
+    fn scan_rules<F>(&self, text_lower: &str, mut on_fire: F) -> Option<usize>
+    where
+        F: FnMut(usize),
+    {
         let first_word = match text_lower.find(' ') {
             Some(i) => &text_lower[..i],
             None => text_lower,
         };
-        let is_pos_verb = self.positive_verbs.contains(first_word);
+        // Parity with Python engine/core.py: a leading positive verb only exempts
+        // non-negative keywords when the text contains NO negative verb phrase.
+        let is_pos_verb =
+            self.positive_verbs.contains(first_word) && !verbs::has_negative_verb(text_lower);
 
         let mut fired: u128 = 0;
         let mut hit_anchors: u128 = 0;
 
-        // AC scan — single pass, tracks both keywords and anchors
+        // AC scan — single overlapping pass tracks both keywords and anchors
         for mat in self.automaton.find_overlapping_iter(text_lower) {
-            match &self.payloads[mat.pattern().as_usize()] {
-                AcPayload::Keyword(kw_data) => {
-                    for &(rule_idx, kw_has_neg) in kw_data {
-                        if is_pos_verb && !kw_has_neg {
-                            continue;
-                        }
-                        let bit = 1u128 << rule_idx;
-                        if fired & bit != 0 {
-                            continue;
-                        }
-                        fired |= bit;
-                        let rd = &self.rule_data[rule_idx];
-                        if self.strict && rd.is_critical {
-                            return (severity::DENY_CRITICAL, rule_idx as i64);
-                        }
-                    }
-                }
+            let kw_slice = match &self.payloads[mat.pattern().as_usize()] {
+                AcPayload::Keyword(kw_data) => kw_data.as_slice(),
                 AcPayload::Anchor(ai) => {
                     hit_anchors |= 1u128 << ai;
+                    continue;
                 }
                 AcPayload::Both {
                     kw_data,
                     anchor_idx,
                 } => {
                     hit_anchors |= 1u128 << anchor_idx;
-                    for &(rule_idx, kw_has_neg) in kw_data {
-                        if is_pos_verb && !kw_has_neg {
-                            continue;
-                        }
-                        let bit = 1u128 << rule_idx;
-                        if fired & bit != 0 {
-                            continue;
-                        }
-                        fired |= bit;
-                        let rd = &self.rule_data[rule_idx];
-                        if self.strict && rd.is_critical {
-                            return (severity::DENY_CRITICAL, rule_idx as i64);
-                        }
-                    }
+                    kw_data.as_slice()
                 }
+            };
+            for &(rule_idx, kw_has_neg) in kw_slice {
+                if is_pos_verb && !kw_has_neg {
+                    continue;
+                }
+                let bit = 1u128 << rule_idx;
+                if fired & bit != 0 {
+                    continue;
+                }
+                fired |= bit;
+                if self.strict && self.rule_data[rule_idx].is_critical {
+                    return Some(rule_idx);
+                }
+                on_fire(rule_idx);
             }
         }
 
         // Anchor dispatch (regex patterns)
-        if hit_anchors != 0 || !self.no_anchor_pats.is_empty() {
-            if hit_anchors != 0 {
-                let mut tmp = hit_anchors;
-                while tmp != 0 {
-                    let lsb = tmp & tmp.wrapping_neg();
-                    let ai = lsb.trailing_zeros() as usize;
-                    tmp ^= lsb;
-                    if ai < self.anchor_dispatch.len() {
-                        for (rule_idx, re) in &self.anchor_dispatch[ai].patterns {
-                            let bit = 1u128 << rule_idx;
-                            if fired & bit == 0 && re.is_match(text_lower) {
-                                fired |= bit;
-                                let rd = &self.rule_data[*rule_idx];
-                                if self.strict && rd.is_critical {
-                                    return (severity::DENY_CRITICAL, *rule_idx as i64);
-                                }
+        if hit_anchors != 0 {
+            let mut tmp = hit_anchors;
+            while tmp != 0 {
+                let lsb = tmp & tmp.wrapping_neg();
+                let ai = lsb.trailing_zeros() as usize;
+                tmp ^= lsb;
+                if ai < self.anchor_dispatch.len() {
+                    for &(rule_idx, ref re) in &self.anchor_dispatch[ai].patterns {
+                        let bit = 1u128 << rule_idx;
+                        if fired & bit == 0 && re.is_match(text_lower) {
+                            fired |= bit;
+                            if self.strict && self.rule_data[rule_idx].is_critical {
+                                return Some(rule_idx);
                             }
+                            on_fire(rule_idx);
                         }
-                    }
-                }
-            }
-            for (rule_idx, re) in &self.no_anchor_pats {
-                let bit = 1u128 << rule_idx;
-                if fired & bit == 0 && re.is_match(text_lower) {
-                    fired |= bit;
-                    let rd = &self.rule_data[*rule_idx];
-                    if self.strict && rd.is_critical {
-                        return (severity::DENY_CRITICAL, *rule_idx as i64);
                     }
                 }
             }
         }
 
-        if fired == 0 {
-            (severity::ALLOW, 0)
-        } else {
-            (severity::DENY, fired as i64)
+        for &(rule_idx, ref re) in &self.no_anchor_pats {
+            let bit = 1u128 << rule_idx;
+            if fired & bit == 0 && re.is_match(text_lower) {
+                fired |= bit;
+                if self.strict && self.rule_data[rule_idx].is_critical {
+                    return Some(rule_idx);
+                }
+                on_fire(rule_idx);
+            }
         }
+
+        None
     }
 
     fn scan(&self, text_lower: &str) -> Decision {
-        let first_word = match text_lower.find(' ') {
-            Some(i) => &text_lower[..i],
-            None => text_lower,
-        };
-        let is_pos_verb = self.positive_verbs.contains(first_word);
-
-        let mut fired: u128 = 0;
-        let mut hit_anchors: u128 = 0;
         let mut violations: Vec<Violation> = Vec::new();
-
-        // AC scan — overlapping mode finds all matches
-        for mat in self.automaton.find_overlapping_iter(text_lower) {
-            match &self.payloads[mat.pattern().as_usize()] {
-                AcPayload::Keyword(kw_data) => {
-                    for &(rule_idx, kw_has_neg) in kw_data {
-                        if is_pos_verb && !kw_has_neg {
-                            continue;
-                        }
-                        let bit = 1u128 << rule_idx;
-                        if fired & bit != 0 {
-                            continue;
-                        }
-                        fired |= bit;
-                        let rd = &self.rule_data[rule_idx];
-                        if self.strict && rd.is_critical {
-                            return Decision::DenyCritical { rule_idx };
-                        }
-                        violations.push(Violation {
-                            rule_idx,
-                            rule_id: rd.rule_id.clone(),
-                            rule_text: rd.rule_text.clone(),
-                            severity: rd.severity_enum,
-                            matched_content: String::new(),
-                            category: rd.category.clone(),
-                        });
-                    }
-                }
-                AcPayload::Anchor(ai) => {
-                    hit_anchors |= 1u128 << ai;
-                }
-                AcPayload::Both {
-                    kw_data,
-                    anchor_idx,
-                } => {
-                    hit_anchors |= 1u128 << anchor_idx;
-                    for &(rule_idx, kw_has_neg) in kw_data {
-                        if is_pos_verb && !kw_has_neg {
-                            continue;
-                        }
-                        let bit = 1u128 << rule_idx;
-                        if fired & bit != 0 {
-                            continue;
-                        }
-                        fired |= bit;
-                        let rd = &self.rule_data[rule_idx];
-                        if self.strict && rd.is_critical {
-                            return Decision::DenyCritical { rule_idx };
-                        }
-                        violations.push(Violation {
-                            rule_idx,
-                            rule_id: rd.rule_id.clone(),
-                            rule_text: rd.rule_text.clone(),
-                            severity: rd.severity_enum,
-                            matched_content: String::new(),
-                            category: rd.category.clone(),
-                        });
-                    }
-                }
-            }
-        }
-
-        // Anchor dispatch (regex patterns)
-        if hit_anchors != 0 || !self.no_anchor_pats.is_empty() {
-            if hit_anchors != 0 {
-                let mut tmp = hit_anchors;
-                while tmp != 0 {
-                    let lsb = tmp & tmp.wrapping_neg();
-                    let ai = lsb.trailing_zeros() as usize;
-                    tmp ^= lsb;
-                    if ai < self.anchor_dispatch.len() {
-                        for (rule_idx, re) in &self.anchor_dispatch[ai].patterns {
-                            let bit = 1u128 << rule_idx;
-                            if fired & bit == 0 && re.is_match(text_lower) {
-                                fired |= bit;
-                                let rd = &self.rule_data[*rule_idx];
-                                if self.strict && rd.is_critical {
-                                    return Decision::DenyCritical {
-                                        rule_idx: *rule_idx,
-                                    };
-                                }
-                                violations.push(Violation {
-                                    rule_idx: *rule_idx,
-                                    rule_id: rd.rule_id.clone(),
-                                    rule_text: rd.rule_text.clone(),
-                                    severity: rd.severity_enum,
-                                    matched_content: String::new(),
-                                    category: rd.category.clone(),
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-            for (rule_idx, re) in &self.no_anchor_pats {
-                let bit = 1u128 << rule_idx;
-                if fired & bit == 0 && re.is_match(text_lower) {
-                    fired |= bit;
-                    let rd = &self.rule_data[*rule_idx];
-                    if self.strict && rd.is_critical {
-                        return Decision::DenyCritical {
-                            rule_idx: *rule_idx,
-                        };
-                    }
-                    violations.push(Violation {
-                        rule_idx: *rule_idx,
-                        rule_id: rd.rule_id.clone(),
-                        rule_text: rd.rule_text.clone(),
-                        severity: rd.severity_enum,
-                        matched_content: String::new(),
-                        category: rd.category.clone(),
-                    });
-                }
-            }
+        if let Some(rule_idx) = self.scan_rules(text_lower, |rule_idx| {
+            let rd = &self.rule_data[rule_idx];
+            violations.push(Violation {
+                rule_idx,
+                rule_id: rd.rule_id.clone(),
+                rule_text: rd.rule_text.clone(),
+                severity: rd.severity_enum,
+                matched_content: String::new(),
+                category: rd.category.clone(),
+            });
+        }) {
+            return Decision::DenyCritical { rule_idx };
         }
 
         if violations.is_empty() {
@@ -622,5 +553,211 @@ mod tests {
     fn non_matching_text_still_allows() {
         let v = validator(Some("akia"), "AKIA[0-9A-Z]{16}");
         assert_eq!(v.validate("akia is a word", None).decision, severity::ALLOW);
+    }
+
+    #[test]
+    fn positive_verb_does_not_exempt_when_negative_verb_present() {
+        let mut kw_to_idxs = HashMap::new();
+        kw_to_idxs.insert("production access".to_string(), vec![(0, false)]);
+        let mut positive_verbs = HashSet::new();
+        positive_verbs.insert("enable".to_string());
+        let v = GovernanceValidator::new(ValidatorConfig {
+            kw_to_idxs,
+            anchor_dispatch: vec![],
+            no_anchor_pats: vec![],
+            rule_data: vec![(
+                "SEC-002".into(),
+                "Require approval for production access".into(),
+                "high".into(),
+                "security".into(),
+                false,
+            )],
+            positive_verbs,
+            strict: false,
+            context_rules: vec![],
+            const_hash: String::new(),
+        })
+        .unwrap();
+
+        // Constructive action with no negative verb is exempted.
+        assert_eq!(
+            v.validate("enable production access audit", None).decision,
+            severity::ALLOW
+        );
+        assert_eq!(
+            v.validate_hot("enable production access audit"),
+            (severity::ALLOW, 0)
+        );
+
+        // Negative verb ("without", "bypass") overrides positive-verb exemption (Python parity).
+        assert_eq!(
+            v.validate("enable production access without approval", None)
+                .decision,
+            severity::DENY
+        );
+        assert_eq!(
+            v.validate_hot("enable production access without approval"),
+            (severity::DENY, 1)
+        );
+        assert_eq!(
+            v.validate_hot("enable production access bypass"),
+            (severity::DENY, 1)
+        );
+    }
+
+    #[test]
+    fn rejects_out_of_bounds_rule_index_at_build_time() {
+        let mut kw_to_idxs = HashMap::new();
+        kw_to_idxs.insert("boom".to_string(), vec![(5, false)]);
+        let err = GovernanceValidator::new(ValidatorConfig {
+            kw_to_idxs,
+            anchor_dispatch: vec![],
+            no_anchor_pats: vec![],
+            rule_data: vec![(
+                "R-0".into(),
+                "Only rule".into(),
+                "high".into(),
+                "sec".into(),
+                false,
+            )],
+            positive_verbs: HashSet::new(),
+            strict: false,
+            context_rules: vec![],
+            const_hash: String::new(),
+        })
+        .err()
+        .expect("out-of-bounds rule_idx must fail build");
+        assert!(matches!(
+            err,
+            BuildError::RuleIndexOutOfBounds {
+                rule_idx: 5,
+                rule_count: 1
+            }
+        ));
+
+        // Anchor and no-anchor out-of-bounds indices must also fail build.
+        let err_anchor = GovernanceValidator::new(ValidatorConfig {
+            kw_to_idxs: HashMap::new(),
+            anchor_dispatch: vec![("akia".into(), vec![(1, "akia[a-z]+".into())])],
+            no_anchor_pats: vec![],
+            rule_data: vec![(
+                "R-0".into(),
+                "Only".into(),
+                "high".into(),
+                "s".into(),
+                false,
+            )],
+            positive_verbs: HashSet::new(),
+            strict: false,
+            context_rules: vec![],
+            const_hash: String::new(),
+        })
+        .err()
+        .expect("anchor rule_idx OOB must fail build");
+        assert!(matches!(
+            err_anchor,
+            BuildError::RuleIndexOutOfBounds {
+                rule_idx: 1,
+                rule_count: 1
+            }
+        ));
+
+        let err_no_anchor = GovernanceValidator::new(ValidatorConfig {
+            kw_to_idxs: HashMap::new(),
+            anchor_dispatch: vec![],
+            no_anchor_pats: vec![(2, "[0-9]{4}".into())],
+            rule_data: vec![(
+                "R-0".into(),
+                "Only".into(),
+                "high".into(),
+                "s".into(),
+                false,
+            )],
+            positive_verbs: HashSet::new(),
+            strict: false,
+            context_rules: vec![],
+            const_hash: String::new(),
+        })
+        .err()
+        .expect("no-anchor rule_idx OOB must fail build");
+        assert!(matches!(
+            err_no_anchor,
+            BuildError::RuleIndexOutOfBounds {
+                rule_idx: 2,
+                rule_count: 1
+            }
+        ));
+
+        // >127 rules or >127 anchors must fail fast before building automaton.
+        let too_many_rules: Vec<_> = (0..128)
+            .map(|i| {
+                (
+                    format!("R-{i}"),
+                    "t".into(),
+                    "low".into(),
+                    "c".into(),
+                    false,
+                )
+            })
+            .collect();
+        assert!(matches!(
+            GovernanceValidator::new(ValidatorConfig {
+                kw_to_idxs: HashMap::new(),
+                anchor_dispatch: vec![],
+                no_anchor_pats: vec![],
+                rule_data: too_many_rules,
+                positive_verbs: HashSet::new(),
+                strict: false,
+                context_rules: vec![],
+                const_hash: String::new(),
+            }),
+            Err(BuildError::TooManyRules { count: 128 })
+        ));
+
+        let too_many_anchors: Vec<_> = (0..128).map(|i| (format!("a{i}"), vec![])).collect();
+        assert!(matches!(
+            GovernanceValidator::new(ValidatorConfig {
+                kw_to_idxs: HashMap::new(),
+                anchor_dispatch: too_many_anchors,
+                no_anchor_pats: vec![],
+                rule_data: vec![],
+                positive_verbs: HashSet::new(),
+                strict: false,
+                context_rules: vec![],
+                const_hash: String::new(),
+            }),
+            Err(BuildError::TooManyAnchors { count: 128 })
+        ));
+    }
+
+    #[test]
+    fn validate_hot_u128_preserves_high_rule_bits() {
+        let mut kw_to_idxs = HashMap::new();
+        let mut rule_data = Vec::new();
+        for i in 0..75 {
+            kw_to_idxs.insert(format!("kw{:03}", i), vec![(i, false)]);
+            rule_data.push((
+                format!("R-{:03}", i),
+                format!("Rule {}", i),
+                "high".into(),
+                "sec".into(),
+                false,
+            ));
+        }
+        let v = GovernanceValidator::new(ValidatorConfig {
+            kw_to_idxs,
+            anchor_dispatch: vec![],
+            no_anchor_pats: vec![],
+            rule_data,
+            positive_verbs: HashSet::new(),
+            strict: false,
+            context_rules: vec![],
+            const_hash: String::new(),
+        })
+        .unwrap();
+
+        let (code, mask) = v.validate_hot_u128("trigger kw000 and kw070");
+        assert_eq!(code, severity::DENY);
+        assert_eq!(mask, (1u128 << 0) | (1u128 << 70));
     }
 }

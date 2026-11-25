@@ -6,13 +6,35 @@
 use std::collections::{HashMap, HashSet};
 
 use acgs_validator_core::{
-    context::ContextRule, result::ViolationTuple, severity::Severity, BuildError,
-    GovernanceValidator, ValidatorConfig, ALLOW, DENY, DENY_CRITICAL,
+    context::ContextRule, result::ViolationTuple, severity::Severity, GovernanceValidator,
+    ValidatorConfig, ALLOW, DENY, DENY_CRITICAL,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
+
+/// Lowercase `text` on a 256-byte stack buffer for short ASCII inputs (avoiding
+/// heap allocation for >99% of governance actions), falling back to Unicode
+/// `to_lowercase()` for non-ASCII strings to match Python `str.lower()`.
+#[inline]
+fn with_lowercased<R>(text: &str, f: impl FnOnce(&str) -> R) -> R {
+    if !text.is_ascii() {
+        return f(&text.to_lowercase());
+    }
+    let len = text.len();
+    if len <= 256 {
+        let mut buf = [0u8; 256];
+        buf[..len].copy_from_slice(text.as_bytes());
+        buf[..len].make_ascii_lowercase();
+        // SAFETY: input was valid UTF-8 and ASCII lowercasing preserves UTF-8 validity.
+        let lowered = unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
+        f(lowered)
+    } else {
+        let lowered = text.to_ascii_lowercase();
+        f(&lowered)
+    }
+}
 
 /// PyO3 wrapper around the core GovernanceValidator.
 #[pyclass(name = "GovernanceValidator")]
@@ -37,7 +59,8 @@ impl PyGovernanceValidator {
         const_hash: Option<String>,
     ) -> PyResult<Self> {
         // Extract anchor_dispatch
-        let mut anchor_dispatch: Vec<(String, Vec<(usize, String)>)> = Vec::new();
+        let mut anchor_dispatch: Vec<(String, Vec<(usize, String)>)> =
+            Vec::with_capacity(anchor_dispatch_py.len());
         for item in anchor_dispatch_py.iter() {
             let tuple = item.cast::<PyTuple>()?;
             let anchor: String = tuple.get_item(0)?.extract()?;
@@ -53,7 +76,8 @@ impl PyGovernanceValidator {
         }
 
         // Extract kw_to_idxs
-        let mut kw_map: HashMap<String, Vec<(usize, bool)>> = HashMap::new();
+        let mut kw_map: HashMap<String, Vec<(usize, bool)>> =
+            HashMap::with_capacity(kw_to_idxs.len());
         for (key, val) in kw_to_idxs.iter() {
             let kw: String = key.extract()?;
             let idxs_py = val.cast::<PyList>()?;
@@ -68,7 +92,7 @@ impl PyGovernanceValidator {
         }
 
         // Extract no-anchor patterns
-        let mut no_anchor_pats: Vec<(usize, String)> = Vec::new();
+        let mut no_anchor_pats: Vec<(usize, String)> = Vec::with_capacity(no_anchor_pats_py.len());
         for item in no_anchor_pats_py.iter() {
             let t = item.cast::<PyTuple>()?;
             let rule_idx: usize = t.get_item(0)?.extract()?;
@@ -91,7 +115,7 @@ impl PyGovernanceValidator {
         }
 
         // Extract positive verbs
-        let mut positive_verbs: HashSet<String> = HashSet::new();
+        let mut positive_verbs: HashSet<String> = HashSet::with_capacity(positive_verbs_py.len());
         for item in positive_verbs_py.iter() {
             positive_verbs.insert(item.extract()?);
         }
@@ -118,9 +142,12 @@ impl PyGovernanceValidator {
                     .iter()
                     .map(|p| {
                         let s: String = p.extract()?;
-                        Regex::new(&format!("(?i){}", s)).map_err(|e| {
-                            PyValueError::new_err(format!("Bad context regex '{}': {}", s, e))
-                        })
+                        RegexBuilder::new(&s)
+                            .case_insensitive(true)
+                            .build()
+                            .map_err(|e| {
+                                PyValueError::new_err(format!("Bad context regex '{}': {}", s, e))
+                            })
                     })
                     .collect::<PyResult<_>>()?;
 
@@ -150,67 +177,30 @@ impl PyGovernanceValidator {
             const_hash: const_hash.unwrap_or_default(),
         };
 
-        let inner = GovernanceValidator::new(config).map_err(|e| match e {
-            BuildError::BadRegex { pattern, message } => {
-                PyValueError::new_err(format!("Bad regex '{}': {}", pattern, message))
-            }
-            BuildError::TooManyRules { count } => PyValueError::new_err(format!(
-                "GovernanceValidator: rule count {} exceeds 63 (u64 bitmask limit)",
-                count
-            )),
-            BuildError::TooManyAnchors { count } => PyValueError::new_err(format!(
-                "GovernanceValidator: anchor count {} exceeds 63 (u64 bitmask limit)",
-                count
-            )),
-            BuildError::AhoCorasickBuild(msg) => {
-                PyValueError::new_err(format!("AC build error: {}", msg))
-            }
-        })?;
+        let inner = GovernanceValidator::new(config)
+            .map_err(|e| PyValueError::new_err(format!("GovernanceValidator: {}", e)))?;
 
         Ok(PyGovernanceValidator { inner })
     }
 
-    /// Legacy hot-path validation.
     /// Hot-path validation. Accepts any-case text, lowercases internally.
-    /// exp271: Moving lowercase into Rust saves ~54ns Python str.lower() + avoids
-    /// allocating a Python string object. Rust's to_ascii_lowercase() is SIMD-optimized.
+    /// Uses a 256-byte stack buffer for short ASCII inputs to avoid heap allocation.
     fn validate_hot(&self, text: &str) -> PyResult<(i32, i64)> {
-        // exp272: Use stack buffer for short strings (≤256 bytes, covers 99%+ of
-        // governance actions). Avoids heap allocation for to_ascii_lowercase().
-        // Non-ASCII input needs full Unicode lowercasing (parity with Python
-        // str.lower()); ASCII-only folding would leave e.g. "Ñ" uppercase and a
-        // keyword such as "contraseña" would never match.
-        if !text.is_ascii() {
-            return Ok(self.inner.validate_hot(&text.to_lowercase()));
-        }
-        let len = text.len();
-        if len <= 256 {
-            let mut buf = [0u8; 256];
-            buf[..len].copy_from_slice(text.as_bytes());
-            buf[..len].make_ascii_lowercase();
-            // SAFETY: input was valid UTF-8, ASCII lowercase preserves validity
-            let lowered = unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
-            Ok(self.inner.validate_hot(lowered))
-        } else {
-            let lowered = text.to_ascii_lowercase();
-            Ok(self.inner.validate_hot(&lowered))
-        }
+        Ok(with_lowercased(text, |lowered| {
+            self.inner.validate_hot(lowered)
+        }))
     }
 
     /// Full validation with structured violation data.
     #[pyo3(signature = (text, context_pairs=None))]
-    /// exp271: accepts any-case text, lowercases internally.
     fn validate_full(
         &self,
         text: &str,
         context_pairs: Option<Vec<(String, String)>>,
     ) -> PyResult<(i32, Vec<ViolationTuple>, bool)> {
-        let lowered = if text.is_ascii() {
-            text.to_ascii_lowercase()
-        } else {
-            text.to_lowercase()
-        };
-        Ok(self.inner.validate_full(&lowered, context_pairs.as_deref()))
+        Ok(with_lowercased(text, |lowered| {
+            self.inner.validate_full(lowered, context_pairs.as_deref())
+        }))
     }
 
     /// Get the constitutional hash.

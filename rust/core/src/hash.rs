@@ -11,25 +11,39 @@ use sha2::{Digest, Sha256};
 ///
 /// `rules` is a list of `(rule_id, rule_text, severity_value, sorted_keywords)`.
 /// Rules are sorted by rule_id before hashing (matching Python behavior).
-/// This function does not mutate the input — it clones and sorts internally.
+/// Streams directly into the SHA-256 hasher without cloning rules or
+/// allocating an intermediate canonical string.
 pub fn compute_constitutional_hash(rules: &[(String, String, String, Vec<String>)]) -> String {
-    let mut sorted: Vec<_> = rules.to_vec();
-    sorted.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let canonical: String = sorted
-        .iter()
-        .map(|(id, text, severity, keywords)| {
-            let mut kws = keywords.clone();
-            kws.sort();
-            format!("{}:{}:{}:{}", id, text, severity, kws.join(","))
-        })
-        .collect::<Vec<_>>()
-        .join("|");
+    let mut order: Vec<usize> = (0..rules.len()).collect();
+    order.sort_by(|&a, &b| rules[a].0.cmp(&rules[b].0));
 
     let mut hasher = Sha256::new();
-    hasher.update(canonical.as_bytes());
+    let mut kw_refs: Vec<&str> = Vec::new();
+    for (pos, &idx) in order.iter().enumerate() {
+        if pos > 0 {
+            hasher.update(b"|");
+        }
+        let (id, text, severity, keywords) = &rules[idx];
+        hasher.update(id.as_bytes());
+        hasher.update(b":");
+        hasher.update(text.as_bytes());
+        hasher.update(b":");
+        hasher.update(severity.as_bytes());
+        hasher.update(b":");
+
+        kw_refs.clear();
+        kw_refs.extend(keywords.iter().map(String::as_str));
+        kw_refs.sort_unstable();
+        for (ki, kw) in kw_refs.iter().enumerate() {
+            if ki > 0 {
+                hasher.update(b",");
+            }
+            hasher.update(kw.as_bytes());
+        }
+    }
+
     let digest = hasher.finalize();
-    hex::encode(digest)[..16].to_string()
+    hex::encode(&digest[..8])
 }
 
 #[cfg(test)]
@@ -71,5 +85,26 @@ mod tests {
             compute_constitutional_hash(&rules_a),
             compute_constitutional_hash(&rules_b),
         );
+    }
+
+    #[test]
+    fn test_matches_canonical_sha256_prefix() {
+        let rules = vec![
+            (
+                "R2".into(),
+                "Second".into(),
+                "critical".into(),
+                vec!["zeta".into(), "alpha".into()],
+            ),
+            (
+                "R1".into(),
+                "First".into(),
+                "high".into(),
+                vec!["beta".into()],
+            ),
+        ];
+        let canonical = "R1:First:high:beta|R2:Second:critical:alpha,zeta";
+        let expected = hex::encode(Sha256::digest(canonical.as_bytes()))[..16].to_string();
+        assert_eq!(compute_constitutional_hash(&rules), expected);
     }
 }

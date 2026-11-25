@@ -72,7 +72,8 @@ pub static KW_NEGATIVE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         "(?i)",
         "without|disable|bypass|remove|skip|delete|override|hide|",
-        "auto-reject|self-approve|proxy for"
+        "auto-reject|self-approve|proxy for|",
+        "secret|credential|token|password|ssn|terraform-destroy"
     ))
     .unwrap()
 });
@@ -131,5 +132,24 @@ mod tests {
         assert!(keyword_has_negative("bypass validation"));
         assert!(!keyword_has_negative("audit trail"));
         assert!(!keyword_has_negative("safety check"));
+    }
+
+    #[test]
+    fn test_keyword_negative_security_parity() {
+        for kw in [
+            "secret",
+            "credential",
+            "token",
+            "password",
+            "ssn",
+            "terraform-destroy",
+            "expose secret key",
+        ] {
+            assert!(
+                keyword_has_negative(kw),
+                "security keyword '{}' must override positive-verb exemption",
+                kw
+            );
+        }
     }
 }
