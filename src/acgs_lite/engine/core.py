@@ -16,6 +16,7 @@ import unicodedata
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
+from datetime import datetime
 from functools import lru_cache
 from typing import Any, Literal, Protocol
 
@@ -29,7 +30,7 @@ from acgs_lite.constitution import (
     Severity,
 )
 from acgs_lite.constitution.analytics import _NEGATIVE_VERBS_LIST
-from acgs_lite.constitution.rule import ViolationAction
+from acgs_lite.constitution.rule import ViolationAction, _parse_iso
 from acgs_lite.errors import ConstitutionalViolationError
 
 from .audit_runtime import _ANON, _FastAuditLog, _NoopRecorder, _request_counter
@@ -73,6 +74,59 @@ _DEFAULT_IGNORABLE: frozenset[int] = frozenset(
     cp for low, high in _DEFAULT_IGNORABLE_RANGES for cp in range(low, high + 1)
 )
 
+# Superset of Unicode <= 16.0.0 Cc (excluding \t\n\r) and Cf code points outside
+# _DEFAULT_IGNORABLE_RANGES. Filtered against the running Python's unicodedata at
+# module load so the compiled C regex matches _is_hidden_char() identically on
+# every Python 3.10-3.14 Unicode database (13.0 through 16.0).
+_KNOWN_EXTRA_HIDDEN_RANGES: tuple[tuple[int, int], ...] = (
+    (0x0000, 0x0008),
+    (0x000B, 0x000C),
+    (0x000E, 0x001F),
+    (0x007F, 0x009F),
+    (0x0600, 0x0605),
+    (0x06DD, 0x06DD),
+    (0x070F, 0x070F),
+    (0x0890, 0x0891),
+    (0x08E2, 0x08E2),
+    (0xFFF9, 0xFFFB),
+    (0x110BD, 0x110BD),
+    (0x110CD, 0x110CD),
+    (0x13430, 0x1343F),
+)
+
+
+def _is_hidden_char(c: str) -> bool:
+    if ord(c) in _DEFAULT_IGNORABLE:
+        return True
+    category = unicodedata.category(c)
+    return category == "Cf" or (category == "Cc" and c not in "\t\n\r")
+
+
+def _build_hidden_char_re() -> re.Pattern[str] | None:
+    """Build a C-level regex equivalent to ``_is_hidden_char`` for Unicode <= 16.0.0."""
+    try:
+        version = tuple(int(part) for part in unicodedata.unidata_version.split(".")[:3])
+    except ValueError:
+        return None
+    if version > (16, 0, 0):
+        return None
+    extra_ranges: list[tuple[int, int]] = []
+    for lo, hi in _KNOWN_EXTRA_HIDDEN_RANGES:
+        for cp in range(lo, hi + 1):
+            if _is_hidden_char(chr(cp)):
+                if extra_ranges and cp == extra_ranges[-1][1] + 1:
+                    extra_ranges[-1] = (extra_ranges[-1][0], cp)
+                else:
+                    extra_ranges.append((cp, cp))
+    parts = [
+        re.escape(chr(lo)) if lo == hi else f"{re.escape(chr(lo))}-{re.escape(chr(hi))}"
+        for lo, hi in (*_DEFAULT_IGNORABLE_RANGES, *extra_ranges)
+    ]
+    return re.compile("[" + "".join(parts) + "]")
+
+
+_HIDDEN_CHAR_RE: re.Pattern[str] | None = _build_hidden_char_re()
+
 
 def normalize_for_matching(text: str) -> str:
     """Fold *text* to the form rule keywords and patterns are matched against.
@@ -91,6 +145,8 @@ def normalize_for_matching(text: str) -> str:
     if text.isascii():
         return _ASCII_HIDDEN_CONTROL_RE.sub("", text) if _has_ascii_control(text) else text
     folded = unicodedata.normalize("NFKC", text)
+    if _HIDDEN_CHAR_RE is not None:
+        return _HIDDEN_CHAR_RE.sub("", folded)
     return "".join(c for c in folded if not _is_hidden_char(c))
 
 
@@ -99,13 +155,6 @@ _ASCII_HIDDEN_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 def _has_ascii_control(text: str) -> bool:
     return _ASCII_HIDDEN_CONTROL_RE.search(text) is not None
-
-
-def _is_hidden_char(c: str) -> bool:
-    if ord(c) in _DEFAULT_IGNORABLE:
-        return True
-    category = unicodedata.category(c)
-    return category == "Cf" or (category == "Cc" and c not in "\t\n\r")
 
 
 def _is_plain_ascii(text: str) -> bool:
@@ -301,6 +350,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         "strict",
         "_const_hash",
         "_active_rules",
+        "_all_rules_meta",
         "_rules_count",
         "_rule_data",
         "_pattern_rule_idxs",
@@ -362,9 +412,12 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         )
         self._const_hash: str = constitution.hash
         self._active_rules: list[Rule] = constitution.active_rules()
+        self._all_rules_meta: tuple[tuple[str, str], ...] = tuple(
+            (rule.id, rule.severity.value) for rule in constitution.rules
+        )
         self._rules_count: int = len(self._active_rules)
         _C = Severity.CRITICAL
-        self._rule_data: list[tuple] = [
+        self._rule_data: list[tuple[Any, ...]] = [
             (
                 rule.id,
                 rule.text,
@@ -394,8 +447,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
 
         kw_to_idxs: dict[str, list[tuple[int, bool]]] = defaultdict(list)
         for idx, rule in enumerate(self._active_rules):
-            for kw in rule._kw_lower:  # type: ignore[attr-defined]
-                kw_has_neg = bool(_KW_NEGATIVE_RE.search(kw))
+            for kw, kw_has_neg in rule._kw_pairs:
                 kw_to_idxs[kw].append((idx, kw_has_neg))
 
         _pattern_rule_idxs: list[tuple[int, Any]] = []
@@ -415,7 +467,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                     _no_anchor_patterns.append((idx, pat))
 
         self._pattern_rule_idxs = _pattern_rule_idxs
-        self._pat_anchor_dispatch: tuple = tuple(
+        self._pat_anchor_dispatch: tuple[tuple[str, list[tuple[int, Any]]], ...] = tuple(
             (anchor, pats) for anchor, pats in _anchor_patterns.items()
         )
         self._no_anchor_patterns = _no_anchor_patterns
@@ -491,7 +543,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
 
         self._has_high_rules: bool = any(r.severity.value == "high" for r in self._active_rules)
 
-        self._hot: tuple = (
+        self._hot: tuple[Any, ...] = (
             self._ac_iter,
             self._pat_anchor_dispatch,
             self._no_anchor_patterns,
@@ -628,7 +680,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                         with suppress(ConstitutionalViolationError):
                             self.validate(_wctx_a, context=_wctx_c)
                 _meta_ctx = {"source": "autoresearch", "rule": "SAFETY-003"}
-                _empty_ctx2: dict = {}
+                _empty_ctx2: dict[str, Any] = {}
                 _meta_warmup = (
                     (
                         "AI coding agent executed terraform destroy on production"
@@ -653,13 +705,14 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 self._hot = _real_hot
                 self.audit_log = _real_audit
                 self.custom_validators = _real_custom_validators
-        import gc as _gc  # noqa: PLC0415
+        if freeze_gc or disable_gc:
+            import gc as _gc  # noqa: PLC0415
 
-        _gc.collect()
-        if freeze_gc:
-            _gc.freeze()
-        if disable_gc:
-            _gc.disable()
+            _gc.collect()
+            if freeze_gc:
+                _gc.freeze()
+            if disable_gc:
+                _gc.disable()
 
     def _new_fast_allow_result(self) -> ValidationResult:
         """Return an isolated fast-path allow result."""
@@ -772,19 +825,47 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         evaluations: list[dict[str, Any]] = []
         for rule in rules:
             evaluated = True if applicable_rule_ids is None else rule.id in applicable_rule_ids
+            matched = rule.id in matched_rule_ids
             evaluations.append(
                 {
                     "rule_id": rule.id,
                     "severity": rule.severity.value,
                     "evaluated": evaluated,
-                    "matched": rule.id in matched_rule_ids,
-                    "reason": (
-                        "violation"
-                        if rule.id in matched_rule_ids
-                        else "no_match"
-                        if evaluated
-                        else "inactive"
-                    ),
+                    "matched": matched,
+                    "reason": ("violation" if matched else "no_match" if evaluated else "inactive"),
+                }
+            )
+        return evaluations
+
+    def _build_rule_evaluations_fast(
+        self,
+        *,
+        matched_rule_ids: set[str],
+        applicable_rule_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build rule-evaluation records using precomputed ``(rule_id, severity)`` metadata."""
+        if not matched_rule_ids and applicable_rule_ids is None:
+            return [
+                {
+                    "rule_id": rid,
+                    "severity": sev,
+                    "evaluated": True,
+                    "matched": False,
+                    "reason": "no_match",
+                }
+                for rid, sev in self._all_rules_meta
+            ]
+        evaluations: list[dict[str, Any]] = []
+        for rid, sev in self._all_rules_meta:
+            evaluated = True if applicable_rule_ids is None else rid in applicable_rule_ids
+            matched = rid in matched_rule_ids
+            evaluations.append(
+                {
+                    "rule_id": rid,
+                    "severity": sev,
+                    "evaluated": evaluated,
+                    "matched": matched,
+                    "reason": ("violation" if matched else "no_match" if evaluated else "inactive"),
                 }
             )
         return evaluations
@@ -876,14 +957,19 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                     and not rule.deprecated
                     and (not rule.condition or rule.condition_matches(ctx))
                 ]
-        return [
-            rule
-            for rule in rules
-            if rule.enabled
-            and not rule.deprecated
-            and (not rule.condition or rule.condition_matches(ctx))
-            and rule.is_valid_at(evaluation_time)
-        ]
+        evaluation_dt: datetime | None = None
+        applicable: list[Rule] = []
+        for rule in rules:
+            if (
+                rule.enabled
+                and not rule.deprecated
+                and (not rule.condition or rule.condition_matches(ctx))
+            ):
+                if evaluation_dt is None:
+                    evaluation_dt = _parse_iso(evaluation_time)
+                if rule._is_valid_at_dt(evaluation_dt):
+                    applicable.append(rule)
+        return applicable
 
     @staticmethod
     def _context_evaluation_time(context: dict[str, Any]) -> str | None:
@@ -1005,8 +1091,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 matched_violations=all_matched,
                 latency_ms=latency_ms,
                 timestamp=timestamp,
-                rule_evaluations=self._build_rule_evaluations(
-                    self.constitution.rules,
+                rule_evaluations=self._build_rule_evaluations_fast(
                     matched_rule_ids={v.rule_id for v in all_matched},
                     applicable_rule_ids={rule.id for rule in applicable_rules},
                 ),
@@ -1039,7 +1124,8 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             self._neg_kw_gate if positive_verb_mode else self._kw_gate, text_lower
         )
         if positive_verb_mode:
-            kw_matches = [] if _kw_absent else self._neg_findall(text_lower)
+            _neg_findall = self._neg_findall
+            kw_matches = [] if (_kw_absent or _neg_findall is None) else _neg_findall(text_lower)
             if kw_matches:
                 fired = 0
                 for kw in kw_matches:
@@ -1109,9 +1195,11 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         elif self._combined_findall is not None or self._pattern_rule_idxs:
             # No keyword index (pattern-only constitution): skip straight to the
             # pattern fallback below instead of evaluating nothing.
+            _combined_search = self._combined_search
+            _combined_findall = self._combined_findall
             _m = (
-                self._combined_search(text_lower)
-                if self._combined_search is not None and not _kw_absent
+                _combined_search(text_lower)
+                if _combined_search is not None and not _kw_absent
                 else None
             )
             if _m:
@@ -1131,8 +1219,12 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                     if violations is None:
                         violations = []
                     violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-                if self._combined_search(text_lower, _m.end()) is not None:
-                    for kw in self._combined_findall(text_lower):
+                if (
+                    _combined_search is not None
+                    and _combined_findall is not None
+                    and _combined_search(text_lower, _m.end()) is not None
+                ):
+                    for kw in _combined_findall(text_lower):
                         for rule_idx, _ in self._kw_to_idxs.get(kw, []):
                             _bit = 1 << rule_idx
                             if fired & _bit:
@@ -1518,8 +1610,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 matched_violations=[],
                 latency_ms=latency_ms,
                 timestamp=now_ts,
-                rule_evaluations=self._build_rule_evaluations(
-                    self.constitution.rules,
+                rule_evaluations=self._build_rule_evaluations_fast(
                     matched_rule_ids=set(),
                 ),
                 audit_metadata=audit_metadata,
@@ -1578,8 +1669,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             matched_violations=all_matched,
             latency_ms=result.latency_ms,
             timestamp=now_ts,
-            rule_evaluations=self._build_rule_evaluations(
-                self.constitution.rules,
+            rule_evaluations=self._build_rule_evaluations_fast(
                 matched_rule_ids={v.rule_id for v in all_matched},
             ),
             enforcement=enforcement,

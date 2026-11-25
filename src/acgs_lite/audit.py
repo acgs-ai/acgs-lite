@@ -20,6 +20,7 @@ import logging
 import os
 import stat
 import threading
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -259,7 +260,7 @@ class JSONLAuditBackend:
             logger.debug("failed to close JSONL audit backend file handle: %s", exc, exc_info=True)
 
 
-@dataclass
+@dataclass(slots=True)
 class AuditEntry:
     """A single audit log entry."""
 
@@ -300,8 +301,18 @@ class AuditEntry:
     @property
     def entry_hash(self) -> str:
         """Hash of this entry for chain integrity."""
-        entry_dict = self.to_dict()
-        entry_dict.pop("pqc_signature", None)
+        entry_dict = {
+            "action": self.action,
+            "agent_id": self.agent_id,
+            "constitutional_hash": self.constitutional_hash,
+            "id": self.id,
+            "latency_ms": self.latency_ms,
+            "metadata": self.metadata,
+            "timestamp": self.timestamp,
+            "type": self.type,
+            "valid": self.valid,
+            "violations": self.violations,
+        }
         canonical = json.dumps(entry_dict, sort_keys=True)
         return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -334,8 +345,8 @@ class AuditLog:
     ) -> None:
         if max_entries <= 0:
             raise ValueError("max_entries must be positive")
-        self._entries: list[AuditEntry] = []
-        self._chain_hashes: list[str] = []
+        self._entries: deque[AuditEntry] = deque()
+        self._chain_hashes: deque[str] = deque()
         self._retained_predecessor_hash = "genesis"
         self._hash_format: Literal["sha256-v1", "legacy-sha256-16"] = "sha256-v1"
         self._strict_poisoned = False
@@ -434,8 +445,15 @@ class AuditLog:
             entry._signature_hash_format = self._hash_format
             entry.pqc_signature = self._pqc_signer.sign(entry.signature_digest.encode())
 
-    def _append_locked(self, entry: AuditEntry) -> str:
-        """Compute chain hash, append entry + hash, trim if needed. Caller holds ``_lock``."""
+    def _append_locked(
+        self,
+        entry: AuditEntry,
+        *,
+        undo_limit: int = 0,
+        discarded_entries: list[AuditEntry] | None = None,
+        discarded_hashes: list[str] | None = None,
+    ) -> str:
+        """Compute chain hash, append entry + hash, trim in O(1). Caller holds ``_lock``."""
         prev_hash = (
             self._chain_hashes[-1] if self._chain_hashes else self._retained_predecessor_hash
         )
@@ -448,13 +466,38 @@ class AuditLog:
         self._entries.append(entry)
         self._chain_hashes.append(chain_hash)
 
-        if len(self._entries) > self.max_entries:
-            discarded_count = len(self._entries) - self.max_entries
-            self._retained_predecessor_hash = self._chain_hashes[discarded_count - 1]
-            self._entries = self._entries[-self.max_entries :]
-            self._chain_hashes = self._chain_hashes[-self.max_entries :]
+        while len(self._entries) > self.max_entries:
+            popped_entry = self._entries.popleft()
+            popped_hash = self._chain_hashes.popleft()
+            self._retained_predecessor_hash = popped_hash
+            if (
+                discarded_entries is not None
+                and discarded_hashes is not None
+                and len(discarded_entries) < undo_limit
+            ):
+                discarded_entries.append(popped_entry)
+                discarded_hashes.append(popped_hash)
 
         return chain_hash
+
+    def _rollback_locked(
+        self,
+        *,
+        pre_len: int,
+        pre_anchor: str,
+        discarded_entries: list[AuditEntry],
+        discarded_hashes: list[str],
+    ) -> None:
+        """Restore the pre-transaction retained window in O(k) under ``_lock``."""
+        orig_remaining = pre_len - len(discarded_entries)
+        new_remaining = len(self._entries) - orig_remaining
+        for _ in range(new_remaining):
+            self._entries.pop()
+            self._chain_hashes.pop()
+        if discarded_entries:
+            self._entries.extendleft(reversed(discarded_entries))
+            self._chain_hashes.extendleft(reversed(discarded_hashes))
+        self._retained_predecessor_hash = pre_anchor
 
     def _entry_digest(self, entry: AuditEntry) -> str:
         digest = entry.entry_hash
@@ -509,18 +552,27 @@ class AuditLog:
             if self._strict_poisoned:
                 raise RuntimeError("audit strict persistence is poisoned after uncertain rollback")
             self.validate_durable_state()
-            pre_entries = list(self._entries)
-            pre_hashes = list(self._chain_hashes)
+            pre_len = len(self._entries)
             pre_anchor = self._retained_predecessor_hash
+            discarded_entries: list[AuditEntry] = []
+            discarded_hashes: list[str] = []
             checkpoint = self._backend.begin_checkpoint()
-            chain_hash = self._append_locked(entry)
+            chain_hash = self._append_locked(
+                entry,
+                undo_limit=pre_len,
+                discarded_entries=discarded_entries,
+                discarded_hashes=discarded_hashes,
+            )
             try:
                 self._backend.write(entry.to_dict(), chain_hash)
                 self._backend.flush_durable()
             except Exception as persist_exc:
-                self._entries = pre_entries
-                self._chain_hashes = pre_hashes
-                self._retained_predecessor_hash = pre_anchor
+                self._rollback_locked(
+                    pre_len=pre_len,
+                    pre_anchor=pre_anchor,
+                    discarded_entries=discarded_entries,
+                    discarded_hashes=discarded_hashes,
+                )
                 try:
                     self._backend.check_identity()
                     self._backend.rollback_to(checkpoint)
@@ -576,9 +628,10 @@ class AuditLog:
         self._prepare_entry(entry, proof_certificate, provenance)
 
         with self._lock:
-            pre_entries = list(self._entries)
-            pre_chain_hashes = list(self._chain_hashes)
+            pre_len = len(self._entries)
             pre_anchor = self._retained_predecessor_hash
+            discarded_entries: list[AuditEntry] = []
+            discarded_hashes: list[str] = []
 
             checkpoint: Any = None
             can_checkpoint = self._backend is not None and hasattr(
@@ -593,7 +646,12 @@ class AuditLog:
                     type(self._backend).__name__,
                 )
 
-            chain_hash = self._append_locked(entry)
+            chain_hash = self._append_locked(
+                entry,
+                undo_limit=pre_len,
+                discarded_entries=discarded_entries,
+                discarded_hashes=discarded_hashes,
+            )
 
             try:
                 if self._backend is not None:
@@ -601,9 +659,12 @@ class AuditLog:
                 if persist is not None:
                     persist(self)
             except Exception:
-                self._entries = pre_entries
-                self._chain_hashes = pre_chain_hashes
-                self._retained_predecessor_hash = pre_anchor
+                self._rollback_locked(
+                    pre_len=pre_len,
+                    pre_anchor=pre_anchor,
+                    discarded_entries=discarded_entries,
+                    discarded_hashes=discarded_hashes,
+                )
                 if can_checkpoint:
                     try:
                         self._backend.rollback_to(checkpoint)  # type: ignore[union-attr]
@@ -643,9 +704,10 @@ class AuditLog:
             self._prepare_entry(entry, proof_certificate, provenance)
 
         with self._lock:
-            pre_entries = list(self._entries)
-            pre_chain_hashes = list(self._chain_hashes)
+            pre_len = len(self._entries)
             pre_anchor = self._retained_predecessor_hash
+            discarded_entries: list[AuditEntry] = []
+            discarded_hashes: list[str] = []
 
             checkpoint: Any = None
             can_checkpoint = self._backend is not None and hasattr(
@@ -663,16 +725,24 @@ class AuditLog:
             chain_hashes: list[str] = []
             try:
                 for entry in entries:
-                    chain_hash = self._append_locked(entry)
+                    chain_hash = self._append_locked(
+                        entry,
+                        undo_limit=pre_len,
+                        discarded_entries=discarded_entries,
+                        discarded_hashes=discarded_hashes,
+                    )
                     chain_hashes.append(chain_hash)
                     if self._backend is not None:
                         self._backend.write(entry.to_dict(), chain_hash)
                 if persist is not None:
                     persist(self)
             except Exception:
-                self._entries = pre_entries
-                self._chain_hashes = pre_chain_hashes
-                self._retained_predecessor_hash = pre_anchor
+                self._rollback_locked(
+                    pre_len=pre_len,
+                    pre_anchor=pre_anchor,
+                    discarded_entries=discarded_entries,
+                    discarded_hashes=discarded_hashes,
+                )
                 if can_checkpoint:
                     try:
                         self._backend.rollback_to(checkpoint)  # type: ignore[union-attr]
@@ -735,11 +805,9 @@ class AuditLog:
         if not log.verify_chain():
             raise ValueError("audit backend chain verification failed")
         # Trim to max if needed
-        if len(log._entries) > max_entries:
-            discarded_count = len(log._entries) - max_entries
-            log._retained_predecessor_hash = log._chain_hashes[discarded_count - 1]
-            log._entries = log._entries[-max_entries:]
-            log._chain_hashes = log._chain_hashes[-max_entries:]
+        while len(log._entries) > max_entries:
+            log._entries.popleft()
+            log._retained_predecessor_hash = log._chain_hashes.popleft()
         return log
 
     @classmethod
@@ -764,7 +832,7 @@ class AuditLog:
             entry = AuditEntry(**entry_dict)
             entry._signature_hash_format = version
             log._entries.append(entry)
-        log._chain_hashes = list(hashes)
+        log._chain_hashes = deque(hashes)
         if not log.verify_chain():
             raise ValueError("audit export chain verification failed")
         return log
@@ -809,7 +877,8 @@ class AuditLog:
         limit: int = 100,
     ) -> list[AuditEntry]:
         """Query audit entries with filters."""
-        results = self._entries
+        with self._lock:
+            results = list(self._entries)
 
         if agent_id is not None:
             results = [e for e in results if e.agent_id == agent_id]
@@ -838,22 +907,27 @@ class AuditLog:
 
     def export_dicts(self) -> list[dict[str, Any]]:
         """Export audit log as list of dicts."""
-        return [e.to_dict() for e in self._entries]
+        with self._lock:
+            return [e.to_dict() for e in self._entries]
 
     @property
     def compliance_rate(self) -> float:
         """Percentage of valid entries."""
-        if not self._entries:
-            return 1.0
-        valid_count = sum(1 for e in self._entries if e.valid)
-        return valid_count / len(self._entries)
+        with self._lock:
+            total = len(self._entries)
+            if not total:
+                return 1.0
+            valid_count = sum(1 for e in self._entries if e.valid)
+            return valid_count / total
 
     def __len__(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
     def __repr__(self) -> str:
-        return (
-            f"AuditLog(entries={len(self._entries)}, "
-            f"compliance={self.compliance_rate:.1%}, "
-            f"chain_valid={self.verify_chain()})"
-        )
+        with self._lock:
+            return (
+                f"AuditLog(entries={len(self._entries)}, "
+                f"compliance={self.compliance_rate:.1%}, "
+                f"chain_valid={self.verify_chain()})"
+            )

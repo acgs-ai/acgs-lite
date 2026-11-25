@@ -7,31 +7,8 @@ All other symbols are lazy-loaded via ``_LAZY_REGISTRY`` on first access.
 from __future__ import annotations
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .abac import (
-    CLASS_CONFIDENTIAL,
-    CLASS_INTERNAL,
-    CLASS_PHI,
-    CLASS_PII,
-    CLASS_PUBLIC,
-    CLASS_SECRET,
-    CLASS_TOP_SECRET,
-    REGION_APAC,
-    REGION_EU,
-    REGION_GLOBAL,
-    REGION_UK,
-    REGION_US,
-    RISK_CRITICAL,
-    RISK_HIGH,
-    RISK_LOW,
-    RISK_MEDIUM,
-    TIER_AUTONOMOUS,
-    TIER_PRIVILEGED,
-    TIER_RESTRICTED,
-    TIER_STANDARD,
-    EvaluationContext,
-)
 from .analytics import (
     _KW_NEGATIVE_RE,
     _NEGATIVE_VERBS_LIST,
@@ -41,55 +18,215 @@ from .analytics import (
     governance_decision_report,
     score_context_risk,
 )
-from .autonomy_ratio import (
-    ActionCommitment,
-    CommitmentRatioState,
-    CommitmentRatioTracker,
-    classify_action,
-)
-from .boundaries import BoundaryViolation, PolicyBoundary, PolicyBoundarySet
 from .core import AcknowledgedTension, Constitution, Rule, RuleSynthesisProvider, Severity
-from .deduplication import (
-    DuplicationReport,
-    ExactDuplicateGroup,
-    NearDuplicatePair,
-    SubsetRedundancy,
-    deduplicate,
-    find_duplicates,
-)
-from .intent_alignment import (
-    ActionAlignmentRecord,
-    IntentAlignmentState,
-    IntentAlignmentTracker,
-    IntentProfile,
-)
-from .interpolation import (
-    context_coverage,
-    extract_placeholders,
-    render_constitution,
-    render_rule,
-    render_text,
-    validate_context_schema,
-)
-from .memoization import CacheStats, MemoizedConstitution
-from .metrics import (
-    AuditEntry,
-    AuditLedger,
-    GovernanceCostModel,
-    GovernanceEvent,
-    GovernanceForecaster,
-    GovernanceMetrics,
-    GovernanceSession,
-    GovernanceSLO,
-    RuleEffectiveness,
-    create_governance_event,
-)
-from .obligation_engine import ObligationEngine, ObligationRecord, ObligationSpec, ObligationStatus
-from .routing import GovernanceRouter
-from .snapshot import ConstitutionSnapshot, capture_snapshot
-from .templates import ConstitutionBuilder
-from .versioning import ChangelogEntry, GovernanceChangelog, RuleSnapshot
-from .weighted_policy import RulePenalty, WeightedConstitution, WeightedEvaluationResult
+
+if TYPE_CHECKING:
+    from .abac import (
+        CLASS_CONFIDENTIAL as CLASS_CONFIDENTIAL,
+    )
+    from .abac import (
+        CLASS_INTERNAL as CLASS_INTERNAL,
+    )
+    from .abac import (
+        CLASS_PHI as CLASS_PHI,
+    )
+    from .abac import (
+        CLASS_PII as CLASS_PII,
+    )
+    from .abac import (
+        CLASS_PUBLIC as CLASS_PUBLIC,
+    )
+    from .abac import (
+        CLASS_SECRET as CLASS_SECRET,
+    )
+    from .abac import (
+        CLASS_TOP_SECRET as CLASS_TOP_SECRET,
+    )
+    from .abac import (
+        REGION_APAC as REGION_APAC,
+    )
+    from .abac import (
+        REGION_EU as REGION_EU,
+    )
+    from .abac import (
+        REGION_GLOBAL as REGION_GLOBAL,
+    )
+    from .abac import (
+        REGION_UK as REGION_UK,
+    )
+    from .abac import (
+        REGION_US as REGION_US,
+    )
+    from .abac import (
+        RISK_CRITICAL as RISK_CRITICAL,
+    )
+    from .abac import (
+        RISK_HIGH as RISK_HIGH,
+    )
+    from .abac import (
+        RISK_LOW as RISK_LOW,
+    )
+    from .abac import (
+        RISK_MEDIUM as RISK_MEDIUM,
+    )
+    from .abac import (
+        TIER_AUTONOMOUS as TIER_AUTONOMOUS,
+    )
+    from .abac import (
+        TIER_PRIVILEGED as TIER_PRIVILEGED,
+    )
+    from .abac import (
+        TIER_RESTRICTED as TIER_RESTRICTED,
+    )
+    from .abac import (
+        TIER_STANDARD as TIER_STANDARD,
+    )
+    from .abac import (
+        EvaluationContext as EvaluationContext,
+    )
+    from .autonomy_ratio import (
+        ActionCommitment as ActionCommitment,
+    )
+    from .autonomy_ratio import (
+        CommitmentRatioState as CommitmentRatioState,
+    )
+    from .autonomy_ratio import (
+        CommitmentRatioTracker as CommitmentRatioTracker,
+    )
+    from .autonomy_ratio import (
+        classify_action as classify_action,
+    )
+    from .boundaries import (
+        BoundaryViolation as BoundaryViolation,
+    )
+    from .boundaries import (
+        PolicyBoundary as PolicyBoundary,
+    )
+    from .boundaries import (
+        PolicyBoundarySet as PolicyBoundarySet,
+    )
+    from .deduplication import (
+        DuplicationReport as DuplicationReport,
+    )
+    from .deduplication import (
+        ExactDuplicateGroup as ExactDuplicateGroup,
+    )
+    from .deduplication import (
+        NearDuplicatePair as NearDuplicatePair,
+    )
+    from .deduplication import (
+        SubsetRedundancy as SubsetRedundancy,
+    )
+    from .deduplication import (
+        deduplicate as deduplicate,
+    )
+    from .deduplication import (
+        find_duplicates as find_duplicates,
+    )
+    from .intent_alignment import (
+        ActionAlignmentRecord as ActionAlignmentRecord,
+    )
+    from .intent_alignment import (
+        IntentAlignmentState as IntentAlignmentState,
+    )
+    from .intent_alignment import (
+        IntentAlignmentTracker as IntentAlignmentTracker,
+    )
+    from .intent_alignment import (
+        IntentProfile as IntentProfile,
+    )
+    from .interpolation import (
+        context_coverage as context_coverage,
+    )
+    from .interpolation import (
+        extract_placeholders as extract_placeholders,
+    )
+    from .interpolation import (
+        render_constitution as render_constitution,
+    )
+    from .interpolation import (
+        render_rule as render_rule,
+    )
+    from .interpolation import (
+        render_text as render_text,
+    )
+    from .interpolation import (
+        validate_context_schema as validate_context_schema,
+    )
+    from .memoization import (
+        CacheStats as CacheStats,
+    )
+    from .memoization import (
+        MemoizedConstitution as MemoizedConstitution,
+    )
+    from .metrics import (
+        AuditEntry as AuditEntry,
+    )
+    from .metrics import (
+        AuditLedger as AuditLedger,
+    )
+    from .metrics import (
+        GovernanceCostModel as GovernanceCostModel,
+    )
+    from .metrics import (
+        GovernanceEvent as GovernanceEvent,
+    )
+    from .metrics import (
+        GovernanceForecaster as GovernanceForecaster,
+    )
+    from .metrics import (
+        GovernanceMetrics as GovernanceMetrics,
+    )
+    from .metrics import (
+        GovernanceSession as GovernanceSession,
+    )
+    from .metrics import (
+        GovernanceSLO as GovernanceSLO,
+    )
+    from .metrics import (
+        RuleEffectiveness as RuleEffectiveness,
+    )
+    from .metrics import (
+        create_governance_event as create_governance_event,
+    )
+    from .obligation_engine import (
+        ObligationEngine as ObligationEngine,
+    )
+    from .obligation_engine import (
+        ObligationRecord as ObligationRecord,
+    )
+    from .obligation_engine import (
+        ObligationSpec as ObligationSpec,
+    )
+    from .obligation_engine import (
+        ObligationStatus as ObligationStatus,
+    )
+    from .routing import GovernanceRouter as GovernanceRouter
+    from .snapshot import (
+        ConstitutionSnapshot as ConstitutionSnapshot,
+    )
+    from .snapshot import (
+        capture_snapshot as capture_snapshot,
+    )
+    from .templates import ConstitutionBuilder as ConstitutionBuilder
+    from .versioning import (
+        ChangelogEntry as ChangelogEntry,
+    )
+    from .versioning import (
+        GovernanceChangelog as GovernanceChangelog,
+    )
+    from .versioning import (
+        RuleSnapshot as RuleSnapshot,
+    )
+    from .weighted_policy import (
+        RulePenalty as RulePenalty,
+    )
+    from .weighted_policy import (
+        WeightedConstitution as WeightedConstitution,
+    )
+    from .weighted_policy import (
+        WeightedEvaluationResult as WeightedEvaluationResult,
+    )
 
 # ── Declarative lazy-load registry ────────────────────────────────────────────
 # Maps symbol_name → (module_name, domain).
@@ -104,6 +241,77 @@ from .weighted_policy import RulePenalty, WeightedConstitution, WeightedEvaluati
 #   analysis    — Quality analysis, simulation, compliance, reporting
 
 _LAZY_REGISTRY: dict[str, tuple[str, str]] = {
+    # ── core (lazy builders, ABAC, rendering, memoization) ────────────────
+    "EvaluationContext": ("abac", "core"),
+    "TIER_RESTRICTED": ("abac", "core"),
+    "TIER_STANDARD": ("abac", "core"),
+    "TIER_PRIVILEGED": ("abac", "core"),
+    "TIER_AUTONOMOUS": ("abac", "core"),
+    "CLASS_PUBLIC": ("abac", "core"),
+    "CLASS_INTERNAL": ("abac", "core"),
+    "CLASS_CONFIDENTIAL": ("abac", "core"),
+    "CLASS_PII": ("abac", "core"),
+    "CLASS_PHI": ("abac", "core"),
+    "CLASS_SECRET": ("abac", "core"),
+    "CLASS_TOP_SECRET": ("abac", "core"),
+    "REGION_EU": ("abac", "core"),
+    "REGION_US": ("abac", "core"),
+    "REGION_UK": ("abac", "core"),
+    "REGION_APAC": ("abac", "core"),
+    "REGION_GLOBAL": ("abac", "core"),
+    "RISK_LOW": ("abac", "core"),
+    "RISK_MEDIUM": ("abac", "core"),
+    "RISK_HIGH": ("abac", "core"),
+    "RISK_CRITICAL": ("abac", "core"),
+    "ConstitutionBuilder": ("templates", "core"),
+    "ConstitutionSnapshot": ("snapshot", "core"),
+    "capture_snapshot": ("snapshot", "core"),
+    "render_text": ("interpolation", "core"),
+    "render_rule": ("interpolation", "core"),
+    "render_constitution": ("interpolation", "core"),
+    "extract_placeholders": ("interpolation", "core"),
+    "context_coverage": ("interpolation", "core"),
+    "validate_context_schema": ("interpolation", "core"),
+    "MemoizedConstitution": ("memoization", "core"),
+    "CacheStats": ("memoization", "core"),
+    "WeightedConstitution": ("weighted_policy", "core"),
+    "WeightedEvaluationResult": ("weighted_policy", "core"),
+    "RulePenalty": ("weighted_policy", "core"),
+    "BoundaryViolation": ("boundaries", "enforcement"),
+    "PolicyBoundary": ("boundaries", "enforcement"),
+    "PolicyBoundarySet": ("boundaries", "enforcement"),
+    "GovernanceRouter": ("routing", "enforcement"),
+    "ObligationEngine": ("obligation_engine", "enforcement"),
+    "ObligationSpec": ("obligation_engine", "enforcement"),
+    "ObligationRecord": ("obligation_engine", "enforcement"),
+    "ObligationStatus": ("obligation_engine", "enforcement"),
+    "RuleSnapshot": ("versioning", "lifecycle"),
+    "ChangelogEntry": ("versioning", "lifecycle"),
+    "GovernanceChangelog": ("versioning", "lifecycle"),
+    "CommitmentRatioTracker": ("autonomy_ratio", "monitoring"),
+    "CommitmentRatioState": ("autonomy_ratio", "monitoring"),
+    "ActionCommitment": ("autonomy_ratio", "monitoring"),
+    "classify_action": ("autonomy_ratio", "monitoring"),
+    "IntentAlignmentTracker": ("intent_alignment", "monitoring"),
+    "IntentProfile": ("intent_alignment", "monitoring"),
+    "ActionAlignmentRecord": ("intent_alignment", "monitoring"),
+    "IntentAlignmentState": ("intent_alignment", "monitoring"),
+    "GovernanceEvent": ("metrics", "monitoring"),
+    "create_governance_event": ("metrics", "monitoring"),
+    "GovernanceMetrics": ("metrics", "monitoring"),
+    "GovernanceSLO": ("metrics", "monitoring"),
+    "GovernanceCostModel": ("metrics", "monitoring"),
+    "GovernanceForecaster": ("metrics", "monitoring"),
+    "GovernanceSession": ("metrics", "monitoring"),
+    "RuleEffectiveness": ("metrics", "monitoring"),
+    "AuditEntry": ("metrics", "monitoring"),
+    "AuditLedger": ("metrics", "monitoring"),
+    "find_duplicates": ("deduplication", "analysis"),
+    "deduplicate": ("deduplication", "analysis"),
+    "DuplicationReport": ("deduplication", "analysis"),
+    "ExactDuplicateGroup": ("deduplication", "analysis"),
+    "SubsetRedundancy": ("deduplication", "analysis"),
+    "NearDuplicatePair": ("deduplication", "analysis"),
     # ── editor ─────────────────────────────────────────────────────────
     "RuleDraft": ("editor", "lifecycle"),
     "ConstitutionDiff": ("editor", "lifecycle"),
@@ -439,7 +647,13 @@ def __getattr__(name: str) -> object:
     if mod is None:
         mod = importlib.import_module(f".{module_name}", __name__)
         _MODULE_CACHE[module_name] = mod
-    return getattr(mod, name)
+    value = getattr(mod, name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
 
 
 def modules_by_domain(domain: str | None = None) -> dict[str, list[str]]:
@@ -462,76 +676,6 @@ __all__ = [
     "classify_action_intent",
     "score_context_risk",
     "governance_decision_report",
-    "render_text",
-    "render_rule",
-    "render_constitution",
-    "extract_placeholders",
-    "context_coverage",
-    "validate_context_schema",
-    "MemoizedConstitution",
-    "CacheStats",
-    "CommitmentRatioTracker",
-    "CommitmentRatioState",
-    "ActionCommitment",
-    "classify_action",
-    "ObligationEngine",
-    "ObligationSpec",
-    "ObligationRecord",
-    "ObligationStatus",
-    "IntentAlignmentTracker",
-    "IntentProfile",
-    "ActionAlignmentRecord",
-    "IntentAlignmentState",
-    "WeightedConstitution",
-    "WeightedEvaluationResult",
-    "RulePenalty",
-    "EvaluationContext",
-    "TIER_RESTRICTED",
-    "TIER_STANDARD",
-    "TIER_PRIVILEGED",
-    "TIER_AUTONOMOUS",
-    "CLASS_PUBLIC",
-    "CLASS_INTERNAL",
-    "CLASS_CONFIDENTIAL",
-    "CLASS_PII",
-    "CLASS_PHI",
-    "CLASS_SECRET",
-    "CLASS_TOP_SECRET",
-    "REGION_EU",
-    "REGION_US",
-    "REGION_UK",
-    "REGION_APAC",
-    "REGION_GLOBAL",
-    "RISK_LOW",
-    "RISK_MEDIUM",
-    "RISK_HIGH",
-    "RISK_CRITICAL",
-    "find_duplicates",
-    "deduplicate",
-    "DuplicationReport",
-    "ExactDuplicateGroup",
-    "SubsetRedundancy",
-    "NearDuplicatePair",
-    "GovernanceEvent",
-    "create_governance_event",
-    "GovernanceMetrics",
-    "GovernanceSLO",
-    "GovernanceCostModel",
-    "GovernanceForecaster",
-    "GovernanceSession",
-    "RuleEffectiveness",
-    "AuditEntry",
-    "AuditLedger",
-    "BoundaryViolation",
-    "PolicyBoundary",
-    "PolicyBoundarySet",
-    "GovernanceRouter",
-    "ConstitutionSnapshot",
-    "capture_snapshot",
-    "ConstitutionBuilder",
-    "RuleSnapshot",
-    "ChangelogEntry",
-    "GovernanceChangelog",
     "_NEGATIVE_VERBS_LIST",
     "_NEGATIVE_VERBS_RE",
     "_POSITIVE_VERBS_SET",

@@ -16,6 +16,8 @@ from acgs_lite.constitution import Severity
 if TYPE_CHECKING:
     from .models import ValidationResult
 
+_SEVERITY_VALUES: frozenset[str] = frozenset(s.value for s in Severity)
+
 
 @dataclass(frozen=True)
 class BatchValidationResult:
@@ -83,6 +85,7 @@ class BatchValidationMixin:
         *,
         agent_id: str = "anonymous",
         context: dict[str, Any] | None = None,
+        strict: bool | None = None,
     ) -> ValidationResult:
         raise NotImplementedError  # pragma: no cover
 
@@ -92,13 +95,13 @@ class BatchValidationMixin:
         *,
         agent_id: str = "anonymous",
     ) -> list[ValidationResult]:
-        """Validate multiple actions without raising in strict mode."""
-        old_strict = self.strict
-        self.strict = False
-        try:
-            return [self.validate(a, agent_id=agent_id) for a in actions]
-        finally:
-            self.strict = old_strict
+        """Validate multiple actions without raising in strict mode.
+
+        Uses the per-call ``strict=False`` override instead of mutating
+        ``self.strict``, so concurrent calls on a shared engine remain
+        thread-safe and never observe a fail-open strictness window.
+        """
+        return [self.validate(a, agent_id=agent_id, strict=False) for a in actions]
 
     def validate_batch_report(
         self,
@@ -143,13 +146,15 @@ class BatchValidationMixin:
             else:
                 action, ctx = item, {}
             try:
-                individual.append(self.validate(action, agent_id=agent_id, context=ctx))
+                individual.append(
+                    self.validate(action, agent_id=agent_id, context=ctx, strict=False)
+                )
             except ConstitutionalViolationError as exc:
-                # Rust hot-path raises for CRITICAL regardless of strict mode;
+                # HALT workflow actions raise regardless of strict mode;
                 # construct a synthetic ValidationResult so the batch never raises.
                 _sev = (
                     Severity(exc.severity)
-                    if exc.severity in {s.value for s in Severity}
+                    if exc.severity in _SEVERITY_VALUES
                     else Severity.CRITICAL
                 )
                 _viol = Violation(

@@ -697,7 +697,7 @@ class GovernedAgent:
 
                     backend = InMemoryCDPBackend()
 
-            audit_entries = list(self.audit_log._entries)
+            audit_entries = self.audit_log.entries
             action = (context or {}).get("governance_action", "")
 
             # Run compliance checker to derive runtime obligations (Phase 2)

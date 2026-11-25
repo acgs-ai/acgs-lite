@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Protocol
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -22,6 +23,7 @@ from .analytics import _KW_NEGATIVE_RE, _NEGATIVE_VERBS_RE, _POSITIVE_VERBS_SET
 # ── module-level helpers ────────────────────────────────────────────────────
 
 
+@lru_cache(maxsize=512)
 def _parse_iso(s: str) -> datetime:
     """Parse an ISO-8601 date or datetime string into a :class:`datetime`.
 
@@ -30,6 +32,12 @@ def _parse_iso(s: str) -> datetime:
     if len(s) == 10 and s[4] == "-":
         s = s + "T00:00:00"
     return datetime.fromisoformat(s)
+
+
+@lru_cache(maxsize=1024)
+def _kw_has_negative(kw_lower: str) -> bool:
+    """Return True if a lowercased rule keyword contains a negative-verb marker."""
+    return _KW_NEGATIVE_RE.search(kw_lower) is not None
 
 
 def _cosine_sim(a: list[float], b: list[float]) -> float | None:
@@ -225,6 +233,7 @@ class Rule(BaseModel):
 
     # Cached derived values (set in model_post_init, never mutated after)
     _kw_lower: list[str] = []
+    _kw_pairs: list[tuple[str, bool]] = []
     _compiled_pats: list[re.Pattern[str]] = []
 
     @model_validator(mode="before")
@@ -293,7 +302,13 @@ class Rule(BaseModel):
 
     def model_post_init(self, __context: Any) -> None:
         """Pre-compute derived values to avoid repeated work per match() call."""
-        object.__setattr__(self, "_kw_lower", [k.lower() for k in self.keywords])
+        kw_lower = [k.lower() for k in self.keywords]
+        object.__setattr__(self, "_kw_lower", kw_lower)
+        object.__setattr__(
+            self,
+            "_kw_pairs",
+            [(k, _kw_has_negative(k)) for k in kw_lower],
+        )
         object.__setattr__(
             self,
             "_compiled_pats",
@@ -311,13 +326,17 @@ class Rule(BaseModel):
         if not self.enabled:
             return False
 
-        for kw_lower in self._kw_lower:
+        suppress_general = has_pos and not has_neg
+        for kw_lower, kw_has_neg in self._kw_pairs:
             if kw_lower in text_lower:
-                if has_pos and not has_neg and not _KW_NEGATIVE_RE.search(kw_lower):
+                if suppress_general and not kw_has_neg:
                     continue
                 return True
 
-        return any(pat.search(text_lower) for pat in self._compiled_pats)
+        for pat in self._compiled_pats:  # noqa: SIM110
+            if pat.search(text_lower):
+                return True
+        return False
 
     def match_detail(self, text: str) -> dict[str, Any]:
         """exp93: Return structured match information for governance consumers.
@@ -363,9 +382,10 @@ class Rule(BaseModel):
         has_pos = (not has_neg) and any(w in _POSITIVE_VERBS_SET for w in text_lower.split()[:4])
 
         # Check keywords
-        for kw_lower in self._kw_lower:
+        suppress_general = has_pos and not has_neg
+        for kw_lower, kw_has_neg in self._kw_pairs:
             if kw_lower in text_lower:
-                if has_pos and not has_neg and not _KW_NEGATIVE_RE.search(kw_lower):
+                if suppress_general and not kw_has_neg:
                     continue
                 return {
                     "matched": True,
@@ -678,6 +698,12 @@ class Rule(BaseModel):
         has_pos = (not has_neg) and any(w in _POSITIVE_VERBS_SET for w in text_lower.split()[:4])
         return self.matches_with_signals(text_lower, has_neg, has_pos)
 
+    def _is_valid_at_dt(self, ts: datetime) -> bool:
+        """Return True if this rule is temporally active at pre-parsed *ts*."""
+        if self.valid_from and ts < _parse_iso(self.valid_from):
+            return False
+        return not (self.valid_until and ts > _parse_iso(self.valid_until))
+
     def is_valid_at(self, timestamp: str) -> bool:
         """exp137: Return True if this rule is temporally active at *timestamp*.
 
@@ -700,11 +726,7 @@ class Rule(BaseModel):
             rule.is_valid_at("2024-12-31")   # → False  (before valid_from)
             rule.is_valid_at("2026-01-01")   # → False  (after valid_until)
         """
-        ts = _parse_iso(timestamp)
-
-        if self.valid_from and ts < _parse_iso(self.valid_from):
-            return False
-        return not (self.valid_until and ts > _parse_iso(self.valid_until))
+        return self._is_valid_at_dt(_parse_iso(timestamp))
 
     def cosine_similarity(self, other: Rule) -> float | None:
         """exp138: Cosine similarity between this rule and *other* using stored embeddings.
