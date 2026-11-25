@@ -1469,40 +1469,6 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 )
                 if _result is not None:
                     return self._post_dispatch_result(_result, action, strict=strict)
-        elif (
-            _rv is not None
-            and _fast_records is not None
-            and context
-            and strict
-            and not self.custom_validators  # M7: see custom_validators guard above
-        ):
-            _ctx_pairs = [
-                (k, v)
-                for k, v in context.items()
-                if isinstance(v, str) and k in ("action_detail", "action_description")
-            ]
-            if not _ctx_pairs:
-                _decision, _data = _rv.validate_hot(action.lower())
-                _result = self._validate_rust_metadata_context(
-                    action,
-                    _decision,
-                    _data,
-                    _rule_excs,
-                    _fast_records,
-                    _is_noop,
-                )
-                if _result is not None:
-                    return self._post_dispatch_result(_result, action, strict=strict)
-            else:
-                _result = self._validate_rust_full(
-                    action,
-                    strict,
-                    _ctx_pairs,
-                    _rule_excs,
-                    _fast_records,
-                )
-                if _result is not None:
-                    return self._post_dispatch_result(_result, action, strict=strict)
         start = time.perf_counter()
         violations = None
         action_trimmed = action[:500]

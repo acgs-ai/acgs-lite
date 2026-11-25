@@ -48,6 +48,36 @@ class GovernanceMatcherMixin:
     ) -> ValidationResult:
         raise NotImplementedError
 
+    def _decode_rust_bitmask(
+        self,
+        bitmask: int,
+        action_200: str,
+    ) -> tuple[list[Violation], Violation | None, bool]:
+        """Decode a fired rule bitmask into Violations, first blocking violation, and HALT flag."""
+        vlist: list[Violation] = []
+        blocking_violation: Violation | None = None
+        has_halt = False
+        rule_data = self._rule_data
+        wa_lookup = self._rule_id_to_wa
+        while bitmask:
+            idx = (bitmask & -bitmask).bit_length() - 1
+            bitmask &= bitmask - 1
+            rd = rule_data[idx]
+            violation = Violation(rd[0], rd[1], rd[2], action_200, rd[4])
+            vlist.append(violation)
+            # Exclude WARN and HALT from the immediate-raise path;
+            # HALT is handled by _post_dispatch_result with correct enforcement_action.
+            vwa = wa_lookup.get(rd[0], ViolationAction.BLOCK)
+            if vwa is ViolationAction.HALT:
+                has_halt = True
+            elif (
+                blocking_violation is None
+                and violation.severity.blocks()
+                and vwa is not ViolationAction.WARN
+            ):
+                blocking_violation = violation
+        return vlist, blocking_violation, has_halt
+
     def _validate_rust_no_context(
         self,
         action: str,
@@ -98,25 +128,8 @@ class GovernanceMatcherMixin:
             _v = Violation(_rd[0], _rd[1], _rd[2], action[:200], _rd[4])
             return self._new_fast_result(valid=False, violations=[_v], action=action)
         elif decision == _RUST_DENY:
-            _bm = data
             _a200 = action[:200]
-            _vlist: list[Violation] = []
-            _bv: Violation | None = None
-            _has_halt = False
-            _wa_lkup = self._rule_id_to_wa
-            while _bm:
-                _idx = (_bm & -_bm).bit_length() - 1
-                _bm &= _bm - 1
-                _rd = self._rule_data[_idx]
-                _v = Violation(_rd[0], _rd[1], _rd[2], _a200, _rd[4])
-                _vlist.append(_v)
-                # Exclude WARN and HALT from the immediate-raise path;
-                # HALT is handled by _post_dispatch_result with correct enforcement_action.
-                _vwa = _wa_lkup.get(_rd[0], ViolationAction.BLOCK)
-                if _vwa is ViolationAction.HALT:
-                    _has_halt = True
-                elif _bv is None and _v.severity.blocks() and _vwa is not ViolationAction.WARN:
-                    _bv = _v
+            _vlist, _bv, _has_halt = self._decode_rust_bitmask(data, _a200)
             fast_records.append(None)
             # Only raise early in strict mode when no HALT rule matched (HALT takes precedence).
             if _bv is not None and strict and not _has_halt:
@@ -197,24 +210,7 @@ class GovernanceMatcherMixin:
                 _unknown_critical = True
         if _merged_bm or _unknown_critical:
             _a200 = action[:200]
-            _vlist: list[Violation] = []
-            _bv_ctx: Violation | None = None
-            _has_halt = False
-            while _merged_bm:
-                _idx = (_merged_bm & -_merged_bm).bit_length() - 1
-                _merged_bm &= _merged_bm - 1
-                _rd = self._rule_data[_idx]
-                _v = Violation(_rd[0], _rd[1], _rd[2], _a200, _rd[4])
-                _vlist.append(_v)
-                _vwa_ctx = self._rule_id_to_wa.get(_rd[0], ViolationAction.BLOCK)
-                if _vwa_ctx is ViolationAction.HALT:
-                    _has_halt = True
-                elif (
-                    _bv_ctx is None
-                    and _v.severity.blocks()
-                    and _vwa_ctx is not ViolationAction.WARN
-                ):
-                    _bv_ctx = _v
+            _vlist, _bv_ctx, _has_halt = self._decode_rust_bitmask(_merged_bm, _a200)
             if _unknown_critical:
                 _unk = Violation(
                     "UNKNOWN",
@@ -272,26 +268,8 @@ class GovernanceMatcherMixin:
                 action=action[:200],
             )
         elif decision == _RUST_DENY:
-            _bm = data
             _a200 = action[:200]
-            _vlist: list[Violation] = []
-            _bv_meta: Violation | None = None
-            _has_halt = False
-            while _bm:
-                _idx = (_bm & -_bm).bit_length() - 1
-                _bm &= _bm - 1
-                _rd = self._rule_data[_idx]
-                _v = Violation(_rd[0], _rd[1], _rd[2], _a200, _rd[4])
-                _vlist.append(_v)
-                _vwa_meta = self._rule_id_to_wa.get(_rd[0], ViolationAction.BLOCK)
-                if _vwa_meta is ViolationAction.HALT:
-                    _has_halt = True
-                elif (
-                    _bv_meta is None
-                    and _v.severity.blocks()
-                    and _vwa_meta is not ViolationAction.WARN
-                ):
-                    _bv_meta = _v
+            _vlist, _bv_meta, _has_halt = self._decode_rust_bitmask(data, _a200)
             if is_noop:
                 fast_records.append(None)
             # strict=True is guaranteed at this call site (outer validate() guard).
@@ -398,171 +376,73 @@ class GovernanceMatcherMixin:
         violations: list[Violation] | None,
     ) -> list[Violation] | None:
         action_200 = action[:200]
-        if positive_verb_mode:
-            fired = 0
-            _hit_anchors = 0
-            for _end_idx, _payload in self._ac_iter(text_lower):
-                _ptype = _payload[0]
-                if _ptype == 0:
-                    for rule_idx, kw_has_neg in _payload[1]:
-                        if not kw_has_neg:
-                            continue
-                        _bit = 1 << rule_idx
-                        if fired & _bit:
-                            continue
-                        fired |= _bit
-                        rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                        if strict and is_crit:
-                            _e_src = self._rule_excs[rule_idx]
-                            raise ConstitutionalViolationError(
-                                str(_e_src),
-                                rule_id=_e_src.rule_id,
-                                severity=_e_src.severity,
-                                action=action_200,
-                            )
-                        if violations is None:
-                            violations = []
-                        violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-                elif _ptype == 1:
-                    _hit_anchors |= 1 << _payload[1]
-                else:
-                    _hit_anchors |= 1 << _payload[2]
-                    for rule_idx, kw_has_neg in _payload[1]:
-                        if not kw_has_neg:
-                            continue
-                        _bit = 1 << rule_idx
-                        if fired & _bit:
-                            continue
-                        fired |= _bit
-                        rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                        if strict and is_crit:
-                            _e_src = self._rule_excs[rule_idx]
-                            raise ConstitutionalViolationError(
-                                str(_e_src),
-                                rule_id=_e_src.rule_id,
-                                severity=_e_src.severity,
-                                action=action_200,
-                            )
-                        if violations is None:
-                            violations = []
-                        violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-            if _hit_anchors or self._no_anchor_patterns:
-                if _hit_anchors:
-                    _tmp_a = _hit_anchors
-                    while _tmp_a:
-                        _lsb_a = _tmp_a & -_tmp_a
-                        _ai = _lsb_a.bit_length() - 1
-                        _tmp_a ^= _lsb_a
-                        for rule_idx, pat in self._pat_anchor_dispatch[_ai][1]:
-                            _bit = 1 << rule_idx
-                            if not (fired & _bit) and pat.search(text_lower):
-                                fired |= _bit
-                                rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                                if strict and is_crit:
-                                    _e_src = self._rule_excs[rule_idx]
-                                    raise ConstitutionalViolationError(
-                                        str(_e_src),
-                                        rule_id=_e_src.rule_id,
-                                        severity=_e_src.severity,
-                                        action=action_200,
-                                    )
-                                if violations is None:
-                                    violations = []
-                                violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-                for rule_idx, pat in self._no_anchor_patterns:
-                    _bit = 1 << rule_idx
-                    if not (fired & _bit) and pat.search(text_lower):
-                        fired |= _bit
-                        rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                        if strict and is_crit:
-                            _e_src = self._rule_excs[rule_idx]
-                            raise ConstitutionalViolationError(
-                                str(_e_src),
-                                rule_id=_e_src.rule_id,
-                                severity=_e_src.severity,
-                                action=action_200,
-                            )
-                        if violations is None:
-                            violations = []
-                        violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-            return violations
         fired = 0
-        _hit_anchors = 0
-        for _end_idx, _payload in self._ac_iter(text_lower):
-            _ptype = _payload[0]
-            if _ptype == 0:
-                for rule_idx, _kw_has_neg in _payload[1]:
-                    _bit = 1 << rule_idx
-                    if fired & _bit:
-                        continue
-                    fired |= _bit
-                    rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                    if strict and is_crit:
-                        _e_src = self._rule_excs[rule_idx]
-                        raise ConstitutionalViolationError(
-                            str(_e_src),
-                            rule_id=_e_src.rule_id,
-                            severity=_e_src.severity,
-                            action=action_200,
-                        )
-                    if violations is None:
-                        violations = []
-                    violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-            elif _ptype == 1:
-                _hit_anchors |= 1 << _payload[1]
-            else:
-                _hit_anchors |= 1 << _payload[2]
-                for rule_idx, _kw_has_neg in _payload[1]:
-                    _bit = 1 << rule_idx
-                    if fired & _bit:
-                        continue
-                    fired |= _bit
-                    rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                    if strict and is_crit:
-                        _e_src = self._rule_excs[rule_idx]
-                        raise ConstitutionalViolationError(
-                            str(_e_src),
-                            rule_id=_e_src.rule_id,
-                            severity=_e_src.severity,
-                            action=action_200,
-                        )
-                    if violations is None:
-                        violations = []
-                    violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-        if _hit_anchors or self._no_anchor_patterns:
-            if _hit_anchors:
-                _tmp_a = _hit_anchors
-                while _tmp_a:
-                    _lsb_a = _tmp_a & -_tmp_a
-                    _ai = _lsb_a.bit_length() - 1
-                    _tmp_a ^= _lsb_a
-                    for rule_idx, pat in self._pat_anchor_dispatch[_ai][1]:
-                        _bit = 1 << rule_idx
-                        if not (fired & _bit) and pat.search(text_lower):
-                            fired |= _bit
-                            rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
+        hit_anchors = 0
+        rule_data = self._rule_data
+        rule_excs = self._rule_excs
+
+        for _end_idx, payload in self._ac_iter(text_lower):
+            ptype = payload[0]
+            if ptype == 1:
+                hit_anchors |= 1 << payload[1]
+                continue
+            if ptype == 2:
+                hit_anchors |= 1 << payload[2]
+            for rule_idx, kw_has_neg in payload[1]:
+                if positive_verb_mode and not kw_has_neg:
+                    continue
+                bit = 1 << rule_idx
+                if fired & bit:
+                    continue
+                fired |= bit
+                rid, rtxt, rsev, _, rcat, is_crit, _ = rule_data[rule_idx]
+                if strict and is_crit:
+                    e_src = rule_excs[rule_idx]
+                    raise ConstitutionalViolationError(
+                        str(e_src),
+                        rule_id=e_src.rule_id,
+                        severity=e_src.severity,
+                        action=action_200,
+                    )
+                if violations is None:
+                    violations = []
+                violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
+
+        if hit_anchors or self._no_anchor_patterns:
+            if hit_anchors:
+                tmp_a = hit_anchors
+                pat_dispatch = self._pat_anchor_dispatch
+                while tmp_a:
+                    lsb_a = tmp_a & -tmp_a
+                    ai = lsb_a.bit_length() - 1
+                    tmp_a ^= lsb_a
+                    for rule_idx, pat in pat_dispatch[ai][1]:
+                        bit = 1 << rule_idx
+                        if not (fired & bit) and pat.search(text_lower):
+                            fired |= bit
+                            rid, rtxt, rsev, _, rcat, is_crit, _ = rule_data[rule_idx]
                             if strict and is_crit:
-                                _e_src = self._rule_excs[rule_idx]
+                                e_src = rule_excs[rule_idx]
                                 raise ConstitutionalViolationError(
-                                    str(_e_src),
-                                    rule_id=_e_src.rule_id,
-                                    severity=_e_src.severity,
+                                    str(e_src),
+                                    rule_id=e_src.rule_id,
+                                    severity=e_src.severity,
                                     action=action_200,
                                 )
                             if violations is None:
                                 violations = []
                             violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
             for rule_idx, pat in self._no_anchor_patterns:
-                _bit = 1 << rule_idx
-                if not (fired & _bit) and pat.search(text_lower):
-                    fired |= _bit
-                    rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
+                bit = 1 << rule_idx
+                if not (fired & bit) and pat.search(text_lower):
+                    fired |= bit
+                    rid, rtxt, rsev, _, rcat, is_crit, _ = rule_data[rule_idx]
                     if strict and is_crit:
-                        _e_src = self._rule_excs[rule_idx]
+                        e_src = rule_excs[rule_idx]
                         raise ConstitutionalViolationError(
-                            str(_e_src),
-                            rule_id=_e_src.rule_id,
-                            severity=_e_src.severity,
+                            str(e_src),
+                            rule_id=e_src.rule_id,
+                            severity=e_src.severity,
                             action=action_200,
                         )
                     if violations is None:

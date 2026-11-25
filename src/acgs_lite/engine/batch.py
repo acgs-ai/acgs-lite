@@ -144,7 +144,7 @@ class BatchValidationMixin:
             if isinstance(item, tuple):
                 action, ctx = item[0], item[1]
             else:
-                action, ctx = item, {}
+                action, ctx = item, None
             try:
                 individual.append(
                     self.validate(action, agent_id=agent_id, context=ctx, strict=False)
@@ -181,17 +181,15 @@ class BatchValidationMixin:
         critical_ids: set[str] = set()
 
         for r in individual:
-            if not r.violations:
+            if not r.violations and not r.warnings:
                 allowed += 1
+            elif r.violations and (not r.valid or any(v.severity.blocks() for v in r.violations)):
+                denied += 1
+                for v in r.violations:
+                    if v.severity.blocks() or not r.valid:
+                        critical_ids.add(v.rule_id)
             else:
-                has_blocking = any(v.severity.blocks() for v in r.violations)
-                if has_blocking:
-                    denied += 1
-                    for v in r.violations:
-                        if v.severity.blocks():
-                            critical_ids.add(v.rule_id)
-                else:
-                    escalated += 1
+                escalated += 1
 
         compliance_rate = allowed / total if total > 0 else 1.0
 

@@ -256,10 +256,12 @@ class Rule(BaseModel):
                 severity_val = Severity(severity_val)
             except ValueError:
                 severity_val = Severity.HIGH
-        data["workflow_action"] = (
-            ViolationAction.BLOCK if severity_val.blocks() else ViolationAction.WARN
-        )
-        return data
+        return {
+            **data,
+            "workflow_action": (
+                ViolationAction.BLOCK if severity_val.blocks() else ViolationAction.WARN
+            ),
+        }
 
     @field_validator("workflow_action", mode="before")
     @classmethod

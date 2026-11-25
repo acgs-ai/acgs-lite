@@ -31,6 +31,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from acgs_lite._compat import constant_time_compare
 from acgs_lite.audit import AuditEntry, AuditLog
 from acgs_lite.constitution import Constitution
 from acgs_lite.engine import GovernanceEngine, ValidationResult
@@ -354,7 +355,7 @@ class GitHubWebhookHandler:
 
         expected = hmac.new(self._secret, payload, hashlib.sha256).hexdigest()
         received = signature[len("sha256=") :]
-        return hmac.compare_digest(expected, received)
+        return constant_time_compare(expected, received)
 
     async def handle(self, request: Any) -> Any:
         """Handle an incoming GitHub webhook request.

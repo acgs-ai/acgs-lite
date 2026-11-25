@@ -1264,3 +1264,324 @@ class TestLazySubmoduleAndStreamingHardening:
         # Unknown attribute still raises AttributeError.
         with pytest.raises(AttributeError):
             srv.__getattr__("nonexistent_server_router_xyz")
+
+
+# ── 8. Constant-time auth, input validation, and batch/rule edge cases ───────
+
+
+class TestConstantTimeAuthAndInputHardening:
+    def test_constant_time_compare_handles_ascii_unicode_empty_and_surrogates(self) -> None:
+        from acgs_lite._compat import constant_time_compare
+
+        assert constant_time_compare("", "") is True
+        assert constant_time_compare("secret-key", "secret-key") is True
+        assert constant_time_compare("secret-key", "secret-key-2") is False
+        assert constant_time_compare("clé-secrète", "clé-secrète") is True
+        assert constant_time_compare("clé-secrète", "ascii-key") is False
+        assert constant_time_compare("\ud800bad", "\ud800bad") is True
+        assert constant_time_compare("\ud800bad", "ascii") is False
+
+    @staticmethod
+    def _raw_asgi_post(
+        app: Any,
+        path: str,
+        payload: dict[str, Any],
+        headers: list[tuple[bytes, bytes]],
+    ) -> tuple[int, dict[str, Any]]:
+        import asyncio
+
+        body = json.dumps(payload).encode("utf-8")
+        req_headers = [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode("ascii")),
+            *headers,
+        ]
+        status_code = 0
+        chunks: list[bytes] = []
+
+        async def _run() -> tuple[int, dict[str, Any]]:
+            nonlocal status_code
+            sent = False
+            scope = {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "http",
+                "path": path,
+                "raw_path": path.encode("ascii"),
+                "query_string": b"",
+                "headers": req_headers,
+            }
+
+            async def _receive() -> dict[str, Any]:
+                nonlocal sent
+                if not sent:
+                    sent = True
+                    return {"type": "http.request", "body": body, "more_body": False}
+                return {"type": "http.disconnect"}
+
+            async def _send(message: dict[str, Any]) -> None:
+                nonlocal status_code
+                if message["type"] == "http.response.start":
+                    status_code = int(message["status"])
+                elif message["type"] == "http.response.body":
+                    chunks.append(message.get("body", b""))
+
+            await app(scope, _receive, _send)
+            raw = b"".join(chunks)
+            return status_code, json.loads(raw.decode("utf-8")) if raw else {}
+
+        return asyncio.run(_run())
+
+    def test_server_rejects_non_ascii_api_key_with_401_and_non_string_action_with_422(
+        self,
+    ) -> None:
+        pytest.importorskip("fastapi")
+        from fastapi.testclient import TestClient
+
+        from acgs_lite.server import create_governance_app
+
+        app = create_governance_app(api_key="test-key", require_auth=True)
+
+        # Raw Latin-1 non-ASCII X-API-Key header must fail closed with 401 (never TypeError -> 500).
+        status_auth, _ = self._raw_asgi_post(
+            app,
+            "/validate",
+            {"action": "check status"},
+            [(b"x-api-key", b"cl\xe9-invalide")],
+        )
+        assert status_auth == 401
+
+        client = TestClient(app)
+        # Non-string 'action' values must return 422 (never AttributeError -> 500).
+        for bad_action in (None, 123, ["rm -rf"], {"cmd": "ls"}, True):
+            resp = client.post(
+                "/validate",
+                json={"action": bad_action},
+                headers={"X-API-Key": "test-key"},
+            )
+            assert resp.status_code == 422, f"expected 422 for action={bad_action!r}"
+
+    def test_lifecycle_router_rejects_non_ascii_api_key_with_401(self) -> None:
+        pytest.importorskip("fastapi")
+        from fastapi import FastAPI
+
+        from acgs_lite.constitution.lifecycle_router import create_lifecycle_router
+
+        app = FastAPI()
+        app.include_router(create_lifecycle_router(api_key="lifecycle-secret"))
+
+        status_code, body = self._raw_asgi_post(
+            app,
+            "/constitution/lifecycle/draft",
+            {"tenant_id": "acme", "name": "draft-1"},
+            [(b"x-api-key", b"cl\xe9-non-ascii"), (b"x-actor-id", b"alice")],
+        )
+        assert status_code == 401
+        assert body["detail"]["code"] == "AUTH_REQUIRED"
+
+    def test_telegram_webhook_rejects_non_ascii_token_and_boolean_chat_id(self) -> None:
+        pytest.importorskip("fastapi")
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from acgs_lite.integrations.telegram_webhook import create_telegram_webhook_router
+
+        engine = GovernanceEngine(
+            Constitution.default(), strict=False, warmup=False, freeze_gc=False
+        )
+        app = FastAPI()
+        app.include_router(
+            create_telegram_webhook_router(
+                engine_getter=lambda: engine,
+                webhook_path_secret="hook-secret",
+                secret_token="tg-secret",
+            )
+        )
+
+        # Raw Latin-1 non-ASCII secret header must return 401 rather than crashing with TypeError.
+        status_bad_tok, _ = self._raw_asgi_post(
+            app,
+            "/telegram/webhook/hook-secret",
+            {"message": {"chat": {"id": 42}, "text": "hello"}},
+            [(b"x-telegram-bot-api-secret-token", b"jeton-invalide-\xe9")],
+        )
+        assert status_bad_tok == 401
+
+        client = TestClient(app)
+        # Boolean chat.id (True is an int subclass in Python) must be ignored safely.
+        resp_bool_chat = client.post(
+            "/telegram/webhook/hook-secret",
+            json={"message": {"chat": {"id": True}, "text": "hello"}},
+            headers={"X-Telegram-Bot-Api-Secret-Token": "tg-secret"},
+        )
+        assert resp_bool_chat.status_code == 200
+        assert resp_bool_chat.json() == {"ok": True}
+
+    def test_github_and_autonoma_signature_checks_reject_non_ascii_safely(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from acgs_lite.integrations.github import GitHubWebhookHandler
+
+        handler = GitHubWebhookHandler(webhook_secret="gh-secret", bot=None)  # type: ignore[arg-type]
+        assert handler.verify_signature(b'{"action":"opened"}', "sha256=invalide-é") is False
+
+        pytest.importorskip("fastapi")
+        pytest.importorskip("jwt")
+        from fastapi import HTTPException
+
+        from acgs_lite.autonoma import _verify_hmac
+
+        monkeypatch.setenv("AUTONOMA_SIGNING_SECRET", "autonoma-secret")
+        with pytest.raises(HTTPException) as exc_info:
+            _verify_hmac(b"{}", "signature-non-ascii-é")
+        assert exc_info.value.status_code == 401
+
+    def test_rule_model_validate_does_not_mutate_caller_dict(self) -> None:
+        raw: dict[str, Any] = {
+            "id": "R-NOMUT",
+            "text": "Warn only rule",
+            "severity": "medium",
+            "keywords": ["warnme"],
+        }
+        rule = Rule.model_validate(raw)
+        assert rule.workflow_action is ViolationAction.WARN
+        assert "workflow_action" not in raw
+
+    def test_validate_batch_report_fast_path_and_empty_batch(self) -> None:
+        rules = [
+            Rule(
+                id="B-HIGH",
+                text="Block danger",
+                severity=Severity.HIGH,
+                keywords=["danger"],
+            ),
+            Rule(
+                id="B-MED",
+                text="Warn caution",
+                severity=Severity.MEDIUM,
+                keywords=["caution"],
+            ),
+            Rule(
+                id="B-HALT",
+                text="Halt catastrophic",
+                severity=Severity.CRITICAL,
+                keywords=["catastrophic"],
+                workflow_action=ViolationAction.HALT,
+            ),
+        ]
+        engine = GovernanceEngine(
+            Constitution(name="batch-test", rules=rules),
+            strict=True,
+            warmup=False,
+            freeze_gc=False,
+        )
+
+        empty = engine.validate_batch_report([])
+        assert empty.total == 0
+        assert empty.compliance_rate == 1.0
+
+        report = engine.validate_batch_report(
+            [
+                "safe action",
+                "trigger danger now",
+                ("note caution here", {"source": "test"}),
+                "trigger catastrophic halt",
+            ]
+        )
+        assert report.total == 4
+        assert report.allowed == 1
+        assert report.denied == 2
+        assert report.escalated == 1
+        assert set(report.critical_rule_ids) == {"B-HIGH", "B-HALT"}
+
+    def test_rust_fast_path_falls_through_when_audit_metadata_present_with_context(self) -> None:
+        """Passing audit_metadata with context must bypass the Rust fast path cleanly."""
+        calls: list[str] = []
+
+        class _SpyRust:
+            def validate_hot(self, text: str) -> tuple[int, int]:
+                calls.append(f"hot:{text}")
+                return (0, 0)
+
+            def validate_full(self, text: str, pairs: Any) -> tuple[int, list[Any], bool]:
+                calls.append(f"full:{text}")
+                return (0, [], False)
+
+        const = Constitution(
+            name="meta-test",
+            rules=[Rule(id="M-1", text="Block bad", severity=Severity.HIGH, keywords=["bad"])],
+        )
+        engine = GovernanceEngine(const, strict=False, warmup=False, freeze_gc=False)
+        engine._rust_validator = _SpyRust()
+        hot = list(engine._hot)
+        hot[10] = engine._rust_validator
+        engine._hot = tuple(hot)
+
+        res = engine.validate(
+            "bad action",
+            context={"source": "probe"},
+            audit_metadata={"trace_id": "t-123"},
+            strict=False,
+        )
+        assert res.valid is False
+        assert calls == []
+
+        with pytest.raises(engine_core.ConstitutionalViolationError):
+            engine.validate(
+                "bad action",
+                context={"source": "probe"},
+                audit_metadata={"trace_id": "t-123"},
+                strict=True,
+            )
+        assert calls == []
+
+    def test_unified_python_ac_matcher_handles_positive_verb_and_anchors(self) -> None:
+        """Unified _validate_python_ac matches keywords, anchors, and no-anchor patterns identically."""
+        from acgs_lite.engine.matcher import _HAS_AHO
+
+        const = Constitution(
+            name="ac-parity",
+            rules=[
+                Rule(
+                    id="AC-KW",
+                    text="Audit keyword",
+                    severity=Severity.HIGH,
+                    keywords=["audit"],
+                ),
+                Rule(
+                    id="AC-NEG",
+                    text="Bypass keyword",
+                    severity=Severity.CRITICAL,
+                    keywords=["bypass"],
+                ),
+                Rule(
+                    id="AC-PAT-ANCHOR",
+                    text="Anchored secret",
+                    severity=Severity.HIGH,
+                    patterns=[r"AKIA[0-9A-Z]{16}"],
+                ),
+                Rule(
+                    id="AC-PAT-NOANCHOR",
+                    text="Unanchored ssn",
+                    severity=Severity.HIGH,
+                    patterns=[r"\b\d{3}-\d{2}-\d{4}\b"],
+                ),
+            ],
+        )
+        engine = GovernanceEngine(const, strict=False, warmup=False, freeze_gc=False)
+        # Positive verb exempts non-negative keyword, still catches negative keyword and patterns.
+        assert engine.validate("run audit report").valid is True
+        assert {v.rule_id for v in engine.validate("run audit without review").violations} == {
+            "AC-KW"
+        }
+        assert {v.rule_id for v in engine.validate("run bypass check").violations} == {"AC-NEG"}
+        assert {
+            v.rule_id for v in engine.validate("run check AKIAABCDEFGHIJKLMNOP").violations
+        } == {"AC-PAT-ANCHOR"}
+        assert {v.rule_id for v in engine.validate("run check 123-45-6789").violations} == {
+            "AC-PAT-NOANCHOR"
+        }
+        if _HAS_AHO:
+            assert engine._ac_iter is not None

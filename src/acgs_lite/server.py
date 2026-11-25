@@ -10,12 +10,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import secrets
 from collections.abc import AsyncGenerator
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from acgs_lite._compat import constant_time_compare
 from acgs_lite._meta import VERSION
 from acgs_lite.audit import AuditEntry, AuditLog
 from acgs_lite.cdp.store import InMemoryCDPBackend
@@ -402,7 +402,7 @@ def create_governance_app(
     def _require_api_key(x_api_key: str | None = Header(default=None)) -> None:
         if not resolved_api_key:
             return
-        if x_api_key is None or not secrets.compare_digest(x_api_key, resolved_api_key):
+        if x_api_key is None or not constant_time_compare(x_api_key, resolved_api_key):
             raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
 
     auth_deps = [Depends(_require_api_key)] if resolved_api_key else []
@@ -450,8 +450,8 @@ def create_governance_app(
 
     @app.post("/validate", dependencies=auth_deps)
     def validate_action(payload: dict[str, Any]) -> dict[str, Any]:
-        action = cast(str, payload.get("action", ""))
-        if not action.strip():
+        action = payload.get("action")
+        if not isinstance(action, str) or not action.strip():
             raise HTTPException(status_code=422, detail="'action' must be a non-empty string")
 
         agent_id = payload.get("agent_id", "anonymous")
