@@ -1129,7 +1129,8 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 matched_violations=all_matched,
                 latency_ms=latency_ms,
                 timestamp=timestamp,
-                rule_evaluations=self._build_rule_evaluations_fast(
+                rule_evaluations=self._build_rule_evaluations(
+                    self.constitution.rules,
                     matched_rule_ids={v.rule_id for v in all_matched},
                     applicable_rule_ids={rule.id for rule in applicable_rules},
                 ),

@@ -142,6 +142,10 @@ class GovernanceMatcherMixin:
         strict: bool | None = None,
     ) -> ValidationResult | None:
         effective_strict = self.strict if strict is None else strict
+        # Preserve the fail-closed contract on CRITICAL matches when ``strict`` is omitted
+        # (``strict=None``) so callers relying on the historical strict-only fast-path
+        # behavior still raise, while honoring an explicit ``strict=False`` override.
+        raise_on_critical = strict is not False
         _merged_bm = 0
         _has_critical = False
         _crit_idx = -1
@@ -157,28 +161,47 @@ class GovernanceMatcherMixin:
                 _ctx_dec, _ctx_data = self._rust_validator.validate_hot(
                     _cv if _cv.islower() else _cv.lower()
                 )
-                if _ctx_dec == _RUST_DENY_CRITICAL and not _has_critical:
-                    _crit_idx = _ctx_data
-                    _has_critical = True
+                if _ctx_dec == _RUST_DENY_CRITICAL:
+                    if not _has_critical:
+                        _crit_idx = _ctx_data
+                        _has_critical = True
+                    elif 0 <= _ctx_data < len(self._rule_data):
+                        _merged_bm |= 1 << _ctx_data
                 elif _ctx_dec == _RUST_DENY:
                     _merged_bm |= _ctx_data
         if _has_critical:
             if not (0 <= _crit_idx < len(rule_excs)):
                 fast_records.append(None)
+                if raise_on_critical:
+                    raise ConstitutionalViolationError(
+                        "Critical rule violation (index out of range)",
+                        rule_id="UNKNOWN",
+                        severity="critical",
+                        action=action[:200],
+                    )
+                return self._new_fast_result(
+                    valid=False,
+                    violations=[
+                        Violation(
+                            "UNKNOWN",
+                            "Critical rule violation",
+                            Severity.CRITICAL,
+                            action[:200],
+                            "",
+                        )
+                    ],
+                    action=action,
+                )
+            if raise_on_critical:
+                _e_src = rule_excs[_crit_idx]
+                fast_records.append(None)
                 raise ConstitutionalViolationError(
-                    "Critical rule violation (index out of range)",
-                    rule_id="UNKNOWN",
-                    severity="critical",
+                    str(_e_src),
+                    rule_id=_e_src.rule_id,
+                    severity=_e_src.severity,
                     action=action[:200],
                 )
-            _e_src = rule_excs[_crit_idx]
-            fast_records.append(None)
-            raise ConstitutionalViolationError(
-                str(_e_src),
-                rule_id=_e_src.rule_id,
-                severity=_e_src.severity,
-                action=action[:200],
-            )
+            _merged_bm |= 1 << _crit_idx
         if _merged_bm:
             _a200 = action[:200]
             _vlist: list[Violation] = []

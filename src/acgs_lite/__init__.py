@@ -1047,6 +1047,29 @@ def stability(name: str) -> str:
     return API_STABILITY.get(name, "experimental")
 
 
+_LAZY_SUBMODULES: frozenset[str] = frozenset(
+    {
+        "agents",
+        "circuit_breaker",
+        "constrained_output",
+        "events",
+        "formal",
+        "governed",
+        "lean_verify",
+        "legitimacy",
+        "licensing",
+        "policygen",
+        "production",
+        "provenance",
+        "provider_capabilities",
+        "scoring",
+        "serialization",
+        "trajectory",
+        "z3_verify",
+    }
+)
+
+
 def __getattr__(name: str) -> object:
     if name in _LAZY_EXPORTS:
         module_name, attr_name, install_hint = _LAZY_EXPORTS[name]
@@ -1060,8 +1083,14 @@ def __getattr__(name: str) -> object:
             ) from exc
         globals()[name] = value
         return value
+    if name in _LAZY_SUBMODULES:
+        from importlib import import_module
+
+        module = import_module(f"{__name__}.{name}")
+        globals()[name] = module
+        return module
     raise AttributeError(f"module 'acgs_lite' has no attribute {name!r}")
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__))
+    return sorted(set(globals()) | set(__all__) | _LAZY_SUBMODULES)

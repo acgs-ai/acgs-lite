@@ -634,26 +634,82 @@ _LAZY_REGISTRY: dict[str, tuple[str, str]] = {
     "GovernanceMemoryRetriever": ("governance_memory", "analysis"),
 }
 
+# Submodules that were historically accessible as attributes on acgs_lite.constitution
+# immediately after import; resolved lazily on first attribute access and cached in globals().
+_LAZY_SUBMODULES: frozenset[str] = frozenset(
+    {
+        "abac",
+        "activation",
+        "autonomy_ratio",
+        "boundaries",
+        "bundle",
+        "claim_lifecycle",
+        "comparison",
+        "conflict_resolution",
+        "coverage_analysis",
+        "deduplication",
+        "dependency_analysis",
+        "diffing",
+        "editor",
+        "evidence",
+        "experience_library",
+        "filtering",
+        "governance_memory",
+        "intent_alignment",
+        "interpolation",
+        "lifecycle",
+        "memoization",
+        "merging",
+        "metrics",
+        "obligation_engine",
+        "permission_ceiling",
+        "provenance",
+        "refusal_reasoning",
+        "regulatory",
+        "rendering",
+        "reporting",
+        "routing",
+        "semantic_search",
+        "serialization",
+        "similarity",
+        "snapshot",
+        "spot_check",
+        "templates",
+        "trust_score",
+        "validator_selection",
+        "versioning",
+        "weighted_policy",
+        "workflow_analytics",
+    }
+)
+
 # Module cache to avoid repeated importlib calls
 _MODULE_CACHE: dict[str, Any] = {}
 
 
 def __getattr__(name: str) -> object:
     entry = _LAZY_REGISTRY.get(name)
-    if entry is None:
-        raise AttributeError(name)
-    module_name = entry[0]
-    mod = _MODULE_CACHE.get(module_name)
-    if mod is None:
-        mod = importlib.import_module(f".{module_name}", __name__)
-        _MODULE_CACHE[module_name] = mod
-    value = getattr(mod, name)
-    globals()[name] = value
-    return value
+    if entry is not None:
+        module_name = entry[0]
+        mod = _MODULE_CACHE.get(module_name)
+        if mod is None:
+            mod = importlib.import_module(f".{module_name}", __name__)
+            _MODULE_CACHE[module_name] = mod
+        value = getattr(mod, name)
+        globals()[name] = value
+        return value
+    if name in _LAZY_SUBMODULES:
+        mod = _MODULE_CACHE.get(name)
+        if mod is None:
+            mod = importlib.import_module(f".{name}", __name__)
+            _MODULE_CACHE[name] = mod
+        globals()[name] = mod
+        return mod
+    raise AttributeError(name)
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__))
+    return sorted(set(globals()) | set(__all__) | _LAZY_SUBMODULES)
 
 
 def modules_by_domain(domain: str | None = None) -> dict[str, list[str]]:

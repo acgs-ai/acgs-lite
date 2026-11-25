@@ -469,6 +469,103 @@ def test_federation_transport_accepts_exact_bearer_and_rejects_missing(
     )
 
 
+def test_federation_transport_handles_non_ascii_header_and_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("fastapi")
+    import asyncio
+
+    from fastapi import HTTPException
+
+    from acgs_lite.federation.transport import _require_federation_auth
+    from acgs_lite.server import create_governance_app
+
+    async def _raw_asgi_get(app: Any, path: str, headers: list[tuple[bytes, bytes]]) -> int:
+        status_code = 0
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "headers": headers,
+        }
+
+        async def _receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def _send(msg: dict[str, Any]) -> None:
+            nonlocal status_code
+            if msg["type"] == "http.response.start":
+                status_code = int(msg["status"])
+
+        await app(scope, _receive, _send)
+        return status_code
+
+    monkeypatch.setenv("ACGS_FEDERATION_ENABLED", "true")
+
+    # Non-ASCII Authorization header against ASCII token must return 401 (never TypeError/500).
+    monkeypatch.setenv("ACGS_FEDERATION_TOKEN", "ascii-token")
+    app_ascii = create_governance_app(require_auth=False)
+    assert (
+        asyncio.run(
+            _raw_asgi_get(
+                app_ascii,
+                "/v1/federation/capabilities",
+                [(b"authorization", b"Bearer \xe9")],
+            )
+        )
+        == 401
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        _require_federation_auth("Bearer \xe9")
+    assert exc_info.value.status_code == 401
+
+    # Non-ASCII ACGS_FEDERATION_TOKEN: exact match -> 200, mismatch -> 401.
+    monkeypatch.setenv("ACGS_FEDERATION_TOKEN", "s\xe9cret-token")
+    app_non_ascii = create_governance_app(require_auth=False)
+    assert (
+        asyncio.run(
+            _raw_asgi_get(
+                app_non_ascii,
+                "/v1/federation/capabilities",
+                [(b"authorization", b"Bearer s\xe9cret-token")],
+            )
+        )
+        == 200
+    )
+    assert (
+        asyncio.run(
+            _raw_asgi_get(
+                app_non_ascii,
+                "/v1/federation/capabilities",
+                [(b"authorization", b"Bearer wrong-token")],
+            )
+        )
+        == 401
+    )
+    assert (
+        asyncio.run(
+            _raw_asgi_get(
+                app_non_ascii,
+                "/v1/federation/capabilities",
+                [(b"authorization", b"Bearer s\xe8cret-token")],
+            )
+        )
+        == 401
+    )
+
+    # Arbitrary Unicode token tested directly on helper.
+    monkeypatch.setenv("ACGS_FEDERATION_TOKEN", "s\u00e9cret-\u2603")
+    _require_federation_auth("Bearer s\u00e9cret-\u2603")
+    with pytest.raises(HTTPException) as exc_info2:
+        _require_federation_auth("Bearer s\u00e9cret-other")
+    assert exc_info2.value.status_code == 401
+
+
 # ── 7. Hardening regressions (re-entrant rollback, Rust/HALT parity, lazy proxy, streaming) ──
 
 
@@ -705,8 +802,226 @@ class TestEngineHaltRustParityAndFallbacks:
         assert res_full is not None and res_full.valid is False
         assert full_recs == [None]
 
+    def test_validate_rust_gov_context_critical_respects_effective_strict(self) -> None:
+        from acgs_lite.engine.matcher import (
+            _RUST_ALLOW,
+            _RUST_DENY,
+            _RUST_DENY_CRITICAL,
+            GovernanceMatcherMixin,
+        )
+        from acgs_lite.engine.models import ValidationResult, Violation
+        from acgs_lite.errors import ConstitutionalViolationError
+
+        class _FakeRust:
+            def __init__(self) -> None:
+                self.hot: dict[str, tuple[int, int]] = {}
+
+            def validate_hot(self, text: str) -> tuple[int, int]:
+                return self.hot.get(text, (_RUST_ALLOW, 0))
+
+        class _Host(GovernanceMatcherMixin):
+            def __init__(self) -> None:
+                self._rule_data = [
+                    ("R-CRIT-0", "crit0", Severity.CRITICAL, "critical", "sec", True, "crit0"),
+                    ("R-HIGH-1", "high1", Severity.HIGH, "high", "sec", False, "high1"),
+                    ("R-CRIT-2", "crit2", Severity.CRITICAL, "critical", "sec", True, "crit2"),
+                ]
+                self._rule_excs = [
+                    ConstitutionalViolationError("crit0", rule_id="R-CRIT-0", severity="critical"),
+                    None,
+                    ConstitutionalViolationError("crit2", rule_id="R-CRIT-2", severity="critical"),
+                ]
+                self._rule_id_to_exc_idx = {"R-CRIT-0": 0, "R-CRIT-2": 2}
+                self._rule_id_to_wa = {
+                    "R-CRIT-0": ViolationAction.BLOCK,
+                    "R-HIGH-1": ViolationAction.BLOCK,
+                    "R-CRIT-2": ViolationAction.BLOCK,
+                }
+                self._rust_validator = _FakeRust()
+                self.strict = True
+
+            def _new_fast_allow_result(self) -> ValidationResult:
+                return ValidationResult(True, "h")
+
+            def _new_fast_result(
+                self, *, valid: bool, violations: list[Violation], action: str
+            ) -> ValidationResult:
+                return ValidationResult(valid, "h", violations, action=action)
+
+        host = _Host()
+        # Critical from action + high from detail + second critical from description, strict=False.
+        host._rust_validator.hot["detail-high"] = (_RUST_DENY, 0b010)
+        host._rust_validator.hot["desc-crit2"] = (_RUST_DENY_CRITICAL, 2)
+        recs: list[Any] = []
+        res = host._validate_rust_gov_context(
+            "act-crit0",
+            _RUST_DENY_CRITICAL,
+            0,
+            {"action_detail": "detail-high", "action_description": "desc-crit2"},
+            host._rule_excs,
+            recs,
+            strict=False,
+        )
+        assert res is not None and res.valid is False
+        assert {v.rule_id for v in res.violations} == {"R-CRIT-0", "R-HIGH-1", "R-CRIT-2"}
+        assert recs == [None]
+
+        # Out-of-range critical index with strict=False returns non-raising UNKNOWN violation.
+        recs_oor: list[Any] = []
+        res_oor = host._validate_rust_gov_context(
+            "act",
+            _RUST_DENY_CRITICAL,
+            99,
+            {"action_detail": "ok"},
+            host._rule_excs,
+            recs_oor,
+            strict=False,
+        )
+        assert res_oor is not None and res_oor.valid is False
+        assert [v.rule_id for v in res_oor.violations] == ["UNKNOWN"]
+        assert recs_oor == [None]
+
+        # Same critical paths with strict=True still raise ConstitutionalViolationError.
+        with pytest.raises(ConstitutionalViolationError, match="crit0"):
+            host._validate_rust_gov_context(
+                "act-crit0",
+                _RUST_DENY_CRITICAL,
+                0,
+                {"action_detail": "ok"},
+                host._rule_excs,
+                [],
+                strict=True,
+            )
+        with pytest.raises(ConstitutionalViolationError, match="index out of range"):
+            host._validate_rust_gov_context(
+                "act",
+                _RUST_DENY_CRITICAL,
+                99,
+                {"action_detail": "ok"},
+                host._rule_excs,
+                [],
+                strict=True,
+            )
+
+    def test_runtime_rule_filtering_receipt_reflects_post_init_rule_mutations(self) -> None:
+        base_rule = Rule(
+            id="R-BASE",
+            text="Base conditional rule",
+            severity=Severity.HIGH,
+            keywords=["alpha"],
+            condition={"env": "prod"},
+        )
+        constitution = Constitution(name="dynamic-runtime", rules=[base_rule])
+        engine = GovernanceEngine(
+            constitution,
+            strict=False,
+            audit_mode="full",
+            warmup=False,
+            freeze_gc=False,
+        )
+
+        # Mutate constitution.rules post-init: add a new rule and update existing rule severity.
+        dynamic_rule = Rule(
+            id="R-DYNAMIC",
+            text="Added after engine init",
+            severity=Severity.CRITICAL,
+            keywords=["beta"],
+        )
+        constitution.rules.append(dynamic_rule)
+        base_rule.severity = Severity.MEDIUM
+
+        result = engine.validate("trigger beta", context={"env": "staging"})
+        assert result.valid is False
+        assert [v.rule_id for v in result.violations] == ["R-DYNAMIC"]
+
+        evals = {
+            item["rule_id"]: item
+            for item in engine.audit_log.entries[-1].metadata["rule_evaluations"]
+        }
+        assert set(evals) == {"R-BASE", "R-DYNAMIC"}
+        assert evals["R-BASE"]["severity"] == "medium"
+        assert evals["R-BASE"]["evaluated"] is False
+        assert evals["R-BASE"]["reason"] == "inactive"
+        assert evals["R-DYNAMIC"]["severity"] == "critical"
+        assert evals["R-DYNAMIC"]["evaluated"] is True
+        assert evals["R-DYNAMIC"]["matched"] is True
+        assert evals["R-DYNAMIC"]["reason"] == "violation"
+
 
 class TestLazySubmoduleAndStreamingHardening:
+    def test_lazy_submodule_resolution_on_acgs_lite_constitution_and_formal(self) -> None:
+        code = (
+            "import sys, types\n"
+            "from unittest.mock import patch\n"
+            "import acgs_lite\n"
+            "import acgs_lite.constitution as c\n"
+            "expected_top = {\n"
+            "    'agents', 'circuit_breaker', 'constrained_output', 'events', 'formal',\n"
+            "    'governed', 'lean_verify', 'legitimacy', 'licensing', 'policygen',\n"
+            "    'production', 'provenance', 'provider_capabilities', 'scoring',\n"
+            "    'serialization', 'trajectory', 'z3_verify',\n"
+            "}\n"
+            "expected_const = {\n"
+            "    'abac', 'activation', 'autonomy_ratio', 'boundaries', 'bundle',\n"
+            "    'claim_lifecycle', 'comparison', 'conflict_resolution', 'coverage_analysis',\n"
+            "    'deduplication', 'dependency_analysis', 'diffing', 'editor', 'evidence',\n"
+            "    'experience_library', 'filtering', 'governance_memory', 'intent_alignment',\n"
+            "    'interpolation', 'lifecycle', 'memoization', 'merging', 'metrics',\n"
+            "    'obligation_engine', 'permission_ceiling', 'provenance', 'refusal_reasoning',\n"
+            "    'regulatory', 'rendering', 'reporting', 'routing', 'semantic_search',\n"
+            "    'serialization', 'similarity', 'snapshot', 'spot_check', 'templates',\n"
+            "    'trust_score', 'validator_selection', 'versioning', 'weighted_policy',\n"
+            "    'workflow_analytics',\n"
+            "}\n"
+            "# Cold start must remain lazy: none of the lazy submodules are preloaded.\n"
+            "assert [m for m in expected_top if f'acgs_lite.{m}' in sys.modules] == []\n"
+            "assert [m for m in expected_const if f'acgs_lite.constitution.{m}' in sys.modules] == []\n"
+            "assert expected_top.issubset(set(dir(acgs_lite)))\n"
+            "assert expected_const.issubset(set(dir(c)))\n"
+            "# unittest.mock.patch against lazy submodule targets works on fresh import.\n"
+            "with patch('acgs_lite.governed.GovernedAgent') as mg:\n"
+            "    assert acgs_lite.governed.GovernedAgent is mg\n"
+            "with patch('acgs_lite.constitution.diffing.AmendmentReviewReport') as md:\n"
+            "    assert c.diffing.AmendmentReviewReport is md\n"
+            "# All lazy submodules resolve to real ModuleType and cache into globals().\n"
+            "for name in sorted(expected_top):\n"
+            "    mod = getattr(acgs_lite, name)\n"
+            "    assert isinstance(mod, types.ModuleType), name\n"
+            "    assert vars(acgs_lite)[name] is mod\n"
+            "    assert sys.modules[f'acgs_lite.{name}'] is mod\n"
+            "assert isinstance(acgs_lite.formal.exemption, types.ModuleType)\n"
+            "assert isinstance(acgs_lite.formal.policy_ast, types.ModuleType)\n"
+            "for name in sorted(expected_const):\n"
+            "    mod = getattr(c, name)\n"
+            "    assert isinstance(mod, types.ModuleType), name\n"
+            "    assert vars(c)[name] is mod\n"
+            "    assert sys.modules[f'acgs_lite.constitution.{name}'] is mod\n"
+        )
+        subprocess.run([sys.executable, "-c", code], check=True, timeout=30)
+
+    def test_lazy_submodule_getattr_and_dir_in_process(self) -> None:
+        import types
+
+        import acgs_lite
+        import acgs_lite.constitution as c
+        import acgs_lite.formal as formal_pkg
+
+        assert isinstance(acgs_lite.__getattr__("provenance"), types.ModuleType)
+        assert "provenance" in dir(acgs_lite)
+        with pytest.raises(AttributeError):
+            acgs_lite.__getattr__("nonexistent_submodule_xyz")
+
+        assert isinstance(c.__getattr__("abac"), types.ModuleType)
+        assert "abac" in dir(c)
+        with pytest.raises(AttributeError):
+            c.__getattr__("nonexistent_constitution_submodule_xyz")
+
+        assert isinstance(formal_pkg.__getattr__("exemption"), types.ModuleType)
+        assert isinstance(formal_pkg.__getattr__("policy_ast"), types.ModuleType)
+        assert {"exemption", "policy_ast"}.issubset(set(dir(formal_pkg)))
+        with pytest.raises(AttributeError):
+            formal_pkg.__getattr__("nonexistent_formal_submodule_xyz")
+
     def test_lazy_submodule_supports_mock_patch_and_binds_real_module(self) -> None:
         code = (
             "import types\n"

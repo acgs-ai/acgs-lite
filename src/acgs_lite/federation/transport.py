@@ -42,7 +42,10 @@ def _require_federation_auth(
         return
 
     expected_value = f"Bearer {expected_token}"
-    if authorization is None or not hmac.compare_digest(authorization, expected_value):
+    if authorization is None or not hmac.compare_digest(
+        authorization.encode("utf-8"),
+        expected_value.encode("utf-8"),
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized federation request",
