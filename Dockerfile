@@ -5,18 +5,22 @@
 
 FROM python:3.11-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
 WORKDIR /app
 
 # Copy everything needed for pip install
 COPY pyproject.toml README.md LICENSE ./
 COPY src/ src/
 
-# Install the package + server deps (uvicorn, starlette, httpx for GitLab API)
+# Install the package + server deps (uvicorn, starlette, httpx for GitLab API).
+# pyyaml is already declared in pyproject.toml core dependencies.
 RUN pip install --no-cache-dir ".[google-cloud]" \
     uvicorn[standard] \
     starlette \
-    httpx \
-    pyyaml
+    httpx
 
 # Create non-root user for Cloud Run security best practices
 RUN useradd --create-home --shell /bin/bash appuser

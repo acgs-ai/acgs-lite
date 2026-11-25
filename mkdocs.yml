@@ -61,6 +61,9 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   features:
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.instant.progress
     - navigation.sections
     - navigation.indexes
     - navigation.tracking
@@ -114,6 +117,7 @@ nav:
       - Constitution: api/constitution.md
       - Governance Engine: api/engine.md
       - Runtime Legitimacy Kernel: api/legitimacy.md
+      - Durable External Effects: api/external-effects.md
       - GovernedAgent: api/governed_agent.md
       - Agent Discovery: api/agents.md
       - Adaptive Policy Generation: api/policygen.md

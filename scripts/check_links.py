@@ -81,8 +81,7 @@ def _public_files(root: Path) -> set[Path]:
     return {
         path.resolve()
         for path in root.rglob("*")
-        if path.is_file()
-        and not any(part in _SKIP_DIRS for part in path.relative_to(root).parts)
+        if path.is_file() and not any(part in _SKIP_DIRS for part in path.relative_to(root).parts)
     }
 
 
