@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import worker, {
@@ -90,7 +91,7 @@ test("content-hashed MkDocs bundles get immutable long-lived Cache-Control", () 
   );
 });
 
-test("unhashed static assets and search index get 1h SWR caching while 404s get short TTL", () => {
+test("unhashed static assets, redirects, 304, 404, and 5xx get appropriate caching", () => {
   assert.equal(
     resolveCacheControl("/docs/assets/_mkdocstrings.css", 200),
     "public, max-age=3600, stale-while-revalidate=86400",
@@ -104,8 +105,20 @@ test("unhashed static assets and search index get 1h SWR caching while 404s get 
     "public, max-age=3600, stale-while-revalidate=86400",
   );
   assert.equal(
+    resolveCacheControl("/docs/quickstart", 307),
+    "public, max-age=3600",
+  );
+  assert.equal(
+    resolveCacheControl("/docs/assets/javascripts/bundle.79ae519e.min.js", 304),
+    "public, max-age=31536000, immutable",
+  );
+  assert.equal(
     resolveCacheControl("/docs/assets/javascripts/bundle.79ae519e.min.js", 404),
     "public, max-age=60",
+  );
+  assert.equal(
+    resolveCacheControl("/docs/index.html", 503),
+    "no-store",
   );
 });
 
@@ -122,4 +135,42 @@ test("applyResponseHeaders preserves explicit upstream Cache-Control and securit
   assert.equal(out.headers.get("Cache-Control"), "public, max-age=120");
   assert.equal(out.headers.get("X-Frame-Options"), "SAMEORIGIN");
   assert.equal(out.headers.get("X-Content-Type-Options"), "nosniff");
+});
+
+test("worker replaces Cloudflare Static Assets default Cache-Control and handles 304", async () => {
+  const assetReq = new Request("https://acgs.ai/docs/assets/javascripts/bundle.79ae519e.min.js");
+  const assetRes = await worker.fetch(
+    assetReq,
+    makeEnv(() => new Response("/*js*/", {
+      status: 200,
+      headers: {
+        "Content-Type": "text/javascript; charset=utf-8",
+        "Cache-Control": "public, max-age=0, must-revalidate",
+      },
+    })),
+  );
+  assert.equal(assetRes.headers.get("Cache-Control"), "public, max-age=31536000, immutable");
+  assert.equal(assetRes.headers.get("X-Content-Type-Options"), "nosniff");
+
+  const notModReq = new Request("https://acgs.ai/docs/", {
+    headers: { "If-None-Match": '"abc"' },
+  });
+  const notModRes = await worker.fetch(
+    notModReq,
+    makeEnv(() => new Response(null, {
+      status: 304,
+      headers: {
+        ETag: '"abc"',
+        "Cache-Control": "public, max-age=0, must-revalidate",
+      },
+    })),
+  );
+  assert.equal(notModRes.status, 304);
+  assert.equal(notModRes.headers.get("Cache-Control"), "public, max-age=300, stale-while-revalidate=86400");
+  assert.equal(notModRes.headers.get("X-Frame-Options"), "DENY");
+});
+
+test("wrangler.jsonc enables run_worker_first so static assets receive Worker headers", () => {
+  const wrangler = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
+  assert.equal(wrangler.assets?.run_worker_first, true);
 });

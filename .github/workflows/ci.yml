@@ -233,3 +233,8 @@ jobs:
         run: python -m mkdocs build --strict
       - name: Check documentation links
         run: python3 scripts/check_links.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test Cloudflare Worker
+        run: node --test tests/test_worker.mjs
