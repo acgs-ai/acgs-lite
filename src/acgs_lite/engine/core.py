@@ -36,7 +36,15 @@ from acgs_lite.errors import ConstitutionalViolationError
 from .audit_runtime import _ANON, _FastAuditLog, _NoopRecorder, _request_counter
 from .batch import BatchValidationMixin
 from .enforcement import EnforcementResolution, resolve_enforcement
-from .matcher import _HAS_AHO, _HAS_RUST, _RUST_ALLOW, GovernanceMatcherMixin, _ac, _rust
+from .matcher import (
+    _HAS_AHO,
+    _HAS_RUST,
+    _RUST_ALLOW,
+    _RUST_DENY_CRITICAL,
+    GovernanceMatcherMixin,
+    _ac,
+    _rust,
+)
 from .models import CustomValidator, ValidationResult, Violation, _dedup_violations
 
 
@@ -321,19 +329,30 @@ def _match_variants(text: str) -> tuple[str, ...]:
     return (lowered,) if normalized == lowered else (lowered, normalized)
 
 
-def _has_distinct_normalized_form(text: str) -> bool:
-    """True when matching *text* needs a second, normalized pass (never for plain ASCII)."""
-    return not _is_plain_ascii(text) and normalize_for_matching(text).lower() != text.lower()
+# Non-ASCII characters that Python's ``re.IGNORECASE`` folds onto ASCII letters
+# (U+0130 İ, U+0131 ı, U+017F ſ, U+212A K) where Rust's ``regex`` crate can
+# disagree on simple case-folding (e.g. ``(?i)disk`` vs ``"dısk"``).
+_PYTHON_IGNORECASE_FOLD_RE = re.compile("[\u0130\u0131\u017f\u212a]")
+
+
+def _needs_rust_python_fallback(text: str) -> bool:
+    """True when *text* must use the Python matcher instead of the Rust fast path."""
+    if _is_plain_ascii(text):
+        return False
+    return (
+        _PYTHON_IGNORECASE_FOLD_RE.search(text) is not None
+        or normalize_for_matching(text).lower() != text.lower()
+    )
 
 
 def _needs_normalized_pass(action: str, context: dict[str, Any] | None) -> bool:
-    """True when the action or a matched context value has a distinct normalized form."""
-    if _has_distinct_normalized_form(action):
+    """True when the action or a matched context value requires Python normalization/folding."""
+    if _needs_rust_python_fallback(action):
         return True
     if not context:
         return False
     return any(
-        _has_distinct_normalized_form(value)
+        _needs_rust_python_fallback(value)
         for key, value in context.items()
         if key in ("action_detail", "action_description") and isinstance(value, str)
     )
@@ -369,6 +388,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         "_kw_gate",
         "_neg_kw_gate",
         "_ac_iter",
+        "_has_halt_rules",
         "_has_high_rules",
         "_hot",
         "_rust_validator",
@@ -417,6 +437,9 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         )
         self._rules_count: int = len(self._active_rules)
         _C = Severity.CRITICAL
+        self._has_halt_rules: bool = any(
+            rule.workflow_action is ViolationAction.HALT for rule in self._active_rules
+        )
         self._rule_data: list[tuple[Any, ...]] = [
             (
                 rule.id,
@@ -424,9 +447,14 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 rule.severity,
                 rule.severity.value,
                 rule.category,
-                # is_crit: True only for CRITICAL rules that are NOT overridden to WARN.
-                # WARN rules must never early-exit, even at CRITICAL severity.
-                rule.severity is _C and rule.workflow_action is not ViolationAction.WARN,
+                # is_crit: True only for CRITICAL rules that are NOT overridden to WARN,
+                # and only when no active HALT rule exists in the constitution.
+                # HALT rules have higher precedence than BLOCK and must always raise
+                # with enforcement_action=ViolationAction.HALT rather than letting an
+                # earlier CRITICAL match short-circuit with BLOCK.
+                rule.severity is _C
+                and rule.workflow_action is not ViolationAction.WARN
+                and not self._has_halt_rules,
                 f"Action blocked by rule {rule.id}: {rule.text}",
             )
             for rule in self._active_rules
@@ -579,16 +607,21 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 )
                 for r in self._active_rules
             ]
-            self._rust_validator: Any = _rust.GovernanceValidator(
-                _rust_kw,
-                _rust_anchor_dispatch,
-                _rust_no_anchor,
-                _rust_rules,
-                list(_POSITIVE_VERBS_SET),
-                self.strict,
-                _rust_ctx_rules,
-                self._const_hash,
-            )
+            try:
+                self._rust_validator: Any = _rust.GovernanceValidator(
+                    _rust_kw,
+                    _rust_anchor_dispatch,
+                    _rust_no_anchor,
+                    _rust_rules,
+                    list(_POSITIVE_VERBS_SET),
+                    self.strict,
+                    _rust_ctx_rules,
+                    self._const_hash,
+                )
+            except ValueError:
+                # Rust's regex crate rejects look-around/backreferences and its
+                # bitmask supports <=127 rules; fall back to the Python matcher.
+                self._rust_validator = None
         else:
             self._rust_validator = None
         if self._rust_validator is not None:
@@ -606,7 +639,12 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 _h[9],
                 self._rust_validator,
             )
-        if warmup and self._rust_validator is not None:
+        if (
+            warmup
+            and self._rust_validator is not None
+            and self._fast_records is not None
+            and not self._requires_runtime_rule_filtering
+        ):
             _real_hot = self._hot
             _real_audit = self.audit_log
             _real_custom_validators = self.custom_validators
@@ -1371,6 +1409,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                     context,
                     _rule_excs,
                     _fast_records,
+                    strict=strict,
                 )
                 if _result is not None:
                     return self._post_dispatch_result(_result, action, strict=strict)
@@ -1409,16 +1448,21 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                     "",
                     _ANON,
                 )
-            _result = self._validate_rust_no_context(
-                action,
-                _decision,
-                _data,
-                _rule_excs,
-                _fast_records,
-                strict=False,
-            )
-            if _result is not None:
-                return self._post_dispatch_result(_result, action, strict=strict)
+            # If the Rust validator was built with strict=True, DENY_CRITICAL
+            # short-circuited on the first critical rule and omitted remaining
+            # matches. Fall through to the Python scan so strict=False callers
+            # (including validate_batch) receive the complete violation set.
+            if _decision != _RUST_DENY_CRITICAL:
+                _result = self._validate_rust_no_context(
+                    action,
+                    _decision,
+                    _data,
+                    _rule_excs,
+                    _fast_records,
+                    strict=False,
+                )
+                if _result is not None:
+                    return self._post_dispatch_result(_result, action, strict=strict)
         elif (
             _rv is not None
             and _fast_records is not None

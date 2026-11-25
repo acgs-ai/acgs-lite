@@ -204,10 +204,8 @@ if TYPE_CHECKING:
     )
 
 # ── Optional & lazy dependency tracking ─────────────────────────────────────
-# Populated when optional extras are not installed. __getattr__ below uses
-# this to resolve lazy exports on first access or raise ImportError with a
-# helpful install hint instead of crashing `import acgs_lite` at startup.
-_MISSING_OPTIONAL: dict[str, str] = {}
+# __getattr__ below resolves lazy exports on first access or raises ImportError
+# with a helpful install hint instead of crashing `import acgs_lite` at startup.
 _LAZY_EXPORTS: dict[str, tuple[str, str, str]] = {
     "NullVerificationGate": (
         "acgs_lite.formal.smt_gate",
@@ -1062,20 +1060,8 @@ def __getattr__(name: str) -> object:
             ) from exc
         globals()[name] = value
         return value
-    if name in _MISSING_OPTIONAL:
-        raise ImportError(
-            f"acgs_lite.{name!r} requires optional dependencies. "
-            f"Install with: {_MISSING_OPTIONAL[name]}"
-        )
     raise AttributeError(f"module 'acgs_lite' has no attribute {name!r}")
 
 
 def __dir__() -> list[str]:
     return sorted(set(globals()) | set(__all__))
-
-
-# Filter __all__ so `from acgs_lite import *` only advertises symbols that are
-# actually resolvable in this installation. Optional symbols missing from the
-# install stay accessible via explicit import (with a helpful ImportError hint
-# from __getattr__), but are not emitted by star-import.
-__all__ = [n for n in __all__ if n not in _MISSING_OPTIONAL]

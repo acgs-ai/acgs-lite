@@ -467,3 +467,287 @@ def test_federation_transport_accepts_exact_bearer_and_rejects_missing(
         ).status_code
         == 200
     )
+
+
+# ── 7. Hardening regressions (re-entrant rollback, Rust/HALT parity, lazy proxy, streaming) ──
+
+
+class TestAuditLogReentrantRollbackAndSnapshots:
+    def test_record_atomic_reentrant_record_rollback_preserves_chain(self) -> None:
+        log = AuditLog(max_entries=2)
+        log.record(AuditEntry(id="e0", type="validation"))
+        log.record(AuditEntry(id="e1", type="validation"))
+        before_ids = [e.id for e in log.entries]
+        before_anchor = log.retained_predecessor_hash
+
+        def _reentrant_boom(al: AuditLog) -> None:
+            al.record(AuditEntry(id="reentrant", type="validation"))
+            raise RuntimeError("persist failed after re-entrant record")
+
+        with pytest.raises(RuntimeError, match="persist failed"):
+            log.record_atomic(AuditEntry(id="e2", type="validation"), persist=_reentrant_boom)
+
+        assert [e.id for e in log.entries] == before_ids
+        assert log.retained_predecessor_hash == before_anchor
+        assert log.verify_chain() is True
+        assert log._tx_undo_stack == []
+
+    def test_record_atomic_nested_rollback_then_outer_rollback_preserves_chain(self) -> None:
+        log = AuditLog(max_entries=3)
+        for i in range(3):
+            log.record(AuditEntry(id=f"e{i}", type="validation"))
+        before_ids = [e.id for e in log.entries]
+        before_anchor = log.retained_predecessor_hash
+
+        def _inner_boom(_al: AuditLog) -> None:
+            raise RuntimeError("inner failed")
+
+        def _outer_persist(al: AuditLog) -> None:
+            with pytest.raises(RuntimeError, match="inner failed"):
+                al.record_atomic(AuditEntry(id="inner", type="validation"), persist=_inner_boom)
+            raise RuntimeError("outer failed")
+
+        with pytest.raises(RuntimeError, match="outer failed"):
+            log.record_atomic(AuditEntry(id="outer", type="validation"), persist=_outer_persist)
+
+        assert [e.id for e in log.entries] == before_ids
+        assert log.retained_predecessor_hash == before_anchor
+        assert log.verify_chain() is True
+        assert log._tx_undo_stack == []
+
+    def test_repr_and_export_json_consistent_under_concurrent_writes(self, tmp_path: Path) -> None:
+        log = AuditLog(max_entries=10)
+        for i in range(5):
+            log.record(AuditEntry(id=f"seed-{i}", type="validation", valid=(i % 2 == 0)))
+        rendered = repr(log)
+        assert "entries=5" in rendered
+        assert "chain_valid=True" in rendered
+        export_path = tmp_path / "export.json"
+        log.export_json(export_path)
+        reloaded = AuditLog.from_json(export_path)
+        assert [e.id for e in reloaded.entries] == [e.id for e in log.entries]
+        assert reloaded.verify_chain() is True
+
+
+class TestEngineHaltRustParityAndFallbacks:
+    def test_halt_precedence_and_enforcement_action_with_critical_block_rule(self) -> None:
+        from acgs_lite.errors import ConstitutionalViolationError
+
+        constitution = Constitution(
+            name="crit-plus-halt",
+            rules=[
+                Rule(
+                    id="R-CRIT",
+                    text="Critical block",
+                    severity=Severity.CRITICAL,
+                    keywords=["alpha"],
+                ),
+                Rule(
+                    id="R-HALT",
+                    text="Critical halt",
+                    severity=Severity.CRITICAL,
+                    keywords=["beta"],
+                    workflow_action=ViolationAction.HALT,
+                ),
+            ],
+        )
+        engine = GovernanceEngine(constitution, strict=True, warmup=False, freeze_gc=False)
+        for strict_arg in (True, False):
+            with pytest.raises(ConstitutionalViolationError) as exc_info:
+                engine.validate("alpha beta", strict=strict_arg)
+            assert exc_info.value.rule_id == "R-HALT"
+            assert exc_info.value.enforcement_action is ViolationAction.HALT
+
+    def test_validate_batch_collects_all_violations_when_critical_and_high_both_match(self) -> None:
+        constitution = Constitution(
+            name="crit-plus-high",
+            rules=[
+                Rule(
+                    id="R-CRIT",
+                    text="Critical block",
+                    severity=Severity.CRITICAL,
+                    keywords=["alpha"],
+                ),
+                Rule(
+                    id="R-HIGH",
+                    text="High block",
+                    severity=Severity.HIGH,
+                    keywords=["beta"],
+                ),
+            ],
+        )
+        engine = GovernanceEngine(constitution, strict=True, warmup=False, freeze_gc=False)
+        results = engine.validate_batch(["alpha beta", "clean"])
+        assert results[0].valid is False
+        assert {v.rule_id for v in results[0].violations} == {"R-CRIT", "R-HIGH"}
+        assert results[1].valid is True
+
+    def test_lookaround_regex_and_unicode_ignorecase_folding_work_with_or_without_rust(
+        self,
+    ) -> None:
+        c_lookaround = Constitution(
+            name="lookaround",
+            rules=[
+                Rule(
+                    id="R-LOOK",
+                    text="Negative lookbehind",
+                    severity=Severity.HIGH,
+                    patterns=[r"(?<!not )allowed"],
+                ),
+            ],
+        )
+        engine_la = GovernanceEngine(c_lookaround, strict=False, warmup=False, freeze_gc=False)
+        assert engine_la.validate("allowed action").valid is False
+        assert engine_la.validate("not allowed action").valid is True
+
+        c_fold = Constitution(
+            name="fold",
+            rules=[
+                Rule(
+                    id="R-DISK",
+                    text="Block disk",
+                    severity=Severity.HIGH,
+                    patterns=["disk"],
+                ),
+            ],
+        )
+        engine_fold = GovernanceEngine(c_fold, strict=False, warmup=False, freeze_gc=False)
+        for obfuscated in ("dısk", "diſk", "disK"):
+            assert engine_fold.validate(obfuscated).valid is False
+
+    def test_matcher_rust_paths_respect_per_call_strict_and_halt_precedence(self) -> None:
+        from acgs_lite.engine.matcher import (
+            _RUST_ALLOW,
+            _RUST_DENY,
+            GovernanceMatcherMixin,
+        )
+        from acgs_lite.engine.models import ValidationResult, Violation
+        from acgs_lite.errors import ConstitutionalViolationError
+
+        class _FakeRust:
+            def __init__(self) -> None:
+                self.hot: dict[str, tuple[int, int]] = {}
+                self.full: tuple[int, list[tuple[str, str, str, str, str]], bool] = (
+                    _RUST_ALLOW,
+                    [],
+                    False,
+                )
+
+            def validate_hot(self, text: str) -> tuple[int, int]:
+                return self.hot.get(text, (_RUST_ALLOW, 0))
+
+            def validate_full(
+                self, _text: str, _pairs: list[tuple[str, str]]
+            ) -> tuple[int, list[tuple[str, str, str, str, str]], bool]:
+                return self.full
+
+        class _Host(GovernanceMatcherMixin):
+            def __init__(self) -> None:
+                self._rule_data = [
+                    ("R-BLK", "block", Severity.HIGH, "high", "sec", False, "block"),
+                    ("R-HLT", "halt", Severity.CRITICAL, "critical", "sec", False, "halt"),
+                ]
+                self._rule_excs = [None, None]
+                self._rule_id_to_exc_idx = {}
+                self._rule_id_to_wa = {
+                    "R-BLK": ViolationAction.BLOCK,
+                    "R-HLT": ViolationAction.HALT,
+                }
+                self._rust_validator = _FakeRust()
+                self.strict = False
+
+            def _new_fast_allow_result(self) -> ValidationResult:
+                return ValidationResult(True, "h")
+
+            def _new_fast_result(
+                self, *, valid: bool, violations: list[Violation], action: str
+            ) -> ValidationResult:
+                return ValidationResult(valid, "h", violations, action=action)
+
+        host = _Host()
+        # Per-call strict=True override on strict=False engine must raise in gov_context.
+        host._rust_validator.hot["bad"] = (_RUST_DENY, 0b01)
+        recs: list[Any] = []
+        with pytest.raises(ConstitutionalViolationError, match="R-BLK"):
+            host._validate_rust_gov_context(
+                "ok", _RUST_ALLOW, 0, {"action_detail": "bad"}, host._rule_excs, recs, strict=True
+            )
+        assert recs == []
+
+        # When BOTH BLOCK and HALT match, all Rust decoders defer to _post_dispatch_result.
+        res_no_ctx = host._validate_rust_no_context(
+            "both", _RUST_DENY, 0b11, host._rule_excs, [], strict=True
+        )
+        assert res_no_ctx is not None and res_no_ctx.valid is False
+        assert {v.rule_id for v in res_no_ctx.violations} == {"R-BLK", "R-HLT"}
+
+        host._rust_validator.hot["both"] = (_RUST_DENY, 0b11)
+        res_gov = host._validate_rust_gov_context(
+            "ok", _RUST_ALLOW, 0, {"action_detail": "both"}, host._rule_excs, [], strict=True
+        )
+        assert res_gov is not None and res_gov.valid is False
+
+        res_meta = host._validate_rust_metadata_context(
+            "both", _RUST_DENY, 0b11, host._rule_excs, [], True
+        )
+        assert res_meta is not None and res_meta.valid is False
+
+        host._rust_validator.full = (
+            _RUST_DENY,
+            [
+                ("R-BLK", "block", "high", "", "sec"),
+                ("R-HLT", "halt", "critical", "", "sec"),
+            ],
+            True,
+        )
+        full_recs: list[Any] = []
+        res_full = host._validate_rust_full("both", True, [], host._rule_excs, full_recs)
+        assert res_full is not None and res_full.valid is False
+        assert full_recs == [None]
+
+
+class TestLazySubmoduleAndStreamingHardening:
+    def test_lazy_submodule_supports_mock_patch_and_binds_real_module(self) -> None:
+        code = (
+            "import types\n"
+            "from unittest.mock import patch\n"
+            "import acgs_lite.constitution.constitution as cm\n"
+            "assert not isinstance(cm.diffing, types.ModuleType)\n"
+            "with patch('acgs_lite.constitution.constitution.diffing.AmendmentReviewReport') as m:\n"
+            "    assert cm.diffing.AmendmentReviewReport is m\n"
+            "assert isinstance(cm.diffing, types.ModuleType)\n"
+        )
+        subprocess.run([sys.executable, "-c", code], check=True, timeout=30)
+
+    def test_streaming_validator_uses_per_call_strict_false_without_mutating_engine(self) -> None:
+        from acgs_lite.engine.streaming import StreamingValidator
+
+        constitution = Constitution(
+            name="stream-strict",
+            rules=[
+                Rule(
+                    id="R-CRIT",
+                    text="Block forbidden",
+                    severity=Severity.CRITICAL,
+                    keywords=["forbidden"],
+                ),
+            ],
+        )
+        observed_strict: list[bool] = []
+        engine = GovernanceEngine(constitution, strict=True, warmup=False, freeze_gc=False)
+
+        def _spy(_action: str, _ctx: dict[str, Any]) -> list[Any]:
+            observed_strict.append(engine.strict)
+            return []
+
+        engine.add_validator(_spy)
+        sv = StreamingValidator(
+            engine,
+            flush_interval_chars=5,
+            blocking_severities={"critical"},
+        )
+        chunk_res = sv.feed("forbidden payload")
+        assert engine.strict is True
+        assert observed_strict == [True]
+        assert chunk_res.passed is False
+        assert chunk_res.should_halt is True

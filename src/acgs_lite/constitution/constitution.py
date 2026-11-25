@@ -38,20 +38,30 @@ if TYPE_CHECKING:
 else:
 
     class _LazySubmodule:
-        """Import a sibling constitution helper module on first method access."""
+        """Import a sibling constitution helper module on first access and bind it."""
 
-        __slots__ = ("_name", "_module")
+        __slots__ = ("_name",)
 
         def __init__(self, name: str) -> None:
-            self._name = name
-            self._module: Any = None
+            object.__setattr__(self, "_name", name)
+
+        def _load(self) -> Any:
+            name: str = object.__getattribute__(self, "_name")
+            mod = importlib.import_module(f".{name}", __package__)
+            globals()[name] = mod
+            return mod
 
         def __getattr__(self, attr: str) -> Any:
-            mod = self._module
-            if mod is None:
-                mod = importlib.import_module(f".{self._name}", __package__)
-                self._module = mod
-            return getattr(mod, attr)
+            return getattr(self._load(), attr)
+
+        def __setattr__(self, attr: str, value: Any) -> None:
+            setattr(self._load(), attr, value)
+
+        def __delattr__(self, attr: str) -> None:
+            delattr(self._load(), attr)
+
+        def __dir__(self) -> list[str]:
+            return dir(self._load())
 
     comparison = _LazySubmodule("comparison")
     conflict_resolution = _LazySubmodule("conflict_resolution")

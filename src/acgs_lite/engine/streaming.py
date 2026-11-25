@@ -296,10 +296,16 @@ class StreamingValidator:
         self,
         text: str,
     ) -> ValidationResult:
-        """Run validation in non-strict mode."""
-        with self._engine.non_strict():
-            result: ValidationResult = self._engine.validate(text)
+        """Run validation in non-strict mode without mutating shared engine state."""
+        try:
+            result: ValidationResult = self._engine.validate(text, strict=False)
             return result
+        except TypeError as exc:
+            if "strict" not in str(exc):
+                raise
+            with self._engine.non_strict():
+                fallback: ValidationResult = self._engine.validate(text)
+                return fallback
 
     def _record_audit(
         self,

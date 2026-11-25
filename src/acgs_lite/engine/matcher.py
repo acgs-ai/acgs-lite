@@ -102,6 +102,7 @@ class GovernanceMatcherMixin:
             _a200 = action[:200]
             _vlist: list[Violation] = []
             _bv: Violation | None = None
+            _has_halt = False
             _wa_lkup = self._rule_id_to_wa
             while _bm:
                 _idx = (_bm & -_bm).bit_length() - 1
@@ -112,22 +113,20 @@ class GovernanceMatcherMixin:
                 # Exclude WARN and HALT from the immediate-raise path;
                 # HALT is handled by _post_dispatch_result with correct enforcement_action.
                 _vwa = _wa_lkup.get(_rd[0], ViolationAction.BLOCK)
-                if (
-                    _bv is None
-                    and _v.severity.blocks()
-                    and _vwa not in (ViolationAction.WARN, ViolationAction.HALT)
-                ):
+                if _vwa is ViolationAction.HALT:
+                    _has_halt = True
+                elif _bv is None and _v.severity.blocks() and _vwa is not ViolationAction.WARN:
                     _bv = _v
             fast_records.append(None)
-            # Only raise in strict mode; otherwise return a result with valid=False if blocking.
-            if _bv is not None and strict:
+            # Only raise early in strict mode when no HALT rule matched (HALT takes precedence).
+            if _bv is not None and strict and not _has_halt:
                 raise ConstitutionalViolationError(
                     f"Action blocked by rule {_bv.rule_id}: {_bv.rule_text}",
                     rule_id=_bv.rule_id,
                     severity=_bv.severity.value,
                     action=_a200,
                 )
-            _has_blocking = _bv is not None
+            _has_blocking = _bv is not None or _has_halt
             return self._new_fast_result(valid=not _has_blocking, violations=_vlist, action=action)
         return None
 
@@ -139,7 +138,10 @@ class GovernanceMatcherMixin:
         context: dict[str, Any],
         rule_excs: list[Any],
         fast_records: Any,
+        *,
+        strict: bool | None = None,
     ) -> ValidationResult | None:
+        effective_strict = self.strict if strict is None else strict
         _merged_bm = 0
         _has_critical = False
         _crit_idx = -1
@@ -181,6 +183,7 @@ class GovernanceMatcherMixin:
             _a200 = action[:200]
             _vlist: list[Violation] = []
             _bv_ctx: Violation | None = None
+            _has_halt = False
             while _merged_bm:
                 _idx = (_merged_bm & -_merged_bm).bit_length() - 1
                 _merged_bm &= _merged_bm - 1
@@ -188,13 +191,15 @@ class GovernanceMatcherMixin:
                 _v = Violation(_rd[0], _rd[1], _rd[2], _a200, _rd[4])
                 _vlist.append(_v)
                 _vwa_ctx = self._rule_id_to_wa.get(_rd[0], ViolationAction.BLOCK)
-                if (
+                if _vwa_ctx is ViolationAction.HALT:
+                    _has_halt = True
+                elif (
                     _bv_ctx is None
                     and _v.severity.blocks()
-                    and _vwa_ctx not in (ViolationAction.WARN, ViolationAction.HALT)
+                    and _vwa_ctx is not ViolationAction.WARN
                 ):
                     _bv_ctx = _v
-            if _bv_ctx is not None and self.strict:
+            if _bv_ctx is not None and effective_strict and not _has_halt:
                 raise ConstitutionalViolationError(
                     f"Action blocked by rule {_bv_ctx.rule_id}: {_bv_ctx.rule_text}",
                     rule_id=_bv_ctx.rule_id,
@@ -202,12 +207,7 @@ class GovernanceMatcherMixin:
                     action=_a200,
                 )
             fast_records.append(None)
-            _has_blocking = any(
-                v.severity.blocks()
-                and self._rule_id_to_wa.get(v.rule_id)
-                not in (ViolationAction.WARN, ViolationAction.HALT)
-                for v in _vlist
-            )
+            _has_blocking = _bv_ctx is not None or _has_halt
             return self._new_fast_result(valid=not _has_blocking, violations=_vlist, action=action)
         fast_records.append(None)
         return self._new_fast_allow_result()
@@ -249,6 +249,7 @@ class GovernanceMatcherMixin:
             _a200 = action[:200]
             _vlist: list[Violation] = []
             _bv_meta: Violation | None = None
+            _has_halt = False
             while _bm:
                 _idx = (_bm & -_bm).bit_length() - 1
                 _bm &= _bm - 1
@@ -256,23 +257,25 @@ class GovernanceMatcherMixin:
                 _v = Violation(_rd[0], _rd[1], _rd[2], _a200, _rd[4])
                 _vlist.append(_v)
                 _vwa_meta = self._rule_id_to_wa.get(_rd[0], ViolationAction.BLOCK)
-                if (
+                if _vwa_meta is ViolationAction.HALT:
+                    _has_halt = True
+                elif (
                     _bv_meta is None
                     and _v.severity.blocks()
-                    and _vwa_meta not in (ViolationAction.WARN, ViolationAction.HALT)
+                    and _vwa_meta is not ViolationAction.WARN
                 ):
                     _bv_meta = _v
             if is_noop:
                 fast_records.append(None)
             # strict=True is guaranteed at this call site (outer validate() guard).
-            if _bv_meta is not None:
+            if _bv_meta is not None and not _has_halt:
                 raise ConstitutionalViolationError(
                     f"Action blocked by rule {_bv_meta.rule_id}: {_bv_meta.rule_text}",
                     rule_id=_bv_meta.rule_id,
                     severity=_bv_meta.severity.value,
                     action=_a200,
                 )
-            return self._new_fast_result(valid=True, violations=_vlist, action=action)
+            return self._new_fast_result(valid=not _has_halt, violations=_vlist, action=action)
         return None
 
     def _validate_rust_full(
@@ -315,7 +318,10 @@ class GovernanceMatcherMixin:
                 Violation(rid, rtxt, _SEV(sev), _a200, cat)
                 for rid, rtxt, sev, _, cat in _violations
             ]
-            if _blocking and strict:
+            _has_halt = any(
+                self._rule_id_to_wa.get(v.rule_id) is ViolationAction.HALT for v in _vlist
+            )
+            if _blocking and strict and not _has_halt:
                 _bv = next((v for v in _vlist if v.severity.blocks()), _vlist[0])
                 _exc_idx = self._rule_id_to_exc_idx.get(_bv.rule_id, -1)
                 if _exc_idx >= 0:
@@ -333,8 +339,9 @@ class GovernanceMatcherMixin:
                     action=_a200,
                 )
             if fast_records is not None:
+                fast_records.append(None)
                 return self._new_fast_result(
-                    valid=not _blocking,
+                    valid=not (_blocking or _has_halt),
                     violations=_vlist,
                     action=action,
                 )
