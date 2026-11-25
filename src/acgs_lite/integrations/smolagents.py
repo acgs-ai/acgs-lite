@@ -394,7 +394,7 @@ def _first_str_attr(obj: Any, names: tuple[str, ...]) -> str | None:
     return None
 
 
-def _append_to_seq(seq: list, hook: Any) -> None:
+def _append_to_seq(seq: list[Any], hook: Any) -> None:
     """Append *hook* to *seq* unless an equivalent governor hook is already there."""
     marker = getattr(hook, "_acgs_governor", None)
     if marker is not None and any(getattr(h, "_acgs_governor", None) == marker for h in seq):

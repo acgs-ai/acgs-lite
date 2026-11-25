@@ -16,7 +16,7 @@ from typing import Any
 from urllib import request as urllib_request
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register observe and otel subcommands."""
     # observe
     p_observe = sub.add_parser(
@@ -245,8 +245,9 @@ def _render_selected_format(
     payloads: dict[str, Any], fmt: str, *, watch_iteration: int | None
 ) -> str:
     """Render payloads in the selected CLI output format."""
+    content: str
     if fmt == "prometheus":
-        content = payloads["prometheus_text"]
+        content = str(payloads["prometheus_text"])
         if watch_iteration is not None:
             content = f"# snapshot={watch_iteration}\n" + content
     elif fmt == "otel":
@@ -272,7 +273,7 @@ def _render_selected_format(
                 + "\n"
             )
     else:
-        content = payloads["summary_text"]
+        content = str(payloads["summary_text"])
         if watch_iteration is not None:
             content = f"\n--- Snapshot {watch_iteration} ---\n{content}"
     return content if content.endswith("\n") else content + "\n"

@@ -110,10 +110,10 @@ def generate_certificate(
     created_at: str = record.get("created_at", "")
     matched_rules: list[str] = record.get("matched_rules") or []
     violated_rules: list[str] = record.get("violated_rules") or []
-    maci_chain: list[dict] = record.get("maci_chain") or []
-    compliance_evidence: list[dict] = record.get("compliance_evidence") or []
-    runtime_obligations: list[dict] = record.get("runtime_obligations") or []
-    intervention: dict | None = record.get("intervention")
+    maci_chain: list[dict[str, Any]] = record.get("maci_chain") or []
+    compliance_evidence: list[dict[str, Any]] = record.get("compliance_evidence") or []
+    runtime_obligations: list[dict[str, Any]] = record.get("runtime_obligations") or []
+    intervention: dict[str, Any] | None = record.get("intervention")
     prev_cdp_hash: str = record.get("prev_cdp_hash", "genesis")
     input_hash: str = record.get("input_hash", "")
     compliance_frameworks: list[str] = record.get("compliance_frameworks") or []
@@ -399,7 +399,7 @@ def _draw_score_bar(pdf: Any, label: str, value: float, color: tuple[int, int, i
     pdf.cell(0, 5, f"{round(value * 100)}%", new_x="LMARGIN", new_y="NEXT")
 
 
-def _draw_maci_table(pdf: Any, steps: list[dict]) -> None:
+def _draw_maci_table(pdf: Any, steps: list[dict[str, Any]]) -> None:
     headers = ["#", "Role", "Agent ID", "Action", "Outcome", "Timestamp"]
     widths = [8, 22, 42, 42, 22, 34]
     pdf.set_font("Helvetica", "B", 7)
@@ -444,7 +444,7 @@ def _draw_maci_table(pdf: Any, steps: list[dict]) -> None:
             pdf.set_font("Helvetica", "", 7)
 
 
-def _draw_evidence_table(pdf: Any, evidence: list[dict]) -> None:
+def _draw_evidence_table(pdf: Any, evidence: list[dict[str, Any]]) -> None:
     headers = ["Framework", "Article", "Evidence", "Compliant"]
     widths = [28, 28, 98, 16]
     pdf.set_font("Helvetica", "B", 7)
@@ -477,7 +477,7 @@ def _draw_evidence_table(pdf: Any, evidence: list[dict]) -> None:
         pdf.set_y(new_y)
 
 
-def _draw_obligations_table(pdf: Any, obligations: list[dict]) -> None:
+def _draw_obligations_table(pdf: Any, obligations: list[dict[str, Any]]) -> None:
     headers = ["Type", "Severity", "Framework", "Article", "Satisfied"]
     widths = [38, 22, 28, 28, 18]
     pdf.set_font("Helvetica", "B", 7)

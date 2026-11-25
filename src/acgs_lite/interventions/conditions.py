@@ -44,7 +44,7 @@ def evaluate_condition(condition: dict[str, Any], cdp_record: dict[str, Any]) ->
 
     # Verdict checks
     if "verdict" in condition:
-        return cdp_record.get("verdict") == condition["verdict"]
+        return bool(cdp_record.get("verdict") == condition["verdict"])
 
     if "verdict_in" in condition:
         return cdp_record.get("verdict") in condition["verdict_in"]

@@ -84,7 +84,7 @@ class _RestoreInputs:
     debug: bool
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the ``restore`` subcommand on the top-level CLI parser."""
     p = sub.add_parser(
         "restore",

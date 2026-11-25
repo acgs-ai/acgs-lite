@@ -602,7 +602,7 @@ class GovernanceNotifier:
         verify = getattr(audit_log, "verify_chain", None)
         if verify is None:
             return True
-        intact = verify()
+        intact = bool(verify())
         if not intact and self.notify_on_audit_tamper:
             event = GovernanceEvent(
                 event_type="audit_tamper",

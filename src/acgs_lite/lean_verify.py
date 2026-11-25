@@ -509,10 +509,11 @@ def _parse_json_response(raw: str | None) -> dict[str, Any]:
             text = text.rstrip()[:-3].rstrip()
 
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
     except json.JSONDecodeError:
         _log.warning("Failed to parse Leanstral response as JSON")
         return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -710,7 +711,8 @@ class LeanstralVerifier:
             self._model = _FALLBACK_MODEL
             response = client.chat.complete(model=self._model, **request)
 
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        return content if isinstance(content, str) else None
 
     def _formalize_rules(
         self,

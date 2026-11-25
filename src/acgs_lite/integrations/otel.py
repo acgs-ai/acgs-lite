@@ -351,7 +351,7 @@ class GovernanceMetricsMiddleware:
         else:
             self._tracer = _NoopTracer()  # type: ignore[assignment]
 
-    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         """ASGI entry point."""
         if scope.get("type") != "http":
             await self._app(scope, receive, send)
@@ -399,7 +399,7 @@ def create_prometheus_app(
             "OpenTelemetry or Prometheus exporter not installed; /metrics endpoint will return 503",
         )
 
-        async def _unavailable(scope: dict, receive: Any, send: Any) -> None:  # noqa: ARG001
+        async def _unavailable(scope: dict[str, Any], receive: Any, send: Any) -> None:  # noqa: ARG001
             await send(
                 {
                     "type": "http.response.start",
@@ -419,7 +419,7 @@ def create_prometheus_app(
     try:
         from prometheus_client import generate_latest
 
-        async def _metrics_app(scope: dict, receive: Any, send: Any) -> None:  # noqa: ARG001
+        async def _metrics_app(scope: dict[str, Any], receive: Any, send: Any) -> None:  # noqa: ARG001
             body = generate_latest()
             await send(
                 {
@@ -441,7 +441,7 @@ def create_prometheus_app(
     except ImportError:
         logger.warning("prometheus_client not installed; /metrics endpoint will return 503")
 
-        async def _fallback(scope: dict, receive: Any, send: Any) -> None:  # noqa: ARG001
+        async def _fallback(scope: dict[str, Any], receive: Any, send: Any) -> None:  # noqa: ARG001
             await send(
                 {
                     "type": "http.response.start",

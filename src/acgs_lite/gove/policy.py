@@ -21,7 +21,7 @@ class ValidatorLike(Protocol):
     def validate(self, action: str, *, agent_id: str = ..., **kwargs: Any) -> Any: ...
 
 
-class ConstitutionPolicy(Policy):
+class ConstitutionPolicy(Policy):  # type: ignore[misc]  # gove_zone is an optional dependency
     def __init__(self, engine: ValidatorLike, *, version: str) -> None:
         if not version:
             raise ValueError("version must be a non-empty stable constitution identifier")

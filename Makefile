@@ -144,7 +144,7 @@ test-quick:
 	$(TEST_ENV) $(PYTEST) $(TEST_DIR)/ \
 	    $(PYTEST_ROOTDIR) $(PYTEST_IGNORE_STANDALONE) \
 	    --import-mode=importlib \
-	    -m "not slow and not benchmark" \
+	    -m "not slow and not benchmark and not e2e" \
 	    -x -v
 
 # Keep this separate from the deliberately dependency-free Python fallback gate.

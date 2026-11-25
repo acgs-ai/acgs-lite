@@ -66,7 +66,7 @@ def _print_signal_dir(breaker: GovernanceCircuitBreaker) -> None:
         )
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register halt and resume subcommands."""
     p_halt = sub.add_parser(
         "halt",

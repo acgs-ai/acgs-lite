@@ -109,7 +109,7 @@ jobs:
 """
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the init subcommand."""
     p = sub.add_parser("init", help="Scaffold rules.yaml + CI governance job")
     p.add_argument("--force", action="store_true", help="Overwrite existing files")

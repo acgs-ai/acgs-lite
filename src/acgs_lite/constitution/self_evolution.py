@@ -621,7 +621,9 @@ def _record_to_mapping(record: GovernanceDecisionRecord | Mapping[str, Any]) -> 
         return record
     to_dict = getattr(record, "to_dict", None)
     if callable(to_dict):
-        return to_dict()
+        mapped = to_dict()
+        if isinstance(mapped, Mapping):
+            return mapped
     msg = f"Unsupported decision record type: {type(record)!r}"
     raise TypeError(msg)
 

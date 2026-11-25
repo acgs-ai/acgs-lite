@@ -42,8 +42,8 @@ else:
 
         def sign(self, data: bytes) -> str:
             with _OQSSignature(self._algorithm, secret_key=self._secret_key) as signer:
-                return signer.sign(data).hex()
+                return str(signer.sign(data).hex())
 
         def verify(self, data: bytes, sig: str) -> bool:
             with _OQSSignature(self._algorithm) as verifier:
-                return verifier.verify(data, bytes.fromhex(sig), self._public_key)
+                return bool(verifier.verify(data, bytes.fromhex(sig), self._public_key))

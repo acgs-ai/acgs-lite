@@ -90,7 +90,7 @@ def _extract_run_output_text(run_output: Any) -> str:
     return str(run_output)
 
 
-class AgnoACGSGovernor(BaseGuardrail):
+class AgnoACGSGovernor(BaseGuardrail):  # type: ignore[misc]  # agno is an optional dependency
     """Attach ACGS validation to an Agno Agent via pre_hooks/post_hooks.
 
     This object is:

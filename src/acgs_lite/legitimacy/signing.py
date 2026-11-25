@@ -121,7 +121,7 @@ class Ed25519ReceiptSigner:
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
         )
-        self._public_key_hex = public_bytes.hex()
+        self._public_key_hex: str = str(public_bytes.hex())
         # Default key id is a stable fingerprint of the public key.
         self.key_id = key_id or hashlib.sha256(public_bytes).hexdigest()[:16]
         self.ephemeral = False
@@ -150,7 +150,7 @@ class Ed25519ReceiptSigner:
         return self._public_key_hex
 
     def sign(self, message: bytes) -> str:
-        return self._private_key.sign(message).hex()
+        return str(self._private_key.sign(message).hex())
 
     def sign_receipt(self, receipt: DecisionReceipt) -> SignedReceipt:
         return sign_receipt(receipt, self)
