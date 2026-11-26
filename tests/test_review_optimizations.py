@@ -1964,3 +1964,214 @@ class TestEnforcementAndRustParityHardening:
             assert not hasattr(eng, "_has_halt_rules")
             # Every attribute initialized on GovernanceEngine should live in __slots__, not __dict__.
             assert getattr(eng, "__dict__", {}) == {}
+
+    def test_rust_fast_path_python_end_anchor_trailing_newline_parity(self) -> None:
+        """Non-multiline `$` patterns must not fail open in Rust on trailing `\\n` inputs."""
+        for pat, matching_input, non_matching_input in (
+            (r"delete$", "delete\n", "delete\n\n"),
+            (r"drop\s+table\s+users$", "drop table users\n", "drop table users\r\n"),
+            (r"(?:delete|drop)$", "drop\n", "drop now\n"),
+            (r"(?m)(?-m:delete$)", "delete\n", "delete\nmore"),
+        ):
+            const = Constitution(
+                name="end-anchor-parity",
+                rules=[
+                    Rule(
+                        id="END-1",
+                        text="Block end-anchored op",
+                        severity=Severity.HIGH,
+                        patterns=[pat],
+                    )
+                ],
+            )
+            eng_fast = GovernanceEngine(
+                const, strict=False, audit_mode="fast", warmup=False, freeze_gc=False
+            )
+            eng_full = GovernanceEngine(
+                const, strict=False, audit_mode="full", warmup=False, freeze_gc=False
+            )
+            if eng_fast._rust_validator is not None:
+                assert eng_fast._rust_has_end_anchor is True
+            assert getattr(eng_fast, "__dict__", {}) == {}
+
+            res_fast = eng_fast.validate(matching_input)
+            res_full = eng_full.validate(matching_input)
+            assert res_fast.valid is False
+            assert res_full.valid is False
+            assert [v.rule_id for v in res_fast.violations] == ["END-1"]
+
+            # Context action_detail/action_description ending in \n must also match Python parity.
+            ctx_fast = eng_fast.validate("safe", context={"action_detail": matching_input})
+            ctx_full = eng_full.validate("safe", context={"action_detail": matching_input})
+            assert ctx_fast.valid is False and ctx_full.valid is False
+
+            # Strict mode must raise identically across fast and full.
+            eng_strict = GovernanceEngine(
+                const, strict=True, audit_mode="fast", warmup=False, freeze_gc=False
+            )
+            with pytest.raises(engine_core.ConstitutionalViolationError) as exc_info:
+                eng_strict.validate(matching_input)
+            assert exc_info.value.rule_id == "END-1"
+            with pytest.raises(engine_core.ConstitutionalViolationError) as ctx_exc:
+                eng_strict.validate("safe", context={"action_detail": matching_input})
+            assert ctx_exc.value.rule_id == "END-1"
+
+            # Non-matching inputs must agree with Python re.
+            assert (
+                eng_fast.validate(non_matching_input).valid
+                == eng_full.validate(non_matching_input).valid
+            )
+
+        # Multiline (?m)$ and non-$ patterns do not set _rust_has_end_anchor.
+        for pat in (r"(?m)delete$", r"\$100", r"AKIA[0-9A-Z]{16}"):
+            const_ml = Constitution(
+                name="no-at-end",
+                rules=[Rule(id="ML-1", text="t", severity=Severity.HIGH, patterns=[pat])],
+            )
+            eng_ml = GovernanceEngine(
+                const_ml, strict=False, audit_mode="fast", warmup=False, freeze_gc=False
+            )
+            assert eng_ml._rust_has_end_anchor is False
+
+    def test_rust_fast_path_combining_mark_and_unicode_word_boundary_parity(self) -> None:
+        """Non-ASCII combining marks (e.g. U+0301) must not bypass `\\b...\\b` rules via Rust."""
+        const = Constitution(
+            name="unicode-wb-parity",
+            rules=[
+                Rule(
+                    id="WB-SECRET",
+                    text="Block secret word boundary",
+                    severity=Severity.CRITICAL,
+                    patterns=[r"\bsecret\b"],
+                ),
+                Rule(
+                    id="DIG-SSN",
+                    text="Block digit pattern",
+                    severity=Severity.HIGH,
+                    patterns=[r"\d{3}-\d{2}-\d{4}"],
+                ),
+            ],
+        )
+        eng_fast = GovernanceEngine(
+            const, strict=False, audit_mode="fast", warmup=False, freeze_gc=False
+        )
+        eng_full = GovernanceEngine(
+            const, strict=False, audit_mode="full", warmup=False, freeze_gc=False
+        )
+        eng_strict = GovernanceEngine(
+            const, strict=True, audit_mode="fast", warmup=False, freeze_gc=False
+        )
+
+        # t + U+0301 is NFKC-stable; Rust's UTS#18 \w includes \p{M} and would break \b.
+        for payload, expected_id in (
+            ("secret\u0301", "WB-SECRET"),
+            ("leak secret\u0301 now", "WB-SECRET"),
+            ("\u0662\u0663\u0664-\u0665\u0666-\u0667\u0668\u0669\u0660", "DIG-SSN"),
+        ):
+            r_fast = eng_fast.validate(payload)
+            r_full = eng_full.validate(payload)
+            assert r_fast.valid is False
+            assert r_full.valid is False
+            assert [v.rule_id for v in r_fast.violations] == [expected_id]
+            assert [v.rule_id for v in r_full.violations] == [expected_id]
+            with pytest.raises(engine_core.ConstitutionalViolationError) as exc_info:
+                eng_strict.validate(payload)
+            assert exc_info.value.rule_id == expected_id
+            with pytest.raises(engine_core.ConstitutionalViolationError) as ctx_exc:
+                eng_strict.validate("safe", context={"action_detail": payload})
+            assert ctx_exc.value.rule_id == expected_id
+
+    def test_python_regex_matches_overlapping_and_substring_keywords_parity(self) -> None:
+        """Pure-Python regex matcher must catch overlapping and substring-contained keywords."""
+        const = Constitution(
+            name="overlap-kw-parity",
+            rules=[
+                Rule(
+                    id="R-WARN-OVERLAP",
+                    text="Warn on delete user",
+                    severity=Severity.LOW,
+                    keywords=["delete user"],
+                    workflow_action=ViolationAction.WARN,
+                ),
+                Rule(
+                    id="R-CRIT-OVERLAP",
+                    text="Block user data",
+                    severity=Severity.CRITICAL,
+                    keywords=["user data"],
+                    workflow_action=ViolationAction.BLOCK,
+                ),
+                Rule(
+                    id="R-WARN-SUPER",
+                    text="Warn on bypass validation",
+                    severity=Severity.LOW,
+                    keywords=["bypass validation"],
+                    workflow_action=ViolationAction.WARN,
+                ),
+                Rule(
+                    id="R-CRIT-SUB",
+                    text="Block bypass",
+                    severity=Severity.CRITICAL,
+                    keywords=["bypass"],
+                    workflow_action=ViolationAction.BLOCK,
+                ),
+                Rule(
+                    id="R-WARN-POS-NEG1",
+                    text="Warn on secret token",
+                    severity=Severity.LOW,
+                    keywords=["secret token"],
+                    workflow_action=ViolationAction.WARN,
+                ),
+                Rule(
+                    id="R-CRIT-POS-NEG2",
+                    text="Block token password",
+                    severity=Severity.CRITICAL,
+                    keywords=["token password"],
+                    workflow_action=ViolationAction.BLOCK,
+                ),
+            ],
+        )
+
+        def _force_python_regex(eng: GovernanceEngine) -> GovernanceEngine:
+            eng._rust_validator = None
+            eng._ac_iter = None
+            hot = list(eng._hot)
+            hot[0] = None
+            hot[8] = False
+            hot[10] = None
+            eng._hot = tuple(hot)
+            return eng
+
+        eng_ns = _force_python_regex(
+            GovernanceEngine(const, strict=False, audit_mode="fast", warmup=False, freeze_gc=False)
+        )
+        eng_s = _force_python_regex(
+            GovernanceEngine(const, strict=True, audit_mode="fast", warmup=False, freeze_gc=False)
+        )
+        assert getattr(eng_ns, "__dict__", {}) == {}
+
+        # 1. Partial overlap: "delete user" + "user data" in "delete user data"
+        r1 = eng_ns.validate("delete user data")
+        assert r1.valid is False
+        assert [v.rule_id for v in r1.violations] == ["R-CRIT-OVERLAP"]
+        assert [w.rule_id for w in r1.warnings] == ["R-WARN-OVERLAP"]
+        with pytest.raises(engine_core.ConstitutionalViolationError) as e1:
+            eng_s.validate("delete user data")
+        assert e1.value.rule_id == "R-CRIT-OVERLAP"
+
+        # 2. Substring/prefix containment: "bypass" inside "bypass validation"
+        r2 = eng_ns.validate("bypass validation")
+        assert r2.valid is False
+        assert [v.rule_id for v in r2.violations] == ["R-CRIT-SUB"]
+        assert [w.rule_id for w in r2.warnings] == ["R-WARN-SUPER"]
+        with pytest.raises(engine_core.ConstitutionalViolationError) as e2:
+            eng_s.validate("bypass validation")
+        assert e2.value.rule_id == "R-CRIT-SUB"
+
+        # 3. Positive-verb mode overlapping security keywords: "secret token" + "token password"
+        r3 = eng_ns.validate("run secret token password")
+        assert r3.valid is False
+        assert [v.rule_id for v in r3.violations] == ["R-CRIT-POS-NEG2"]
+        assert [w.rule_id for w in r3.warnings] == ["R-WARN-POS-NEG1"]
+        with pytest.raises(engine_core.ConstitutionalViolationError) as e3:
+            eng_s.validate("run secret token password")
+        assert e3.value.rule_id == "R-CRIT-POS-NEG2"

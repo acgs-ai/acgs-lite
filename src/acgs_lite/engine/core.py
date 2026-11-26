@@ -329,30 +329,122 @@ def _match_variants(text: str) -> tuple[str, ...]:
     return (lowered,) if normalized == lowered else (lowered, normalized)
 
 
-# Non-ASCII characters that Python's ``re.IGNORECASE`` folds onto ASCII letters
-# (U+0130 İ, U+0131 ı, U+017F ſ, U+212A K) where Rust's ``regex`` crate can
-# disagree on simple case-folding (e.g. ``(?i)disk`` vs ``"dısk"``).
-_PYTHON_IGNORECASE_FOLD_RE = re.compile("[\u0130\u0131\u017f\u212a]")
+@lru_cache(maxsize=1024)
+def _pattern_has_python_end_anchor(pattern: str, flags: int) -> bool:
+    """True if *pattern* uses Python's non-multiline ``$`` (``AT_END``).
 
+    In Python's ``re``, non-multiline ``$`` matches both end-of-string and
+    immediately before a trailing ``\\n``, whereas Rust's ``regex`` crate only
+    matches end-of-text (``\\z``). Constitutions containing such patterns must
+    fall back to Python on inputs ending with ``\\n`` to avoid fail-open drift.
+    """
+    try:
+        parsed = _sre_parser.parse(pattern, flags)
+    except Exception:
+        return True
 
-def _needs_rust_python_fallback(text: str) -> bool:
-    """True when *text* must use the Python matcher instead of the Rust fast path."""
-    if _is_plain_ascii(text):
+    def walk(items: Any, multiline: bool) -> bool:
+        for op, av in items:
+            name = getattr(op, "name", str(op))
+            if name == "AT":
+                if not multiline and getattr(av, "name", str(av)) == "AT_END":
+                    return True
+            elif name == "SUBPATTERN":
+                sub_ml = (multiline or bool(av[1] & re.MULTILINE)) and not bool(
+                    av[2] & re.MULTILINE
+                )
+                if walk(av[3], sub_ml):
+                    return True
+            elif name == "BRANCH":
+                if any(walk(branch, multiline) for branch in av[1]):
+                    return True
+            elif name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"):
+                if walk(av[2], multiline):
+                    return True
+            elif name in ("ASSERT", "ASSERT_NOT"):
+                if walk(av[1], multiline):
+                    return True
+            elif name == "GROUPREF_EXISTS":
+                if walk(av[1], multiline) or (av[2] is not None and walk(av[2], multiline)):
+                    return True
+            elif name == "ATOMIC_GROUP":
+                if walk(av, multiline):
+                    return True
         return False
-    return (
-        _PYTHON_IGNORECASE_FOLD_RE.search(text) is not None
-        or normalize_for_matching(text).lower() != text.lower()
-    )
+
+    return walk(parsed, bool(parsed.state.flags & re.MULTILINE))
 
 
-def _needs_normalized_pass(action: str, context: dict[str, Any] | None) -> bool:
-    """True when the action or a matched context value requires Python normalization/folding."""
-    if _needs_rust_python_fallback(action):
+def _build_substring_closed_kw_map(
+    sorted_kws: list[str],
+    kw_to_idxs: dict[str, list[tuple[int, bool]]],
+    *,
+    neg_only: bool = False,
+) -> tuple[dict[str, tuple[int, ...]], int]:
+    """Map each keyword to rule indices for itself and any contained shorter keyword.
+
+    ``sorted_kws`` must be sorted longest-first (matching the alternation order of
+    ``_combined_kw_re`` / ``_neg_kw_re``) so leftmost-longest regex matching paired
+    with ``m.start() + 1`` resumption never shadows contained or overlapping
+    keywords (matching Rust ``find_overlapping_iter`` and Aho-Corasick parity).
+    """
+    n = len(sorted_kws)
+    all_mask = 0
+    direct: list[tuple[int, ...]] = []
+    for kw in sorted_kws:
+        idxs = tuple(
+            dict.fromkeys(
+                rule_idx for rule_idx, kw_has_neg in kw_to_idxs[kw] if (not neg_only or kw_has_neg)
+            )
+        )
+        direct.append(idxs)
+        for rule_idx in idxs:
+            all_mask |= 1 << rule_idx
+
+    result: dict[str, tuple[int, ...]] = {}
+    for i, kw in enumerate(sorted_kws):
+        merged_list = list(direct[i])
+        seen = set(merged_list)
+        kw_len = len(kw)
+        for j in range(i + 1, n):
+            sub_kw = sorted_kws[j]
+            if len(sub_kw) < kw_len and sub_kw in kw:
+                for rule_idx in direct[j]:
+                    if rule_idx not in seen:
+                        seen.add(rule_idx)
+                        merged_list.append(rule_idx)
+        result[kw] = tuple(merged_list)
+    return result, all_mask
+
+
+def _needs_rust_python_fallback(text: str, *, check_trailing_newline: bool = False) -> bool:
+    """True when *text* must use the Python matcher instead of the Rust fast path.
+
+    Rust's ``regex`` crate differs from Python's ``re`` on non-ASCII Unicode
+    character classes/boundaries (e.g. ``\\w``/``\\b`` includes combining marks
+    such as ``U+0301``, allowing ``"secret\\u0301"`` to bypass ``\\bsecret\\b``),
+    non-ASCII ``IGNORECASE`` folding, and NFKC/hidden-character normalization.
+    On plain ASCII, Python's non-multiline ``$`` also matches before a trailing
+    ``\\n`` whereas Rust's ``$`` only matches end-of-text (``\\z``).
+    """
+    if not _is_plain_ascii(text):
+        return True
+    return check_trailing_newline and text.endswith("\n")
+
+
+def _needs_normalized_pass(
+    action: str,
+    context: dict[str, Any] | None,
+    *,
+    check_trailing_newline: bool = False,
+) -> bool:
+    """True when the action or a matched context value requires the Python matcher."""
+    if _needs_rust_python_fallback(action, check_trailing_newline=check_trailing_newline):
         return True
     if not context:
         return False
     return any(
-        _needs_rust_python_fallback(value)
+        _needs_rust_python_fallback(value, check_trailing_newline=check_trailing_newline)
         for key, value in context.items()
         if key in ("action_detail", "action_description") and isinstance(value, str)
     )
@@ -374,10 +466,15 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         "_rule_data",
         "_pattern_rule_idxs",
         "_kw_to_idxs",
+        "_regex_kw_to_idxs",
+        "_regex_neg_kw_to_idxs",
+        "_kw_all_mask",
+        "_neg_kw_all_mask",
         "_combined_kw_re",
         "_combined_findall",
         "_neg_kw_re",
         "_neg_findall",
+        "_neg_search",
         "_rule_excs",
         "_combined_search",
         "_pat_anchor_search",
@@ -392,6 +489,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         "_has_high_rules",
         "_hot",
         "_rust_validator",
+        "_rust_has_end_anchor",
         "_rule_id_to_exc_idx",
         "_rule_id_to_wa",
         "_audit_mode",
@@ -529,6 +627,11 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             # Both keyword regexes are flag-free alternations of escaped literals,
             # so they match somewhere in a text iff one keyword is a substring of it.
             self._kw_gate: tuple[str, ...] = tuple(sorted_kws)
+            self._regex_kw_to_idxs: dict[str, tuple[int, ...]]
+            self._kw_all_mask: int
+            self._regex_kw_to_idxs, self._kw_all_mask = _build_substring_closed_kw_map(
+                sorted_kws, kw_to_idxs
+            )
 
             neg_kws = sorted(
                 (kw for kw in kw_to_idxs if _KW_NEGATIVE_RE.search(kw)),
@@ -536,22 +639,36 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 reverse=True,
             )
             self._neg_kw_gate: tuple[str, ...] = tuple(neg_kws)
+            self._regex_neg_kw_to_idxs: dict[str, tuple[int, ...]]
+            self._neg_kw_all_mask: int
             if neg_kws:
                 self._neg_kw_re: re.Pattern[str] | None = re.compile(
                     "|".join(re.escape(kw) for kw in neg_kws)
                 )
                 self._neg_findall: Callable[[str], list[str]] | None = self._neg_kw_re.findall
+                self._neg_search: _PatternSearch | None = self._neg_kw_re.search
+                self._regex_neg_kw_to_idxs, self._neg_kw_all_mask = _build_substring_closed_kw_map(
+                    neg_kws, kw_to_idxs, neg_only=True
+                )
             else:
                 self._neg_kw_re = None
                 self._neg_findall = None
+                self._neg_search = None
+                self._regex_neg_kw_to_idxs = {}
+                self._neg_kw_all_mask = 0
         else:
             self._combined_kw_re = None
             self._combined_findall = None
             self._combined_search = None
             self._kw_gate = ()
+            self._regex_kw_to_idxs = {}
+            self._kw_all_mask = 0
             self._neg_kw_re = None
             self._neg_findall = None
+            self._neg_search = None
             self._neg_kw_gate = ()
+            self._regex_neg_kw_to_idxs = {}
+            self._neg_kw_all_mask = 0
 
         if _HAS_AHO and (kw_to_idxs or _anchor_patterns):
             _kw_frozen = self._kw_to_idxs
@@ -630,6 +747,10 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 self._rust_validator = None
         else:
             self._rust_validator = None
+        self._rust_has_end_anchor: bool = self._rust_validator is not None and any(
+            _pattern_has_python_end_anchor(pat.pattern, pat.flags)
+            for _, pat in self._pattern_rule_idxs
+        )
         if self._rust_validator is not None:
             _h = self._hot
             self._hot = (
@@ -1164,25 +1285,35 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         # Pattern ASCII gates (see _ascii_gate_literal) hold only for ASCII text;
         # any other text runs every pattern regex.
         _ungated = not text_lower.isascii()
+        if positive_verb_mode:
+            _kw_search = self._neg_search
+            _kw_gate = self._neg_kw_gate
+            _kw_map = self._regex_neg_kw_to_idxs
+            _all_kw_mask = self._neg_kw_all_mask
+        else:
+            _kw_search = self._combined_search
+            _kw_gate = self._kw_gate
+            _kw_map = self._regex_kw_to_idxs
+            _all_kw_mask = self._kw_all_mask
+
         # Keyword gates (exact for any text): a long text containing no keyword
         # skips the alternation regex, which then could only find nothing.
-        _kw_absent = len(text_lower) >= _KW_GATE_MIN_LEN and not _contains_any(
-            self._neg_kw_gate if positive_verb_mode else self._kw_gate, text_lower
-        )
-        if positive_verb_mode:
-            _neg_findall = self._neg_findall
-            kw_matches = [] if (_kw_absent or _neg_findall is None) else _neg_findall(text_lower)
-            if kw_matches:
-                fired = 0
-                for kw in kw_matches:
-                    for rule_idx, _ in self._kw_to_idxs.get(kw, []):
+        _kw_absent = len(text_lower) >= _KW_GATE_MIN_LEN and not _contains_any(_kw_gate, text_lower)
+        fired = 0
+        if _kw_search is not None and not _kw_absent:
+            _m = _kw_search(text_lower)
+            if _m is not None:
+                rule_data = self._rule_data
+                rule_excs = self._rule_excs
+                while _m is not None:
+                    for rule_idx in _kw_map[_m.group(0)]:
                         _bit = 1 << rule_idx
                         if fired & _bit:
                             continue
                         fired |= _bit
-                        rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
+                        rid, rtxt, rsev, _, rcat, is_crit, _ = rule_data[rule_idx]
                         if strict and is_crit:
-                            _e_src = self._rule_excs[rule_idx]
+                            _e_src = rule_excs[rule_idx]
                             raise ConstitutionalViolationError(
                                 str(_e_src),
                                 rule_id=_e_src.rule_id,
@@ -1192,70 +1323,35 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                         if violations is None:
                             violations = []
                         violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-                for rule_idx, pat, gate in self._pattern_rule_gates:
-                    if (
-                        not (fired & (1 << rule_idx))
-                        and (_ungated or gate in text_lower)
-                        and pat.search(text_lower)
-                    ):
-                        fired |= 1 << rule_idx
-                        rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                        if strict and is_crit:
-                            _e_src = self._rule_excs[rule_idx]
-                            raise ConstitutionalViolationError(
-                                str(_e_src),
-                                rule_id=_e_src.rule_id,
-                                severity=_e_src.severity,
-                                action=action_200,
-                            )
-                        if violations is None:
-                            violations = []
-                        violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-            elif self._pattern_rule_idxs:
-                # F4: no-anchor patterns (secret regexes with no literal anchor
-                # word, e.g. ``sk-...`` keys or SSNs) must ALWAYS be evaluated.
-                # Gating the whole pattern list behind the anchor search dropped
-                # them whenever the text had no anchor word — a fail-open the
-                # Aho-Corasick backend never had. Fall back to the no-anchor
-                # subset when the anchor search misses.
-                _pats = (
-                    self._pattern_rule_gates
-                    if (self._pat_anchor_search is None or self._pat_anchor_search(text_lower))
-                    else self._no_anchor_gates
-                )
-                for rule_idx, pat, gate in _pats:
-                    if (_ungated or gate in text_lower) and pat.search(text_lower):
-                        rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                        if strict and is_crit:
-                            _e_src = self._rule_excs[rule_idx]
-                            raise ConstitutionalViolationError(
-                                str(_e_src),
-                                rule_id=_e_src.rule_id,
-                                severity=_e_src.severity,
-                                action=action_200,
-                            )
-                        if violations is None:
-                            violations = []
-                        violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-            return violations
-        elif self._combined_findall is not None or self._pattern_rule_idxs:
-            # No keyword index (pattern-only constitution): skip straight to the
-            # pattern fallback below instead of evaluating nothing.
-            _combined_search = self._combined_search
-            _combined_findall = self._combined_findall
-            _m = (
-                _combined_search(text_lower)
-                if _combined_search is not None and not _kw_absent
-                else None
+                    if fired == _all_kw_mask:
+                        break
+                    _m = _kw_search(text_lower, _m.start() + 1)
+
+        if self._pattern_rule_idxs:
+            # F4: no-anchor patterns (secret regexes with no literal anchor
+            # word, e.g. ``sk-...`` keys or SSNs) must ALWAYS be evaluated.
+            # Gating the whole pattern list behind the anchor search dropped
+            # them whenever the text had no anchor word — a fail-open the
+            # Aho-Corasick backend never had. Fall back to the no-anchor
+            # subset when the anchor search misses.
+            _pats = (
+                self._pattern_rule_gates
+                if (self._pat_anchor_search is None or self._pat_anchor_search(text_lower))
+                else self._no_anchor_gates
             )
-            if _m:
-                fired = 0
-                kw0 = _m.group(0)
-                for rule_idx, _ in self._kw_to_idxs.get(kw0, []):
-                    fired |= 1 << rule_idx
-                    rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
+            rule_data = self._rule_data
+            rule_excs = self._rule_excs
+            for rule_idx, pat, gate in _pats:
+                _bit = 1 << rule_idx
+                if (
+                    not (fired & _bit)
+                    and (_ungated or gate in text_lower)
+                    and pat.search(text_lower)
+                ):
+                    fired |= _bit
+                    rid, rtxt, rsev, _, rcat, is_crit, _ = rule_data[rule_idx]
                     if strict and is_crit:
-                        _e_src = self._rule_excs[rule_idx]
+                        _e_src = rule_excs[rule_idx]
                         raise ConstitutionalViolationError(
                             str(_e_src),
                             rule_id=_e_src.rule_id,
@@ -1265,82 +1361,6 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                     if violations is None:
                         violations = []
                     violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-                if (
-                    _combined_search is not None
-                    and _combined_findall is not None
-                    and _combined_search(text_lower, _m.end()) is not None
-                ):
-                    for kw in _combined_findall(text_lower):
-                        for rule_idx, _ in self._kw_to_idxs.get(kw, []):
-                            _bit = 1 << rule_idx
-                            if fired & _bit:
-                                continue
-                            fired |= _bit
-                            rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                            if strict and is_crit:
-                                _e_src = self._rule_excs[rule_idx]
-                                raise ConstitutionalViolationError(
-                                    str(_e_src),
-                                    rule_id=_e_src.rule_id,
-                                    severity=_e_src.severity,
-                                    action=action_200,
-                                )
-                            if violations is None:
-                                violations = []
-                            violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-                # F4: always evaluate no-anchor patterns even when no anchor word
-                # is present (mirrors the Aho-Corasick backend).
-                _pats = (
-                    self._pattern_rule_gates
-                    if (self._pat_anchor_search is None or self._pat_anchor_search(text_lower))
-                    else self._no_anchor_gates
-                )
-                for rule_idx, pat, gate in _pats:
-                    if (
-                        not (fired & (1 << rule_idx))
-                        and (_ungated or gate in text_lower)
-                        and pat.search(text_lower)
-                    ):
-                        fired |= 1 << rule_idx
-                        rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                        if strict and is_crit:
-                            _e_src = self._rule_excs[rule_idx]
-                            raise ConstitutionalViolationError(
-                                str(_e_src),
-                                rule_id=_e_src.rule_id,
-                                severity=_e_src.severity,
-                                action=action_200,
-                            )
-                        if violations is None:
-                            violations = []
-                        violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-            elif self._pattern_rule_idxs:
-                # F4: no-anchor patterns (secret regexes with no literal anchor
-                # word, e.g. ``sk-...`` keys or SSNs) must ALWAYS be evaluated.
-                # Gating the whole pattern list behind the anchor search dropped
-                # them whenever the text had no anchor word — a fail-open the
-                # Aho-Corasick backend never had. Fall back to the no-anchor
-                # subset when the anchor search misses.
-                _pats = (
-                    self._pattern_rule_gates
-                    if (self._pat_anchor_search is None or self._pat_anchor_search(text_lower))
-                    else self._no_anchor_gates
-                )
-                for rule_idx, pat, gate in _pats:
-                    if (_ungated or gate in text_lower) and pat.search(text_lower):
-                        rid, rtxt, rsev, _, rcat, is_crit, _ = self._rule_data[rule_idx]
-                        if strict and is_crit:
-                            _e_src = self._rule_excs[rule_idx]
-                            raise ConstitutionalViolationError(
-                                str(_e_src),
-                                rule_id=_e_src.rule_id,
-                                severity=_e_src.severity,
-                                action=action_200,
-                            )
-                        if violations is None:
-                            violations = []
-                        violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
-            return violations
         return violations
 
     def validate(
@@ -1384,11 +1404,15 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             _is_noop,
             _rv,
         ) = self._hot
-        # Obfuscated input (fullwidth forms, zero-width or other format chars) is
-        # matched on both its original and normalized text. Only the Python path
-        # below runs that second pass, so such input skips the Rust fast paths.
-        # ASCII input pays one isascii() check per text here.
-        if _rv is not None and _needs_normalized_pass(action, context):
+        # Non-ASCII/hidden-control inputs (normalization, Unicode \w/\b/\d and
+        # case-folding parity) and trailing-newline inputs under Python non-multiline
+        # `$` rules skip the Rust fast path so semantics match Python's `re` exactly.
+        # Plain ASCII without `$` rules pays only one isascii()/isprintable() check.
+        if _rv is not None and _needs_normalized_pass(
+            action,
+            context,
+            check_trailing_newline=self._rust_has_end_anchor,
+        ):
             _rv = None
         if (
             _rv is not None
