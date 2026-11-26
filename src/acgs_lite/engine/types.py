@@ -9,8 +9,6 @@ from __future__ import annotations
 from .audit_runtime import _ANON, _FastAuditLog, _NoopRecorder, _request_counter
 from .models import CustomValidator, ValidationResult, Violation, _dedup_violations
 
-_EMPTY_VIOLATIONS: list[Violation] = []  # shared empty-violation list for allow-path records
-
 __all__ = [
     "CustomValidator",
     "ValidationResult",

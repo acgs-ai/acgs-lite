@@ -39,11 +39,6 @@ _CLAUDE_CODE_READ_ONLY_TOOLS = frozenset({"Read", "Glob", "Grep", "LS"})
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
-    from acgs_lite.federation import federation_router as federation_router
-    from acgs_lite.integrations.telegram_webhook import (
-        create_telegram_webhook_router as create_telegram_webhook_router,
-    )
-
 
 _LAZY_ROUTERS: dict[str, tuple[str, str]] = {
     "federation_router": ("acgs_lite.federation", "federation_router"),

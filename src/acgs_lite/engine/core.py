@@ -1305,6 +1305,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             if _m is not None:
                 rule_data = self._rule_data
                 rule_excs = self._rule_excs
+                text_len = len(text_lower)
                 while _m is not None:
                     for rule_idx in _kw_map[_m.group(0)]:
                         _bit = 1 << rule_idx
@@ -1325,7 +1326,10 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                         violations.append(Violation(rid, rtxt, rsev, action_200, rcat))
                     if fired == _all_kw_mask:
                         break
-                    _m = _kw_search(text_lower, _m.start() + 1)
+                    next_pos = _m.start() + 1
+                    if next_pos > text_len:
+                        break
+                    _m = _kw_search(text_lower, next_pos)
 
         if self._pattern_rule_idxs:
             # F4: no-anchor patterns (secret regexes with no literal anchor

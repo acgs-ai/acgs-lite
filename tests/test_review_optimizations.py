@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gc
 import hashlib
+import importlib
 import json
 import subprocess
 import sys
@@ -18,6 +19,7 @@ from acgs_lite import (
     AuditEntry,
     AuditLog,
     Constitution,
+    ConstitutionalViolationError,
     GovernanceEngine,
     JSONLAuditBackend,
     Rule,
@@ -304,8 +306,8 @@ class TestBatchValidationThreadSafety:
                     engine.validate("forbidden action")
                     errors.append("strict validate unexpectedly succeeded")
                     break
-                except Exception:
-                    pass
+                except ConstitutionalViolationError:
+                    continue  # Expected fail-closed block under strict=True.
         finally:
             stop.set()
             t.join(timeout=5)
@@ -1117,9 +1119,9 @@ class TestLazySubmoduleAndStreamingHardening:
     def test_lazy_submodule_getattr_and_dir_in_process(self) -> None:
         import types
 
-        import acgs_lite
-        import acgs_lite.constitution as c
-        import acgs_lite.formal as formal_pkg
+        acgs_lite: Any = importlib.import_module("acgs_lite")
+        c: Any = importlib.import_module("acgs_lite.constitution")
+        formal_pkg: Any = importlib.import_module("acgs_lite.formal")
 
         assert isinstance(acgs_lite.__getattr__("provenance"), types.ModuleType)
         assert "provenance" in dir(acgs_lite)
@@ -1225,7 +1227,7 @@ class TestLazySubmoduleAndStreamingHardening:
         pytest.importorskip("fastapi")
         from fastapi import APIRouter
 
-        import acgs_lite.server as srv
+        srv: Any = importlib.import_module("acgs_lite.server")
 
         # Subprocess verifies bare import stays lazy while dir() and patch() work.
         code = (
@@ -1602,8 +1604,8 @@ class TestEnforcementAndRustParityHardening:
             def validate_hot(self, text: str) -> tuple[int, int]:
                 return (_RUST_DENY, 1) if "trigger" in text else (_RUST_ALLOW, 0)
 
-        for sev in Severity:
-            for wa in ViolationAction:
+        for sev in tuple(Severity.__members__.values()):
+            for wa in tuple(ViolationAction.__members__.values()):
                 rule = Rule(
                     id=f"M-{sev.value}-{wa.value}",
                     text="matrix rule",
@@ -2175,3 +2177,61 @@ class TestEnforcementAndRustParityHardening:
         with pytest.raises(engine_core.ConstitutionalViolationError) as e3:
             eng_s.validate("run secret token password")
         assert e3.value.rule_id == "R-CRIT-POS-NEG2"
+
+    def test_python_regex_empty_keyword_terminates_without_hanging(self) -> None:
+        """Terminal empty-string regex match must not loop infinitely when another rule is absent."""
+        const = Constitution(
+            name="empty-keyword",
+            rules=[
+                Rule(
+                    id="R-EMPTY-WARN",
+                    text="Warn on empty keyword",
+                    severity=Severity.LOW,
+                    keywords=[""],
+                    workflow_action=ViolationAction.WARN,
+                ),
+                Rule(
+                    id="R-ABSENT-CRIT",
+                    text="Block absent keyword",
+                    severity=Severity.CRITICAL,
+                    keywords=["never_present"],
+                ),
+            ],
+        )
+
+        def _force_python_regex(eng: GovernanceEngine) -> GovernanceEngine:
+            eng._rust_validator = None
+            eng._ac_iter = None
+            hot = list(eng._hot)
+            hot[0] = None
+            hot[8] = False
+            hot[10] = None
+            eng._hot = tuple(hot)
+            return eng
+
+        eng_ns = _force_python_regex(
+            GovernanceEngine(const, strict=False, audit_mode="fast", warmup=False, freeze_gc=False)
+        )
+        eng_s = _force_python_regex(
+            GovernanceEngine(const, strict=True, audit_mode="fast", warmup=False, freeze_gc=False)
+        )
+
+        for action in ("", "safe text"):
+            res_ns = eng_ns.validate(action)
+            assert res_ns.valid is True
+            assert res_ns.violations == []
+            assert [w.rule_id for w in res_ns.warnings] == ["R-EMPTY-WARN"]
+
+            res_s = eng_s.validate(action)
+            assert res_s.valid is True
+            assert res_s.violations == []
+            assert [w.rule_id for w in res_s.warnings] == ["R-EMPTY-WARN"]
+
+        res_hit = eng_ns.validate("safe never_present")
+        assert res_hit.valid is False
+        assert [v.rule_id for v in res_hit.violations] == ["R-ABSENT-CRIT"]
+        assert [w.rule_id for w in res_hit.warnings] == ["R-EMPTY-WARN"]
+
+        with pytest.raises(ConstitutionalViolationError) as exc_info:
+            eng_s.validate("safe never_present")
+        assert exc_info.value.rule_id == "R-ABSENT-CRIT"
