@@ -202,6 +202,7 @@ test-rust:
 
 test-docs: validate
 	$(PYTHON) -m mkdocs build --strict
+	$(PYTHON) scripts/generate_cf_headers.py
 
 test-worker:
 	node --test tests/test_worker.mjs

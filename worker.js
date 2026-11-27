@@ -1,9 +1,15 @@
 /**
- * Cloudflare Worker serving the static ACGS-Lite MkDocs documentation site (`./site/docs`).
+ * Cloudflare Worker fronting the ACGS-Lite MkDocs documentation site (`./site/docs`).
  *
- * Applies preventative security headers (HSTS, CSP, X-Content-Type-Options,
- * X-Frame-Options, COOP, CORP, Referrer-Policy, Permissions-Policy) and
- * asset-aware Cache-Control policies without breaking bfcache.
+ * Static `/docs/*` pages and assets are served directly by Cloudflare Static Assets
+ * (zero Worker invocations billed) using the build-generated `./site/_headers` file
+ * (`scripts/generate_cf_headers.py`), which attaches preventative security headers,
+ * a hash-based `script-src` CSP (no `'unsafe-inline'`), and asset-aware `Cache-Control`.
+ *
+ * This Worker handles canonical root redirects (`/` and `/docs` via `run_worker_first`),
+ * disallowed HTTP methods (`405`), and any unmatched fallback responses, applying
+ * strict security headers (with `script-src 'self'`, no `'unsafe-inline'`) and
+ * bfcache-safe caching.
  */
 
 const HASHED_ASSET_RE = /^\/docs\/assets\/.*\.[0-9a-f]{8}\.min\.(?:js|css)(?:\.map)?$/i;
@@ -13,7 +19,7 @@ const CLOUDFLARE_DEFAULT_ASSET_CC = "public, max-age=0, must-revalidate";
 
 const DOCS_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  "script-src 'self'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' data: https:",
