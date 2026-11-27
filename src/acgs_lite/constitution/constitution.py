@@ -1460,7 +1460,7 @@ class Constitution(BaseModel):
     def explain_rendered(self, action: str, context: dict[str, Any]) -> dict[str, Any]:
         return rendering.explain_rendered(self, action, context)
 
-    def builder(self) -> ConstitutionBuilder:
+    def builder(self) -> templates.ConstitutionBuilder:
         """Return a ConstitutionBuilder pre-populated with this constitution's rules.
 
         Useful for creating modified versions of an existing constitution using
@@ -1506,9 +1506,9 @@ if TYPE_CHECKING:
         reporting,
         serialization,
         similarity,
+        templates,
         workflow_analytics,
     )
-    from .templates import ConstitutionBuilder  # noqa: E402
 else:
 
     class _LazySubmodule:
