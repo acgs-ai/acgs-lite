@@ -8,7 +8,9 @@ Constitutional Hash: 608508a9bd224290
 
 from __future__ import annotations
 
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -167,11 +169,13 @@ class GovernanceChangelog:
         recent = changelog.query(change_type="rule_added", since="2026-01-01")
     """
 
-    __slots__ = ("_entries", "_max_entries")
+    __slots__ = ("_entries", "_max_entries", "_lock")
 
     def __init__(self, *, max_entries: int = 10_000) -> None:
-        self._entries: list[ChangelogEntry] = []
-        self._max_entries = max_entries
+        limit = max(0, max_entries)
+        self._entries: deque[ChangelogEntry] = deque(maxlen=limit)
+        self._max_entries = limit
+        self._lock = threading.RLock()
 
     def record(
         self,
@@ -209,9 +213,8 @@ class GovernanceChangelog:
             constitution_hash_before=constitution_hash_before,
             constitution_hash_after=constitution_hash_after,
         )
-        self._entries.append(entry)
-        if len(self._entries) > self._max_entries:
-            self._entries = self._entries[-self._max_entries :]
+        with self._lock:
+            self._entries.append(entry)
         return entry
 
     def query(
@@ -233,8 +236,10 @@ class GovernanceChangelog:
         Returns:
             List of matching entries in chronological order.
         """
+        with self._lock:
+            entries = list(self._entries)
         results: list[ChangelogEntry] = []
-        for e in self._entries:
+        for e in entries:
             if since is not None and e.timestamp < since:
                 continue
             if until is not None and e.timestamp >= until:
@@ -253,7 +258,9 @@ class GovernanceChangelog:
             dict with total, by_change_type counts, unique actors,
             time range, and affected rules.
         """
-        total = len(self._entries)
+        with self._lock:
+            entries = list(self._entries)
+        total = len(entries)
         if total == 0:
             return {
                 "total": 0,
@@ -267,7 +274,7 @@ class GovernanceChangelog:
         actors: set[str] = set()
         rules: set[str] = set()
 
-        for e in self._entries:
+        for e in entries:
             counts[e.change_type] = counts.get(e.change_type, 0) + 1
             if e.actor:
                 actors.add(e.actor)
@@ -279,19 +286,23 @@ class GovernanceChangelog:
             "by_change_type": counts,
             "actors": sorted(actors),
             "time_range": {
-                "earliest": self._entries[0].timestamp,
-                "latest": self._entries[-1].timestamp,
+                "earliest": entries[0].timestamp,
+                "latest": entries[-1].timestamp,
             },
             "affected_rules": sorted(rules),
         }
 
     def export(self) -> list[dict[str, Any]]:
         """Export all entries as dicts for JSON serialization."""
-        return [e.to_dict() for e in self._entries]
+        with self._lock:
+            entries = list(self._entries)
+        return [e.to_dict() for e in entries]
 
     def clear(self) -> None:
         """Clear all entries."""
-        self._entries.clear()
+        with self._lock:
+            self._entries.clear()
 
     def __len__(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)

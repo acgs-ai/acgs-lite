@@ -1,6 +1,6 @@
 # Constitutional Hash: 608508a9bd224290
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,8 @@ name = "acgs-lite"
 version = "4.1.0"
 description = "Runtime governance for AI agents — deterministic enforcement before execution, MACI role separation, tamper-evident audit trails, and operator intervention workflows."
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 authors = [
     {name = "ACGS Team", email = "hello@acgs.ai"},
@@ -80,7 +81,7 @@ dev = [
     "pytest-cov>=4.1",
     "ruff>=0.8",
     "mypy>=1.13",
-    "twine>=5.0",
+    "twine>=6.1",
     "tomli>=2.0; python_version < '3.11'",
     "acgs-lite[docs]",
     "acgs-lite[crypto]",

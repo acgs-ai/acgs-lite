@@ -34,8 +34,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import time
 import uuid
+from collections import deque
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -144,8 +146,10 @@ class Article12Logger:
         self.tenant_id = tenant_id
         self.rule_version = rule_version
         self.max_records = max_records
-        self._records: list[Article12Record] = []
-        self._chain_hashes: list[str] = []
+        limit = max(0, max_records)
+        self._records: deque[Article12Record] = deque(maxlen=limit)
+        self._chain_hashes: deque[str] = deque(maxlen=limit)
+        self._lock = threading.RLock()
 
     def log_call(
         self,
@@ -188,27 +192,30 @@ class Article12Logger:
             raise
         finally:
             latency_ms = (time.perf_counter() - start) * 1000
-            self._append(
-                Article12Record(
-                    record_id=record_id,
-                    system_id=self.system_id,
-                    operation=operation,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    outcome=outcome,
-                    constitutional_hash=CONSTITUTIONAL_HASH,
-                    human_oversight_applied=human_oversight_applied,
-                    risk_level=self.risk_level,
-                    retention_period_years=RETENTION_PERIOD_YEARS,
-                    latency_ms=round(latency_ms, 3),
-                    input_hash=_hash_content(input_text) if input_text else "",
-                    output_hash=_hash_content(output_text) if output_text else "",
-                    error=error_msg,
-                    tenant_id=self.tenant_id,
-                    rule_version=self.rule_version,
-                    metadata=metadata or {},
-                    prev_record_hash=self._chain_hashes[-1] if self._chain_hashes else "genesis",
+            with self._lock:
+                self._append(
+                    Article12Record(
+                        record_id=record_id,
+                        system_id=self.system_id,
+                        operation=operation,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        outcome=outcome,
+                        constitutional_hash=CONSTITUTIONAL_HASH,
+                        human_oversight_applied=human_oversight_applied,
+                        risk_level=self.risk_level,
+                        retention_period_years=RETENTION_PERIOD_YEARS,
+                        latency_ms=round(latency_ms, 3),
+                        input_hash=_hash_content(input_text) if input_text else "",
+                        output_hash=_hash_content(output_text) if output_text else "",
+                        error=error_msg,
+                        tenant_id=self.tenant_id,
+                        rule_version=self.rule_version,
+                        metadata=metadata or {},
+                        prev_record_hash=self._chain_hashes[-1]
+                        if self._chain_hashes
+                        else "genesis",
+                    )
                 )
-            )
 
     def record_operation(
         self,
@@ -236,42 +243,56 @@ class Article12Logger:
 
     def _append(self, record: Article12Record) -> None:
         """Append a record and update the chain hash."""
-        chain_input = f"{record.prev_record_hash}|{record.record_hash}"
-        chain_hash = hashlib.sha256(chain_input.encode()).hexdigest()[:16]
-        self._records.append(record)
-        self._chain_hashes.append(chain_hash)
+        with self._lock:
+            limit = max(0, self.max_records)
+            if self._records.maxlen != limit:
+                self._records = deque(self._records, maxlen=limit)
+                self._chain_hashes = deque(self._chain_hashes, maxlen=limit)
+            chain_input = f"{record.prev_record_hash}|{record.record_hash}"
+            chain_hash = hashlib.sha256(chain_input.encode()).hexdigest()[:16]
+            self._records.append(record)
+            self._chain_hashes.append(chain_hash)
 
-        # Trim old records if over limit (keep most recent)
-        if len(self._records) > self.max_records:
-            self._records = self._records[-self.max_records :]
-            self._chain_hashes = self._chain_hashes[-self.max_records :]
+    @staticmethod
+    def _verify_chain_snapshot(
+        records: list[Article12Record],
+        chain_hashes: list[str],
+    ) -> bool:
+        if len(records) != len(chain_hashes):
+            return False
+        if not records:
+            return True
+
+        for record, expected_hash in zip(records, chain_hashes, strict=True):
+            prev_hash = record.prev_record_hash
+            chain_input = f"{prev_hash}|{record.record_hash}"
+            expected = hashlib.sha256(chain_input.encode()).hexdigest()[:16]
+            if expected != expected_hash:
+                return False
+
+        return True
 
     def verify_chain(self) -> bool:
         """Verify the tamper-evident chain integrity.
 
         Returns True if no records have been modified since creation.
         """
-        if not self._records:
-            return True
-
-        for i, record in enumerate(self._records):
-            prev_hash = record.prev_record_hash
-            chain_input = f"{prev_hash}|{record.record_hash}"
-            expected = hashlib.sha256(chain_input.encode()).hexdigest()[:16]
-            if expected != self._chain_hashes[i]:
-                return False
-
-        return True
+        with self._lock:
+            records = list(self._records)
+            chain_hashes = list(self._chain_hashes)
+        return self._verify_chain_snapshot(records, chain_hashes)
 
     @property
     def records(self) -> list[Article12Record]:
         """All records (read-only copy)."""
-        return list(self._records)
+        with self._lock:
+            return list(self._records)
 
     @property
     def record_count(self) -> int:
         """Return the number of records in the audit log."""
-        return len(self._records)
+        with self._lock:
+            return len(self._records)
 
     def export_jsonl(self, path: str | Path, *, append: bool = True) -> None:
         """Export records as append-only JSONL (EU AI Act Article 12 format).
@@ -284,20 +305,25 @@ class Article12Logger:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         mode = "a" if append else "w"
+        with self._lock:
+            records = list(self._records)
         with open(path, mode) as f:
-            for record in self._records:
+            for record in records:
                 f.write(json.dumps(record.to_dict(), separators=(",", ":"), default=str))
                 f.write("\n")
 
     def export_dict(self) -> dict[str, Any]:
         """Export as a dictionary with chain integrity status."""
+        with self._lock:
+            records = list(self._records)
+            chain_hashes = list(self._chain_hashes)
         return {
             "system_id": self.system_id,
-            "record_count": len(self._records),
-            "chain_valid": self.verify_chain(),
+            "record_count": len(records),
+            "chain_valid": self._verify_chain_snapshot(records, chain_hashes),
             "risk_level": self.risk_level,
             "constitutional_hash": CONSTITUTIONAL_HASH,
-            "records": [r.to_dict() for r in self._records],
+            "records": [r.to_dict() for r in records],
         }
 
     def compliance_summary(self) -> dict[str, Any]:
@@ -305,7 +331,10 @@ class Article12Logger:
 
         Useful for including in compliance reports.
         """
-        if not self._records:
+        with self._lock:
+            records = list(self._records)
+            chain_hashes = list(self._chain_hashes)
+        if not records:
             return {
                 "article": "Article 12 — Record-Keeping",
                 "compliant": True,
@@ -315,17 +344,18 @@ class Article12Logger:
                 "note": "No operations logged yet.",
             }
 
-        total = len(self._records)
-        failures = sum(1 for r in self._records if r.outcome == "failure")
-        human_reviewed = sum(1 for r in self._records if r.human_oversight_applied)
+        total = len(records)
+        failures = sum(1 for r in records if r.outcome == "failure")
+        human_reviewed = sum(1 for r in records if r.human_oversight_applied)
+        chain_valid = self._verify_chain_snapshot(records, chain_hashes)
 
         return {
             "article": "Article 12 — Record-Keeping",
-            "compliant": self.verify_chain(),
+            "compliant": chain_valid,
             "record_count": total,
             "failure_count": failures,
             "human_oversight_rate": round(human_reviewed / total, 4) if total else 0.0,
-            "chain_valid": self.verify_chain(),
+            "chain_valid": chain_valid,
             "retention_period_years": RETENTION_PERIOD_YEARS,
             "constitutional_hash": CONSTITUTIONAL_HASH,
             "system_id": self.system_id,
@@ -333,10 +363,14 @@ class Article12Logger:
         }
 
     def __repr__(self) -> str:
+        with self._lock:
+            records = list(self._records)
+            chain_hashes = list(self._chain_hashes)
+        chain_valid = self._verify_chain_snapshot(records, chain_hashes)
         return (
             f"Article12Logger(system_id={self.system_id!r}, "
-            f"records={len(self._records)}, "
-            f"chain_valid={self.verify_chain()})"
+            f"records={len(records)}, "
+            f"chain_valid={chain_valid})"
         )
 
 
@@ -381,26 +415,27 @@ class _OperationContext:
         outcome = "failure" if exc_val is not None else "success"
         error_msg = str(exc_val)[:500] if exc_val is not None else None
 
-        self._log._append(
-            Article12Record(
-                record_id=self._record_id,
-                system_id=self._log.system_id,
-                operation=self._operation,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                outcome=outcome,
-                constitutional_hash=CONSTITUTIONAL_HASH,
-                human_oversight_applied=self._human_oversight_applied,
-                risk_level=self._log.risk_level,
-                retention_period_years=RETENTION_PERIOD_YEARS,
-                latency_ms=round(latency_ms, 3),
-                input_hash=_hash_content(self._input_text) if self._input_text else "",
-                output_hash=_hash_content(self._output_text) if self._output_text else "",
-                error=error_msg,
-                tenant_id=self._log.tenant_id,
-                rule_version=self._log.rule_version,
-                metadata=self._metadata,
-                prev_record_hash=(
-                    self._log._chain_hashes[-1] if self._log._chain_hashes else "genesis"
-                ),
+        with self._log._lock:
+            self._log._append(
+                Article12Record(
+                    record_id=self._record_id,
+                    system_id=self._log.system_id,
+                    operation=self._operation,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    outcome=outcome,
+                    constitutional_hash=CONSTITUTIONAL_HASH,
+                    human_oversight_applied=self._human_oversight_applied,
+                    risk_level=self._log.risk_level,
+                    retention_period_years=RETENTION_PERIOD_YEARS,
+                    latency_ms=round(latency_ms, 3),
+                    input_hash=_hash_content(self._input_text) if self._input_text else "",
+                    output_hash=_hash_content(self._output_text) if self._output_text else "",
+                    error=error_msg,
+                    tenant_id=self._log.tenant_id,
+                    rule_version=self._log.rule_version,
+                    metadata=self._metadata,
+                    prev_record_hash=(
+                        self._log._chain_hashes[-1] if self._log._chain_hashes else "genesis"
+                    ),
+                )
             )
-        )
