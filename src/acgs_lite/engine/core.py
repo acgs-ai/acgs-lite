@@ -489,6 +489,8 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
         "_has_high_rules",
         "_hot",
         "_rust_validator",
+        "_rust_hot_owner",
+        "_rust_hot_fn",
         "_rust_has_end_anchor",
         "_rule_id_to_exc_idx",
         "_rule_id_to_wa",
@@ -702,12 +704,28 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             isinstance(self._fast_records, _NoopRecorder),
             None,
         )
-        # Rust's validate_hot() returns (decision, fired as i64): signed 64-bit
-        # bitmasks can only represent rule indices 0..62 without sign-bit
+        # Rust's legacy validate_hot() returns (decision, fired as i64): signed
+        # 64-bit bitmasks can only represent rule indices 0..62 without sign-bit
         # overflow (bit 63 -> negative -> IndexError) or truncation (bits >= 64
-        # -> 0 -> silent fail-open). Fall back to the arbitrary-precision Python
-        # matcher whenever more than 63 active rules are compiled.
-        if _HAS_RUST and len(self._active_rules) <= 63:
+        # -> 0 -> silent fail-open). When the installed acgs_lite_rust wheel
+        # exposes validate_hot_u128(), full 128-bit bitmasks safely cover up to
+        # 127 active rules while preserving backward compatibility with older
+        # prebuilt wheels (capped at 63).
+        _rust_validator_cls = (
+            getattr(_rust, "GovernanceValidator", None) if _rust is not None else None
+        )
+        _rust_supports_u128 = (
+            _HAS_RUST
+            and _rust_validator_cls is not None
+            and callable(getattr(_rust_validator_cls, "validate_hot_u128", None))
+        )
+        _rust_max_rules = 127 if _rust_supports_u128 else 63
+        _rv_hot_fn: Any = None
+        if (
+            _HAS_RUST
+            and _rust_validator_cls is not None
+            and len(self._active_rules) <= _rust_max_rules
+        ):
             _rust_anchor_dispatch = [
                 (anchor, [(ri, pat.pattern) for ri, pat in pats])
                 for anchor, pats in self._pat_anchor_dispatch
@@ -731,7 +749,7 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
                 for r in self._active_rules
             ]
             try:
-                self._rust_validator: Any = _rust.GovernanceValidator(
+                _rv_instance: Any = _rust_validator_cls(
                     _rust_kw,
                     _rust_anchor_dispatch,
                     _rust_no_anchor,
@@ -744,9 +762,26 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             except ValueError:
                 # Rust's regex crate rejects look-around/backreferences and its
                 # anchor bitmask has a fixed upper bound; fall back to Python.
-                self._rust_validator = None
+                _rv_instance = None
+            if _rv_instance is not None:
+                _u128_fn = getattr(_rv_instance, "validate_hot_u128", None)
+                if callable(_u128_fn):
+                    _rv_hot_fn = _u128_fn
+                elif len(self._active_rules) > 63:
+                    # Defensive fail-safe: never dispatch >63 rules to a 64-bit-only
+                    # or non-callable validator instance even if a custom factory advertised u128.
+                    _rv_instance = None
+                else:
+                    _legacy_fn = getattr(_rv_instance, "validate_hot", None)
+                    if callable(_legacy_fn):
+                        _rv_hot_fn = _legacy_fn
+                    else:
+                        _rv_instance = None
+            self._rust_validator: Any = _rv_instance
         else:
             self._rust_validator = None
+        self._rust_hot_owner: Any = self._rust_validator
+        self._rust_hot_fn: Any = _rv_hot_fn
         self._rust_has_end_anchor: bool = self._rust_validator is not None and any(
             _pattern_has_python_end_anchor(pat.pattern, pat.flags)
             for _, pat in self._pattern_rule_idxs
@@ -1434,7 +1469,13 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             # The Rust fast path short-circuits before custom validators, so when any
             # are present we fall through to the Python path, which defers the raise.
             _action_lower = action if action.islower() else action.lower()
-            _decision, _data = _rv.validate_hot(_action_lower)
+            if _rv is self._rust_hot_owner:
+                _decision, _data = self._rust_hot_fn(_action_lower)
+            else:
+                _hot_fn = getattr(_rv, "validate_hot_u128", None)
+                _decision, _data = (
+                    _hot_fn(_action_lower) if callable(_hot_fn) else _rv.validate_hot(_action_lower)
+                )
             if context is not None and (
                 "action_description" in context or "action_detail" in context
             ):
@@ -1470,7 +1511,13 @@ class GovernanceEngine(BatchValidationMixin, GovernanceMatcherMixin):
             # strict=False Rust fast path: return violations instead of raising
             # Only used when no context/audit_metadata provided and no custom validators (benchmark mode)
             _action_lower = action if action.islower() else action.lower()
-            _decision, _data = _rv.validate_hot(_action_lower)
+            if _rv is self._rust_hot_owner:
+                _decision, _data = self._rust_hot_fn(_action_lower)
+            else:
+                _hot_fn = getattr(_rv, "validate_hot_u128", None)
+                _decision, _data = (
+                    _hot_fn(_action_lower) if callable(_hot_fn) else _rv.validate_hot(_action_lower)
+                )
             if _decision == _RUST_ALLOW:
                 _fast_records.append(None)
                 return ValidationResult(

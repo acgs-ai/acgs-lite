@@ -35,6 +35,8 @@ class GovernanceMatcherMixin:
     _rule_id_to_exc_idx: dict[str, int]
     _rule_id_to_wa: dict[str, ViolationAction]
     _rust_validator: Any
+    _rust_hot_owner: Any
+    _rust_hot_fn: Any
     strict: bool
 
     def _new_fast_allow_result(self) -> ValidationResult:
@@ -181,10 +183,11 @@ class GovernanceMatcherMixin:
             _merged_bm = data
         _ctx_det = context.get("action_detail")
         _ctx_desc = context.get("action_description")
+        _ctx_hot_fn: Any = None
         for _cv in (_ctx_det, _ctx_desc):
             if _cv is not None and isinstance(_cv, str):
                 _cv_lower = _cv if _cv.islower() else _cv.lower()
-                # Rust validate_hot only checks word 0 (space-delimited) for positive
+                # Rust validate_hot* only checks word 0 (space-delimited) for positive
                 # verbs, whereas Python context matching checks split()[:4]. Fall
                 # through to Python when a positive verb appears in words 1..3 or
                 # after leading/non-space whitespace.
@@ -195,7 +198,14 @@ class GovernanceMatcherMixin:
                     and any(w in _POSITIVE_VERBS_SET for w in _cv_words)
                 ):
                     return None
-                _ctx_dec, _ctx_data = self._rust_validator.validate_hot(_cv_lower)
+                if _ctx_hot_fn is None:
+                    _rv = self._rust_validator
+                    if _rv is getattr(self, "_rust_hot_owner", None):
+                        _ctx_hot_fn = self._rust_hot_fn
+                    else:
+                        _cand = getattr(_rv, "validate_hot_u128", None)
+                        _ctx_hot_fn = _cand if callable(_cand) else _rv.validate_hot
+                _ctx_dec, _ctx_data = _ctx_hot_fn(_cv_lower)
                 if _ctx_dec == _RUST_DENY_CRITICAL:
                     if not _has_critical:
                         _crit_idx = _ctx_data
