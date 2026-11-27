@@ -31,6 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compliance bundles as RFC 9052 `COSE_Sign1` EdDSA statements.
 - Five-stage offline end-to-end commercial pipeline example
   (`examples/commercial_evidence_pipeline.py`).
+- `acgs_lite.tool_calls`: a public module that evaluates one tool call against a
+  constitution. `ToolCallGovernor.evaluate(tool_name, arguments)` returns a
+  `GovernanceDecision` with the verdict `ALLOW`, `DENY` or `REVIEW`, and never
+  raises: any error while formatting or validating gives `DENY`.
+  `format_tool_call` renders a tool call as the text the rules are matched
+  against. The code is the `_governance.py` module that the framework adapter
+  packages each carried as a private copy, moved here unchanged together with
+  its tests, so adapters can import it instead. The module is not re-exported
+  from the top-level `acgs_lite` package. See
+  [Tool-Call Governance](https://github.com/acgs-ai/acgs-lite/blob/main/docs/api/tool_calls.md).
 
 ## [4.1.0] - 2026-11-27
 
