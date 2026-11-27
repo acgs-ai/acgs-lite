@@ -372,3 +372,43 @@ def test_verify_receipt_bundle_detects_tampering_never_raises() -> None:
         "oversight.every_escalation_has_distinct_human_overseer" in r for r in ver_forged.reasons
     )
     assert any("human_review does not match" in r for r in ver_forged.reasons)
+
+    # Non-hashable key_id in signed_receipt must return valid=False cleanly without TypeError
+    bad_key_id = bundle.to_dict()
+    bad_key_id["decisions"][0]["signed_receipt"]["key_id"] = []
+    ver_bad_key = verify_receipt_bundle(bad_key_id, trusted_public_keys=trusted)
+    assert ver_bad_key.valid is False
+    assert any("malformed envelope metadata" in r for r in ver_bad_key.reasons)
+
+    # Repeated adverse receipts round-trip cleanly with preserved multiplicity
+    dup_bundle = export_receipt_bundle(
+        [r_deny, r_deny],
+        profile=PROFILE_CA_ADMT_2027,
+        trusted_public_keys=trusted,
+        system_id="sys-dup",
+    )
+    assert dup_bundle.oversight["adverse_decision_count"] == 2
+    assert len(dup_bundle.adverse_decisions) == 2
+    ver_dup = verify_receipt_bundle(dup_bundle.to_dict(), trusted_public_keys=trusted)
+    assert ver_dup.valid is True
+    assert ver_dup.verified_decision_count == 2
+
+    # Casefold equivalence for proposer/approver must NOT report distinct human overseer
+    casefold_bundle = export_receipt_bundle(
+        [r_deny],
+        profile=PROFILE_EU_AI_ACT_ART12_26,
+        trusted_public_keys=trusted,
+        system_id="sys-case",
+        retention_days=180,
+        escalations=[
+            {
+                "escalation_id": "e-case",
+                "proposer_id": "Alice@example.com",
+                "approver_id": "alice@example.com",
+            }
+        ],
+    )
+    assert casefold_bundle.oversight["every_escalation_has_distinct_human_overseer"] is False
+    assert (
+        verify_receipt_bundle(casefold_bundle.to_dict(), trusted_public_keys=trusted).valid is True
+    )

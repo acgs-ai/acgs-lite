@@ -151,6 +151,28 @@ def test_live_webhook_transport_https_and_status_mapping(
         assert outcome is expected
 
 
+def test_webhook_send_requires_explicit_boolean_fenced_confirmation() -> None:
+    class _UnconfirmedCancelTransport:
+        def deliver(self, **_: object) -> dict[str, object]:
+            return {"delivery_id": "whd_x", "status": "canceled", "fenced": False}
+
+        def retrieve_and_fence(self, **_: object) -> tuple[EffectOutcome, str | None, bool]:
+            return EffectOutcome.UNKNOWN, None, False
+
+    from acgs_lite.legitimacy import EffectRequest
+
+    provider = WebhookDeliveryProvider(_UnconfirmedCancelTransport())  # type: ignore[arg-type]
+    req = EffectRequest(
+        key="acgs:effect:v1:" + "1" * 64,
+        provider_id=provider.provider_id,
+        grant_identity="grant-1",
+        action_json='{"event_type":"invoice.paid","data":{}}',
+    )
+    res = provider.send(req)
+    assert res.outcome is EffectOutcome.UNKNOWN
+    assert res.fenced is False
+
+
 def test_webhook_main_with_live_url_fails_on_http_error_and_succeeds_when_ok(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

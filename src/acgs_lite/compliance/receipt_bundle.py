@@ -158,7 +158,11 @@ def _escalation_has_distinct_human_overseer(record: Mapping[str, Any]) -> bool:
     proposer = record.get("proposer_id")
     if not isinstance(approver, str) or not approver.strip():
         return False
-    return not (isinstance(proposer, str) and proposer.strip() and approver == proposer)
+    return not (
+        isinstance(proposer, str)
+        and proposer.strip()
+        and approver.strip().casefold() == proposer.strip().casefold()
+    )
 
 
 def _verify_trusted_keys(trusted_public_keys: Mapping[str, str]) -> None:
@@ -440,7 +444,8 @@ def verify_receipt_bundle(
 
     verified_decision_ids: set[str] = set()
     verified_decision_count = 0
-    expected_adverse_by_id: dict[str, dict[str, Any]] = {}
+    expected_adverse_count = 0
+    adverse_pools: dict[str, list[dict[str, Any]]] = {}
     if not isinstance(decisions_raw, list):
         reasons.append("decisions must be a list")
     else:
@@ -453,6 +458,15 @@ def verify_receipt_bundle(
             except ValueError as exc:
                 reasons.append(f"decisions[{idx}] invalid signed_receipt: {exc}")
                 continue
+            if (
+                not isinstance(signed.key_id, str)
+                or not signed.key_id
+                or not isinstance(signed.public_key, str)
+                or not isinstance(signed.signature, str)
+                or not isinstance(signed.algorithm, str)
+            ):
+                reasons.append(f"decisions[{idx}] malformed envelope metadata")
+                continue
             trusted_key = trusted_public_keys.get(signed.key_id)
             if not isinstance(trusted_key, str):
                 reasons.append(f"decisions[{idx}] untrusted key_id {signed.key_id!r}")
@@ -461,6 +475,9 @@ def verify_receipt_bundle(
                 ok = signed.verify(trusted_key)
             except ReceiptSigningUnavailable as exc:
                 reasons.append(f"decisions[{idx}] crypto unavailable: {exc}")
+                continue
+            except (TypeError, ValueError) as exc:
+                reasons.append(f"decisions[{idx}] malformed cryptographic fields: {exc}")
                 continue
             if not ok:
                 reasons.append(f"decisions[{idx}] signature or hash verification failed")
@@ -491,9 +508,10 @@ def verify_receipt_bundle(
             verified_decision_ids.add(env_id)
             verified_decision_count += 1
             if adverse:
-                expected_adverse_by_id[rec_id] = {
-                    k: v for k, v in expected_summary.items() if k != "adverse_or_consequential"
-                }
+                expected_adverse_count += 1
+                adverse_pools.setdefault(rec_id, []).append(
+                    {k: v for k, v in expected_summary.items() if k != "adverse_or_consequential"}
+                )
 
     verified_outcome_count = 0
     if not isinstance(outcomes_raw, list):
@@ -508,6 +526,15 @@ def verify_receipt_bundle(
             except ValueError as exc:
                 reasons.append(f"outcomes[{idx}] invalid signed outcome: {exc}")
                 continue
+            if (
+                not isinstance(signed_outcome.key_id, str)
+                or not signed_outcome.key_id
+                or not isinstance(signed_outcome.public_key, str)
+                or not isinstance(signed_outcome.signature, str)
+                or not isinstance(signed_outcome.algorithm, str)
+            ):
+                reasons.append(f"outcomes[{idx}] malformed outcome envelope metadata")
+                continue
             trusted_key = trusted_public_keys.get(signed_outcome.key_id)
             if not isinstance(trusted_key, str):
                 reasons.append(f"outcomes[{idx}] untrusted key_id {signed_outcome.key_id!r}")
@@ -516,6 +543,9 @@ def verify_receipt_bundle(
                 outcome_ok = signed_outcome.verify(trusted_key)
             except ReceiptSigningUnavailable as exc:
                 reasons.append(f"outcomes[{idx}] crypto unavailable: {exc}")
+                continue
+            except (TypeError, ValueError) as exc:
+                reasons.append(f"outcomes[{idx}] malformed cryptographic fields: {exc}")
                 continue
             if not outcome_ok:
                 reasons.append(f"outcomes[{idx}] signature verification failed")
@@ -585,7 +615,7 @@ def verify_receipt_bundle(
 
         for count_key, expected_count in (
             ("decision_count", verified_decision_count),
-            ("adverse_decision_count", len(expected_adverse_by_id)),
+            ("adverse_decision_count", expected_adverse_count),
             ("outcome_count", verified_outcome_count),
             ("paired_chain_count", verified_outcome_count),
         ):
@@ -596,19 +626,18 @@ def verify_receipt_bundle(
     if not isinstance(adverse_raw, list):
         reasons.append("adverse_decisions must be a list")
     else:
-        seen_adverse_ids: list[str] = []
         for idx, item in enumerate(adverse_raw):
             if not isinstance(item, Mapping):
                 reasons.append(f"adverse_decisions[{idx}] must be a mapping")
                 continue
             dec_id = item.get("decision_identity")
-            if not isinstance(dec_id, str) or dec_id not in expected_adverse_by_id:
+            pool = adverse_pools.get(dec_id) if isinstance(dec_id, str) else None
+            if not isinstance(dec_id, str) or not pool:
                 reasons.append(
                     f"adverse_decisions[{idx}] does not reference a verified adverse decision"
                 )
                 continue
-            seen_adverse_ids.append(dec_id)
-            expected_fields = expected_adverse_by_id[dec_id]
+            expected_fields = pool.pop(0)
             for field_name, expected_val in expected_fields.items():
                 if item.get(field_name) != expected_val:
                     reasons.append(
@@ -633,7 +662,7 @@ def verify_receipt_bundle(
                 reasons.append(
                     f"adverse_decisions[{idx}] human_review does not match oversight.escalations"
                 )
-        if sorted(seen_adverse_ids) != sorted(expected_adverse_by_id):
+        if any(remaining for remaining in adverse_pools.values()):
             reasons.append("adverse_decisions does not match verified adverse decisions")
 
     return ReceiptBundleVerification(

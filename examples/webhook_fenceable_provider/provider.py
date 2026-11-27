@@ -272,9 +272,10 @@ class WebhookDeliveryProvider:
         if isinstance(ref, str) and ref:
             self._references[request.key] = ref
         status = str(res.get("status", ""))
+        fenced = res.get("fenced") is True
         if status == "delivered":
             return ProviderResult(request.key, self.provider_id, EffectOutcome.DONE, fenced=True)
-        if status in ("canceled", "fenced"):
+        if status in ("canceled", "fenced") and fenced:
             return ProviderResult(
                 request.key, self.provider_id, EffectOutcome.NOT_DONE, fenced=True
             )
