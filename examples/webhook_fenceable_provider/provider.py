@@ -158,6 +158,29 @@ class InMemoryWebhookReceiver:
             return EffectOutcome.NOT_DONE, None, True
 
 
+class _WebhookNoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Fail closed on HTTP redirects so webhook HMAC signatures and keys never leave origin."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        if fp is not None:
+            fp.close()
+        raise RuntimeError(
+            f"Webhook redirect refused (HTTP {code}): "
+            "automatic redirects are disabled to prevent credential leakage"
+        )
+
+
+_WEBHOOK_NO_REDIRECT_OPENER = urllib.request.build_opener(_WebhookNoRedirectHandler())
+
+
 class LiveWebhookTransport:
     """Real HTTPS outbound signed-webhook transport using stdlib ``urllib.request``."""
 
@@ -205,7 +228,7 @@ class LiveWebhookTransport:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310
+            with _WEBHOOK_NO_REDIRECT_OPENER.open(req, timeout=self._timeout) as resp:  # noqa: S310
                 return dict(json.loads(resp.read().decode("utf-8")))
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="replace")
@@ -221,7 +244,7 @@ class LiveWebhookTransport:
             data=b"",
             headers={"X-Idempotency-Key": idempotency_key},
         )
-        with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310
+        with _WEBHOOK_NO_REDIRECT_OPENER.open(req, timeout=self._timeout) as resp:  # noqa: S310
             data = json.loads(resp.read().decode("utf-8"))
         delivery_id = str(data.get("delivery_id")) if data.get("delivery_id") else None
         status = str(data.get("status", ""))

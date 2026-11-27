@@ -5,8 +5,10 @@ from __future__ import annotations
 import io
 import json
 import sys
+import threading
 import urllib.error
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -35,6 +37,7 @@ from examples.webhook_fenceable_provider import (  # noqa: E402
     WebhookIdempotencyConflictError,
     run_webhook_conformance_suite,
 )
+from examples.webhook_fenceable_provider import provider as provider_mod  # noqa: E402
 from examples.webhook_fenceable_provider.provider import _mint_grant, main  # noqa: E402
 
 
@@ -141,8 +144,8 @@ def test_live_webhook_transport_https_and_status_mapping(
         ("queued", False, EffectOutcome.UNKNOWN),
     ]:
         monkeypatch.setattr(
-            urllib.request,
-            "urlopen",
+            provider_mod._WEBHOOK_NO_REDIRECT_OPENER,
+            "open",
             lambda req, timeout=10.0, _s=status, _f=fenced_flag: _FakeResp(
                 {"delivery_id": "whd_1", "status": _s, "fenced": _f}
             ),
@@ -189,7 +192,7 @@ def test_webhook_main_with_live_url_fails_on_http_error_and_succeeds_when_ok(
             io.BytesIO(b"bad gateway"),
         )
 
-    monkeypatch.setattr(urllib.request, "urlopen", _fail)
+    monkeypatch.setattr(provider_mod._WEBHOOK_NO_REDIRECT_OPENER, "open", _fail)
     assert main() == 1
     fail_out = json.loads(capsys.readouterr().out)
     assert fail_out["all_passed"] is False
@@ -209,8 +212,8 @@ def test_webhook_main_with_live_url_fails_on_http_error_and_succeeds_when_ok(
             return self._body
 
     monkeypatch.setattr(
-        urllib.request,
-        "urlopen",
+        provider_mod._WEBHOOK_NO_REDIRECT_OPENER,
+        "open",
         lambda req, timeout=10.0: _FakeResp(
             {"delivery_id": "whd_live_1", "status": "delivered", "fenced": False}
         ),
@@ -234,3 +237,54 @@ def test_webhook_main_with_live_url_fails_on_http_error_and_succeeds_when_ok(
     broken = run_live_webhook_verification(_BrokenFenceTransport())  # type: ignore[arg-type]
     assert broken["reconcile_outcome"] == "unknown"
     assert broken["passed"] is False
+
+
+def test_live_webhook_transport_refuses_redirects_before_leaking_signature() -> None:
+    leaked: list[dict[str, str]] = []
+
+    class _SinkHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            leaked.append({k.lower(): v for k, v in self.headers.items()})
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, format: str, *args: object) -> None:
+            return None
+
+    sink = ThreadingHTTPServer(("127.0.0.1", 0), _SinkHandler)
+    sink_port = sink.server_address[1]
+
+    class _RedirectHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            _ = self.rfile.read(length)
+            self.send_response(307)
+            self.send_header("Location", f"http://127.0.0.1:{sink_port}/steal")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            return None
+
+    redir = ThreadingHTTPServer(("127.0.0.1", 0), _RedirectHandler)
+    redir_port = redir.server_address[1]
+    t1 = threading.Thread(target=sink.serve_forever, daemon=True)
+    t2 = threading.Thread(target=redir.serve_forever, daemon=True)
+    t1.start()
+    t2.start()
+    try:
+        transport = LiveWebhookTransport(
+            f"http://127.0.0.1:{redir_port}", signing_secret=b"top-secret"
+        )
+        with pytest.raises(RuntimeError, match="redirect refused"):
+            transport.deliver(
+                idempotency_key="wk-redir", event_type="invoice.paid", payload={"id": "1"}
+            )
+        with pytest.raises(RuntimeError, match="redirect refused"):
+            transport.retrieve_and_fence(idempotency_key="wk-redir")
+        assert leaked == []
+    finally:
+        redir.shutdown()
+        redir.server_close()
+        sink.shutdown()
+        sink.server_close()
