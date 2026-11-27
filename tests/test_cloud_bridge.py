@@ -284,3 +284,56 @@ def test_urllib_bridge_transport_against_loopback_http() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_urllib_bridge_transport_refuses_redirects_before_leaking_api_key() -> None:
+    leaked_headers: list[dict[str, str]] = []
+
+    class _SinkHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            leaked_headers.append({k.lower(): v for k, v in self.headers.items()})
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def do_GET(self) -> None:
+            self.do_POST()
+
+        def log_message(self, format: str, *args: Any) -> None:
+            return None
+
+    sink_server = ThreadingHTTPServer(("127.0.0.1", 0), _SinkHandler)
+    sink_port = sink_server.server_address[1]
+
+    class _RedirectHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            _ = self.rfile.read(length)
+            self.send_response(307)
+            self.send_header("Location", f"http://127.0.0.1:{sink_port}/steal")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: Any) -> None:
+            return None
+
+    redir_server = ThreadingHTTPServer(("127.0.0.1", 0), _RedirectHandler)
+    redir_port = redir_server.server_address[1]
+    t1 = threading.Thread(target=sink_server.serve_forever, daemon=True)
+    t2 = threading.Thread(target=redir_server.serve_forever, daemon=True)
+    t1.start()
+    t2.start()
+    try:
+        cfg = CloudBridgeConfig(
+            base_url=f"http://127.0.0.1:{redir_port}",
+            org_id="org-redir",
+            api_key="super-secret-api-key",
+        )
+        client = ControlPlaneBridgeClient(cfg, transport=UrllibBridgeTransport())
+        with pytest.raises(CloudBridgeError, match="redirect refused"):
+            client.ingest_receipts([{"id": "1"}])
+        assert leaked_headers == []
+    finally:
+        redir_server.shutdown()
+        redir_server.server_close()
+        sink_server.shutdown()
+        sink_server.server_close()

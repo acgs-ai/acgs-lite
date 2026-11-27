@@ -225,7 +225,7 @@ class LiveWebhookTransport:
             data = json.loads(resp.read().decode("utf-8"))
         delivery_id = str(data.get("delivery_id")) if data.get("delivery_id") else None
         status = str(data.get("status", ""))
-        fenced = bool(data.get("fenced", False))
+        fenced = data.get("fenced") is True
         if status == "delivered":
             return EffectOutcome.DONE, delivery_id, False
         if status in ("canceled", "fenced") and fenced:

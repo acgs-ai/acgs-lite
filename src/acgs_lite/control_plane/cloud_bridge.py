@@ -100,6 +100,29 @@ class CloudBridgeConfig:
         object.__setattr__(self, "base_url", self.base_url.rstrip("/"))
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Fail closed on HTTP redirects so API keys never cross origins or protocol boundaries."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        if fp is not None:
+            fp.close()
+        raise CloudBridgeError(
+            f"Control-plane redirect refused (HTTP {code}): "
+            "automatic redirects are disabled to prevent credential leakage"
+        )
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler())
+
+
 class UrllibBridgeTransport:
     """Stdlib ``urllib.request`` implementation of :class:`BridgeHttpTransport`."""
 
@@ -122,7 +145,7 @@ class UrllibBridgeTransport:
             headers=dict(headers),
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:  # noqa: S310
+            with _NO_REDIRECT_OPENER.open(req, timeout=timeout_seconds) as resp:  # noqa: S310
                 return BridgeResponse(
                     status=int(getattr(resp, "status", 200)),
                     headers={k.lower(): v for k, v in resp.headers.items()},

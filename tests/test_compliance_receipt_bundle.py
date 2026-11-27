@@ -316,3 +316,59 @@ def test_verify_receipt_bundle_detects_tampering_never_raises() -> None:
     assert any("section_digests must be a mapping" in r for r in ver_corrupt.reasons)
     assert any("decisions[0] missing signed_receipt" in r for r in ver_corrupt.reasons)
     assert any("outcomes[0] invalid signed outcome" in r for r in ver_corrupt.reasons)
+
+    # Non-ASCII digest string (e.g. "sha256:é") must return valid=False cleanly without TypeError
+    non_ascii = bundle.to_dict()
+    non_ascii["bundle_digest"] = "sha256:\u00e9"
+    non_ascii["section_digests"]["decisions"] = "sha256:\u00e9"
+    ver_non_ascii = verify_receipt_bundle(non_ascii, trusted_public_keys=trusted)
+    assert ver_non_ascii.valid is False
+    assert any("bundle_digest missing or malformed" in r for r in ver_non_ascii.reasons)
+    assert any(
+        "section_digests['decisions'] missing or malformed" in r for r in ver_non_ascii.reasons
+    )
+
+    # Summary-rehash attack: rewriting wrapper/adverse/oversight fields + recomputing digests still fails
+    import hashlib
+    import json
+
+    forged = bundle.to_dict()
+    forged["decisions"][0]["decision_type"] = "ALLOW"
+    forged["decisions"][0]["denial_or_review_rationale"] = None
+    forged["adverse_decisions"][0]["decision_type"] = "ALLOW"
+    forged["adverse_decisions"][0]["human_review"] = {
+        "decision": "approve",
+        "approver_id": "mallory",
+    }
+    forged["oversight"]["every_escalation_has_distinct_human_overseer"] = True
+    forged["oversight"]["adverse_decision_count"] = 0
+    for name, sec in (
+        ("decisions", forged["decisions"]),
+        ("adverse_decisions", forged["adverse_decisions"]),
+        ("outcomes", forged["outcomes"]),
+        ("oversight", forged["oversight"]),
+    ):
+        forged["section_digests"][name] = (
+            "sha256:"
+            + hashlib.sha256(
+                json.dumps(sec, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+                    "utf-8"
+                )
+            ).hexdigest()
+        )
+    unsigned_forged = {k: v for k, v in forged.items() if k != "bundle_digest"}
+    forged["bundle_digest"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                unsigned_forged, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+    ver_forged = verify_receipt_bundle(forged, trusted_public_keys=trusted)
+    assert ver_forged.valid is False
+    assert any("does not match verified signed_receipt" in r for r in ver_forged.reasons)
+    assert any(
+        "oversight.every_escalation_has_distinct_human_overseer" in r for r in ver_forged.reasons
+    )
+    assert any("human_review does not match" in r for r in ver_forged.reasons)

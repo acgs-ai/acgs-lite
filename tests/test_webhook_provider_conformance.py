@@ -137,6 +137,7 @@ def test_live_webhook_transport_https_and_status_mapping(
     for status, fenced_flag, expected in [
         ("delivered", False, EffectOutcome.DONE),
         ("canceled", True, EffectOutcome.NOT_DONE),
+        ("canceled", "false", EffectOutcome.UNKNOWN),
         ("queued", False, EffectOutcome.UNKNOWN),
     ]:
         monkeypatch.setattr(

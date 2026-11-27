@@ -123,6 +123,24 @@ def _sha256_prefixed(value: Any) -> str:
     return "sha256:" + hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 
+_HEX_CHARS = frozenset("0123456789abcdefABCDEF")
+
+
+def _is_sha256_prefixed_hex(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 71
+        and value.startswith("sha256:")
+        and all(ch in _HEX_CHARS for ch in value[7:])
+    )
+
+
+def _safe_digest_equals(expected: str, actual: Any) -> bool:
+    if not _is_sha256_prefixed_hex(actual):
+        return False
+    return hmac.compare_digest(expected.encode("ascii"), str(actual).lower().encode("ascii"))
+
+
 def _normalize_records(items: Sequence[Mapping[str, Any]], label: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for idx, item in enumerate(items):
@@ -381,7 +399,7 @@ def verify_receipt_bundle(
         reasons.append(f"unsupported profile: {profile!r}")
     if bundle.get("self_assessment_notice") != SELF_ASSESSMENT_NOTICE:
         reasons.append("self_assessment_notice missing or modified")
-    if not isinstance(digest_str, str) or not digest_str.startswith("sha256:"):
+    if not _is_sha256_prefixed_hex(digest_str):
         reasons.append("bundle_digest missing or malformed")
     else:
         unsigned = {k: v for k, v in bundle.items() if k != "bundle_digest"}
@@ -390,7 +408,7 @@ def verify_receipt_bundle(
         except (TypeError, ValueError) as exc:
             reasons.append(f"bundle is not canonical JSON: {exc}")
         else:
-            if not hmac.compare_digest(expected_digest, digest_str):
+            if not _safe_digest_equals(expected_digest, digest_str):
                 reasons.append("bundle_digest mismatch")
 
     decisions_raw = bundle.get("decisions")
@@ -409,20 +427,20 @@ def verify_receipt_bundle(
             ("oversight", oversight_raw),
         ):
             recorded = section_digests.get(name)
-            if not isinstance(recorded, str):
-                reasons.append(f"section_digests[{name!r}] missing")
+            if not _is_sha256_prefixed_hex(recorded):
+                reasons.append(f"section_digests[{name!r}] missing or malformed")
                 continue
             try:
                 computed = _sha256_prefixed(section)
             except (TypeError, ValueError) as exc:
                 reasons.append(f"section {name!r} invalid JSON: {exc}")
             else:
-                if not hmac.compare_digest(computed, recorded):
+                if not _safe_digest_equals(computed, recorded):
                     reasons.append(f"section_digests[{name!r}] mismatch")
 
     verified_decision_ids: set[str] = set()
     verified_decision_count = 0
-    adverse_expected_ids: list[str] = []
+    expected_adverse_by_id: dict[str, dict[str, Any]] = {}
     if not isinstance(decisions_raw, list):
         reasons.append("decisions must be a list")
     else:
@@ -449,24 +467,33 @@ def verify_receipt_bundle(
                 continue
             rec_id = receipt_identity(signed.receipt)
             env_id = signed_envelope_identity(signed)
+            adverse = signed.receipt.decision_type in ADVERSE_DECISION_STATES
+            expected_summary: dict[str, Any] = {
+                "decision_identity": rec_id,
+                "signed_envelope_identity": env_id,
+                "request_id": signed.receipt.request_id,
+                "proposed_method": signed.receipt.proposed_method,
+                "decision_type": signed.receipt.decision_type,
+                "adverse_or_consequential": adverse,
+                "matched_constraints": list(signed.receipt.matched_constraints),
+                "denial_or_review_rationale": signed.receipt.denial_or_review_rationale,
+                "issued_at": signed.receipt.issued_at,
+            }
+            for field_name, expected_val in expected_summary.items():
+                actual_val = item.get(field_name)
+                if actual_val != expected_val or (
+                    isinstance(expected_val, bool) and type(actual_val) is not bool
+                ):
+                    reasons.append(
+                        f"decisions[{idx}] summary field {field_name!r} does not match verified signed_receipt"
+                    )
             verified_decision_ids.add(rec_id)
             verified_decision_ids.add(env_id)
             verified_decision_count += 1
-            if signed.receipt.decision_type in ADVERSE_DECISION_STATES:
-                adverse_expected_ids.append(rec_id)
-
-    if not isinstance(adverse_raw, list):
-        reasons.append("adverse_decisions must be a list")
-    else:
-        adverse_actual_ids: list[str] = [
-            str(item["decision_identity"])
-            for item in adverse_raw
-            if isinstance(item, Mapping) and isinstance(item.get("decision_identity"), str)
-        ]
-        if len(adverse_actual_ids) != len(adverse_raw) or sorted(adverse_actual_ids) != sorted(
-            adverse_expected_ids
-        ):
-            reasons.append("adverse_decisions does not match verified adverse decisions")
+            if adverse:
+                expected_adverse_by_id[rec_id] = {
+                    k: v for k, v in expected_summary.items() if k != "adverse_or_consequential"
+                }
 
     verified_outcome_count = 0
     if not isinstance(outcomes_raw, list):
@@ -485,13 +512,129 @@ def verify_receipt_bundle(
             if not isinstance(trusted_key, str):
                 reasons.append(f"outcomes[{idx}] untrusted key_id {signed_outcome.key_id!r}")
                 continue
-            if not signed_outcome.verify(trusted_key):
+            try:
+                outcome_ok = signed_outcome.verify(trusted_key)
+            except ReceiptSigningUnavailable as exc:
+                reasons.append(f"outcomes[{idx}] crypto unavailable: {exc}")
+                continue
+            if not outcome_ok:
                 reasons.append(f"outcomes[{idx}] signature verification failed")
                 continue
             if signed_outcome.receipt.decision_receipt_identity not in verified_decision_ids:
                 reasons.append(f"outcomes[{idx}] references unverified or missing decision receipt")
                 continue
             verified_outcome_count += 1
+
+    escalation_by_ref: dict[str, Mapping[str, Any]] = {}
+    if not isinstance(oversight_raw, Mapping):
+        reasons.append("oversight must be a mapping")
+    else:
+        escalations_raw = oversight_raw.get("escalations")
+        halt_events_raw = oversight_raw.get("halt_events")
+        if not isinstance(escalations_raw, list) or not all(
+            isinstance(e, Mapping) for e in escalations_raw
+        ):
+            reasons.append("oversight.escalations must be a list of mappings")
+            escalations_list: list[Mapping[str, Any]] = []
+        else:
+            escalations_list = list(escalations_raw)
+            for esc in escalations_list:
+                for ref_key in ("decision_identity", "request_id", "escalation_id"):
+                    ref_val = esc.get(ref_key)
+                    if isinstance(ref_val, str) and ref_val:
+                        escalation_by_ref[ref_val] = esc
+        if not isinstance(halt_events_raw, list) or not all(
+            isinstance(h, Mapping) for h in halt_events_raw
+        ):
+            reasons.append("oversight.halt_events must be a list of mappings")
+
+        ret_days = oversight_raw.get("retention_days")
+        if ret_days is not None and (type(ret_days) is not int or ret_days <= 0):
+            reasons.append("oversight.retention_days must be None or a positive int")
+
+        if profile_str in _PROFILE_METADATA:
+            expected_meta = _PROFILE_METADATA[profile_str]
+            if oversight_raw.get("framework") != expected_meta["framework"]:
+                reasons.append("oversight.framework does not match profile")
+            if oversight_raw.get("effective_date") != expected_meta["effective_date"]:
+                reasons.append("oversight.effective_date does not match profile")
+            expected_floor = (
+                EU_AI_ACT_RETENTION_FLOOR_DAYS
+                if profile_str == PROFILE_EU_AI_ACT_ART12_26
+                else None
+            )
+            if oversight_raw.get("retention_floor_days") != expected_floor:
+                reasons.append("oversight.retention_floor_days does not match profile")
+
+        expected_ret_met = (
+            ret_days is not None
+            and type(ret_days) is int
+            and ret_days >= EU_AI_ACT_RETENTION_FLOOR_DAYS
+        )
+        if oversight_raw.get("retention_meets_art26_6_floor") is not expected_ret_met:
+            reasons.append("oversight.retention_meets_art26_6_floor mismatch")
+
+        expected_distinct = all(
+            _escalation_has_distinct_human_overseer(esc) for esc in escalations_list
+        )
+        if (
+            oversight_raw.get("every_escalation_has_distinct_human_overseer")
+            is not expected_distinct
+        ):
+            reasons.append("oversight.every_escalation_has_distinct_human_overseer mismatch")
+
+        for count_key, expected_count in (
+            ("decision_count", verified_decision_count),
+            ("adverse_decision_count", len(expected_adverse_by_id)),
+            ("outcome_count", verified_outcome_count),
+            ("paired_chain_count", verified_outcome_count),
+        ):
+            actual_count = oversight_raw.get(count_key)
+            if type(actual_count) is not int or actual_count != expected_count:
+                reasons.append(f"oversight.{count_key} does not match verified records")
+
+    if not isinstance(adverse_raw, list):
+        reasons.append("adverse_decisions must be a list")
+    else:
+        seen_adverse_ids: list[str] = []
+        for idx, item in enumerate(adverse_raw):
+            if not isinstance(item, Mapping):
+                reasons.append(f"adverse_decisions[{idx}] must be a mapping")
+                continue
+            dec_id = item.get("decision_identity")
+            if not isinstance(dec_id, str) or dec_id not in expected_adverse_by_id:
+                reasons.append(
+                    f"adverse_decisions[{idx}] does not reference a verified adverse decision"
+                )
+                continue
+            seen_adverse_ids.append(dec_id)
+            expected_fields = expected_adverse_by_id[dec_id]
+            for field_name, expected_val in expected_fields.items():
+                if item.get(field_name) != expected_val:
+                    reasons.append(
+                        f"adverse_decisions[{idx}] field {field_name!r} does not match verified signed_receipt"
+                    )
+            matched_esc = (
+                escalation_by_ref.get(dec_id)
+                or escalation_by_ref.get(str(expected_fields["signed_envelope_identity"]))
+                or escalation_by_ref.get(str(expected_fields["request_id"]))
+            )
+            expected_review = (
+                {
+                    "decision": matched_esc.get("decision"),
+                    "approver_id": matched_esc.get("approver_id"),
+                    "decided_at": matched_esc.get("decided_at"),
+                    "rationale": matched_esc.get("rationale"),
+                }
+                if matched_esc is not None
+                else None
+            )
+            if item.get("human_review") != expected_review:
+                reasons.append(
+                    f"adverse_decisions[{idx}] human_review does not match oversight.escalations"
+                )
+        if sorted(seen_adverse_ids) != sorted(expected_adverse_by_id):
+            reasons.append("adverse_decisions does not match verified adverse decisions")
 
     return ReceiptBundleVerification(
         valid=not reasons,
