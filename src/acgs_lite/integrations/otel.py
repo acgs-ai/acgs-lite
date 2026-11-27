@@ -38,8 +38,12 @@ Constitutional Hash: 608508a9bd224290
 from __future__ import annotations
 
 import logging
+import math
+import re
 import threading
 import time
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any
 
 from acgs_lite.audit import AuditLog
@@ -52,6 +56,7 @@ try:
     from opentelemetry import trace as otel_trace
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.trace import Status, StatusCode
 
     OTEL_AVAILABLE = True
 except ImportError:
@@ -60,6 +65,8 @@ except ImportError:
     otel_trace = None  # type: ignore[assignment]
     MeterProvider = None  # type: ignore[assignment,misc]
     TracerProvider = None  # type: ignore[assignment,misc]
+    Status = None  # type: ignore[assignment,misc]
+    StatusCode = None  # type: ignore[assignment,misc]
 
 try:
     from opentelemetry.exporter.prometheus import PrometheusMetricReader
@@ -457,3 +464,352 @@ def create_prometheus_app(
             )
 
         return _fallback
+
+
+# ---------------------------------------------------------------------------
+# Experimental OpenTelemetry GenAI semantic convention spans
+# ---------------------------------------------------------------------------
+
+GEN_AI_OPERATION_EXECUTE_TOOL = "execute_tool"
+GEN_AI_SYSTEM_ACGS = "acgs-lite"
+_GENAI_HEX64_RE = re.compile(r"[0-9a-f]{64}")
+_RESERVED_GENAI_PREFIXES = (
+    "gen_ai.",
+    "acgs.receipt.",
+    "acgs.outcome.",
+    "acgs.governance.",
+    "acgs.provider.",
+)
+
+OtelAttributeValue = str | int | float | bool
+
+
+def _extract_attr(obj: Any, key: str) -> Any:
+    if obj is None:
+        return None
+    if isinstance(obj, Mapping):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _nonempty_str(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _validate_extra_attributes(
+    extra_attributes: Mapping[str, OtelAttributeValue] | None,
+) -> dict[str, OtelAttributeValue]:
+    if extra_attributes is None:
+        return {}
+    if not isinstance(extra_attributes, Mapping):
+        raise TypeError("extra_attributes must be a mapping")
+    validated: dict[str, OtelAttributeValue] = {}
+    for key, val in extra_attributes.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("extra_attributes keys must be non-empty strings")
+        if key.startswith(_RESERVED_GENAI_PREFIXES):
+            raise ValueError(f"extra_attributes cannot override reserved attribute {key!r}")
+        if isinstance(val, (bool, int)):
+            validated[key] = val
+        elif isinstance(val, float):
+            if not math.isfinite(val):
+                raise ValueError(f"extra_attributes[{key!r}] float must be finite")
+            validated[key] = val
+        elif isinstance(val, str):
+            validated[key] = val
+        else:
+            raise TypeError(
+                f"extra_attributes[{key!r}] must be str, int, float, or bool, "
+                f"got {type(val).__name__}"
+            )
+    return validated
+
+
+def _resolve_receipt_identity(receipt_obj: Any, r_hash: str) -> str | None:
+    if _GENAI_HEX64_RE.fullmatch(r_hash) is None:
+        return None
+    if not isinstance(receipt_obj, Mapping):
+        try:
+            from acgs_lite.legitimacy.identity import receipt_identity
+
+            return receipt_identity(receipt_obj)
+        except (ImportError, TypeError, ValueError):
+            return None
+    schema_version = _extract_attr(receipt_obj, "schema_version")
+    version = "v2" if schema_version == 2 else "v1"
+    return f"acgs:receipt:{version}:sha256:{r_hash}"
+
+
+def build_genai_governance_attributes(
+    *,
+    tool_name: str,
+    signed_receipt: Any | None = None,
+    signed_outcome: Any | None = None,
+    agent_id: str | None = None,
+    agent_name: str | None = None,
+    system: str = GEN_AI_SYSTEM_ACGS,
+    contract_class: str | None = None,
+    decision_override: str | None = None,
+    extra_attributes: Mapping[str, OtelAttributeValue] | None = None,
+) -> dict[str, OtelAttributeValue]:
+    """Build experimental OTel GenAI semantic convention attributes for a tool call.
+
+    Captures only governance identities, decision/outcome states, key IDs, and
+    contract metadata — never raw prompt text, arguments, or secrets.
+    """
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        raise ValueError("tool_name must be a non-empty string")
+    if not isinstance(system, str) or not system.strip():
+        raise ValueError("system must be a non-empty string")
+
+    validated_extra = _validate_extra_attributes(extra_attributes)
+
+    attrs: dict[str, OtelAttributeValue] = {
+        "gen_ai.operation.name": GEN_AI_OPERATION_EXECUTE_TOOL,
+        "gen_ai.system": system,
+        "gen_ai.tool.name": tool_name,
+    }
+    if (clean_agent_id := _nonempty_str(agent_id)) is not None:
+        attrs["gen_ai.agent.id"] = clean_agent_id
+    if (clean_agent_name := _nonempty_str(agent_name)) is not None:
+        attrs["gen_ai.agent.name"] = clean_agent_name
+
+    if signed_receipt is not None:
+        nested_receipt = _extract_attr(signed_receipt, "receipt")
+        receipt_obj = nested_receipt if nested_receipt is not None else signed_receipt
+
+        decision = _nonempty_str(_extract_attr(receipt_obj, "decision_type"))
+        if decision is not None:
+            attrs["acgs.governance.decision"] = decision
+
+        r_hash = _nonempty_str(_extract_attr(receipt_obj, "receipt_hash"))
+        if r_hash is not None:
+            attrs["acgs.receipt.hash"] = r_hash
+            r_id = _resolve_receipt_identity(receipt_obj, r_hash)
+            if r_id is not None:
+                attrs["acgs.receipt.identity"] = r_id
+
+        key_id = _nonempty_str(_extract_attr(signed_receipt, "key_id"))
+        if key_id is not None:
+            attrs["acgs.receipt.key_id"] = key_id
+
+        algorithm = _nonempty_str(_extract_attr(signed_receipt, "algorithm"))
+        if algorithm is not None:
+            attrs["acgs.receipt.algorithm"] = algorithm
+
+        schema_version = _extract_attr(receipt_obj, "schema_version")
+        if type(schema_version) is int:
+            attrs["acgs.receipt.schema_version"] = schema_version
+
+    if (clean_override := _nonempty_str(decision_override)) is not None:
+        attrs["acgs.governance.decision"] = clean_override
+
+    if signed_outcome is not None:
+        nested_outcome = _extract_attr(signed_outcome, "receipt")
+        outcome_obj = nested_outcome if nested_outcome is not None else signed_outcome
+
+        outcome_val = _extract_attr(outcome_obj, "outcome")
+        if outcome_val is not None:
+            raw_outcome = getattr(outcome_val, "value", outcome_val)
+            if isinstance(raw_outcome, str) and raw_outcome.strip():
+                attrs["acgs.outcome.status"] = raw_outcome.strip().upper()
+
+        effect_key = _nonempty_str(_extract_attr(outcome_obj, "effect_key"))
+        if effect_key is not None:
+            attrs["acgs.outcome.effect_key"] = effect_key
+
+        provider_id = _nonempty_str(_extract_attr(outcome_obj, "provider_id"))
+        if provider_id is not None:
+            attrs["acgs.outcome.provider_id"] = provider_id
+
+        contract_digest = _nonempty_str(_extract_attr(outcome_obj, "provider_contract_digest"))
+        if contract_digest is not None:
+            attrs["acgs.outcome.provider_contract_digest"] = contract_digest
+
+    if (clean_contract_class := _nonempty_str(contract_class)) is not None:
+        attrs["acgs.provider.contract_class"] = clean_contract_class
+
+    attrs.update(validated_extra)
+    return attrs
+
+
+class _GovernedToolSpanHandle:
+    """Mutable handle yielded by :meth:`GenAIGovernanceTracer.trace_governed_tool`."""
+
+    def __init__(
+        self,
+        *,
+        tool_name: str,
+        agent_id: str | None,
+        agent_name: str | None,
+        system: str,
+        contract_class: str | None,
+        extra_attributes: Mapping[str, OtelAttributeValue] | None,
+    ) -> None:
+        self._tool_name = tool_name
+        self._agent_id = agent_id
+        self._agent_name = agent_name
+        self._system = system
+        self._contract_class = contract_class
+        self._extra_attributes = extra_attributes
+        self._signed_receipt: Any | None = None
+        self._signed_outcome: Any | None = None
+        self._decision_override: str | None = None
+
+    def attach_decision(
+        self,
+        signed_receipt: Any | None = None,
+        *,
+        decision_override: str | None = None,
+    ) -> None:
+        """Bind a signed pre-execution decision receipt to the active span."""
+        self._signed_receipt = signed_receipt
+        if decision_override is not None:
+            self._decision_override = decision_override
+
+    def attach_outcome(self, signed_outcome: Any) -> None:
+        """Bind a signed post-execution outcome receipt to the active span."""
+        self._signed_outcome = signed_outcome
+
+    @property
+    def attributes(self) -> dict[str, OtelAttributeValue]:
+        """Compute the current sanitized OTel GenAI + ACGS attribute snapshot."""
+        return build_genai_governance_attributes(
+            tool_name=self._tool_name,
+            signed_receipt=self._signed_receipt,
+            signed_outcome=self._signed_outcome,
+            agent_id=self._agent_id,
+            agent_name=self._agent_name,
+            system=self._system,
+            contract_class=self._contract_class,
+            decision_override=self._decision_override,
+            extra_attributes=self._extra_attributes,
+        )
+
+
+def _span_failure_reason(
+    attrs: Mapping[str, OtelAttributeValue],
+    exc: BaseException | None,
+) -> str | None:
+    if exc is not None:
+        return type(exc).__name__
+    decision = str(attrs.get("acgs.governance.decision", "")).upper()
+    if decision.startswith(("DENY", "HARD_DENY")):
+        return f"governance decision {decision}"
+    outcome_status = str(attrs.get("acgs.outcome.status", "")).upper()
+    if outcome_status == "NOT_DONE":
+        return "effect outcome NOT_DONE"
+    return None
+
+
+def _apply_span_status(
+    span: Any,
+    attrs: Mapping[str, OtelAttributeValue],
+    *,
+    exc: BaseException | None = None,
+) -> None:
+    if not OTEL_AVAILABLE or Status is None or StatusCode is None:
+        return
+    reason = _span_failure_reason(attrs, exc)
+    if reason is not None:
+        span.set_status(Status(StatusCode.ERROR, reason))
+    else:
+        span.set_status(Status(StatusCode.OK))
+
+
+class GenAIGovernanceTracer:
+    """Emit experimental OpenTelemetry GenAI spans with ACGS receipt provenance."""
+
+    def __init__(
+        self,
+        *,
+        tracer_provider: Any | None = None,
+        system: str = GEN_AI_SYSTEM_ACGS,
+    ) -> None:
+        if not isinstance(system, str) or not system.strip():
+            raise ValueError("system must be a non-empty string")
+        self._system = system
+        if OTEL_AVAILABLE and tracer_provider is not None:
+            self._tracer = tracer_provider.get_tracer(_TRACER_NAME)
+        elif OTEL_AVAILABLE:
+            self._tracer = otel_trace.get_tracer(_TRACER_NAME)
+        else:
+            self._tracer = _NoopTracer()  # type: ignore[assignment]
+
+    def record_receipt_span(
+        self,
+        *,
+        tool_name: str,
+        signed_receipt: Any | None = None,
+        signed_outcome: Any | None = None,
+        agent_id: str | None = None,
+        agent_name: str | None = None,
+        contract_class: str | None = None,
+        decision_override: str | None = None,
+        extra_attributes: Mapping[str, OtelAttributeValue] | None = None,
+    ) -> dict[str, OtelAttributeValue]:
+        """Emit a single completed ``execute_tool <tool_name>`` span from receipts."""
+        attrs = build_genai_governance_attributes(
+            tool_name=tool_name,
+            signed_receipt=signed_receipt,
+            signed_outcome=signed_outcome,
+            agent_id=agent_id,
+            agent_name=agent_name,
+            system=self._system,
+            contract_class=contract_class,
+            decision_override=decision_override,
+            extra_attributes=extra_attributes,
+        )
+        span_name = f"{GEN_AI_OPERATION_EXECUTE_TOOL} {tool_name}"
+        with self._tracer.start_as_current_span(
+            span_name,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            for key, val in attrs.items():
+                span.set_attribute(key, val)
+            _apply_span_status(span, attrs)
+        return attrs
+
+    @contextmanager
+    def trace_governed_tool(
+        self,
+        *,
+        tool_name: str,
+        agent_id: str | None = None,
+        agent_name: str | None = None,
+        contract_class: str | None = None,
+        extra_attributes: Mapping[str, OtelAttributeValue] | None = None,
+    ) -> Iterator[_GovernedToolSpanHandle]:
+        """Wrap a governed tool execution in an ``execute_tool`` GenAI span."""
+        handle = _GovernedToolSpanHandle(
+            tool_name=tool_name,
+            agent_id=agent_id,
+            agent_name=agent_name,
+            system=self._system,
+            contract_class=contract_class,
+            extra_attributes=extra_attributes,
+        )
+        # Validate inputs eagerly before entering span.
+        initial_attrs = handle.attributes
+        span_name = f"{GEN_AI_OPERATION_EXECUTE_TOOL} {tool_name}"
+        caught: BaseException | None = None
+        with self._tracer.start_as_current_span(
+            span_name,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            for key, val in initial_attrs.items():
+                span.set_attribute(key, val)
+            try:
+                yield handle
+            except BaseException as exc:
+                caught = exc
+                raise
+            finally:
+                final_attrs = handle.attributes
+                for key, val in final_attrs.items():
+                    span.set_attribute(key, val)
+                _apply_span_status(span, final_attrs, exc=caught)
