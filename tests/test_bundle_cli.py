@@ -297,3 +297,304 @@ class TestCmdBundle:
             == 1
         )
         assert "Error:" in capsys.readouterr().err
+
+    def test_scitt_export_and_verify_bundle_and_decision_round_trip(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        pytest.importorskip("cryptography")
+        parser = build_parser()
+        bundle_path = tmp_path / "bundle.json"
+        keys_path = tmp_path / "keys.json"
+        assert (
+            cmd_bundle(
+                parser.parse_args(
+                    [
+                        "bundle",
+                        "demo",
+                        "--profile",
+                        "ca-admt-2027",
+                        "--out",
+                        str(bundle_path),
+                        "--keys-out",
+                        str(keys_path),
+                        "--json",
+                    ]
+                )
+            )
+            == 0
+        )
+        _ = capsys.readouterr()
+
+        cose_path = tmp_path / "bundle.cose"
+        rc_export = cmd_bundle(
+            parser.parse_args(
+                [
+                    "bundle",
+                    "scitt-export",
+                    str(bundle_path),
+                    "--demo-key",
+                    "--keys",
+                    str(keys_path),
+                    "--issuer",
+                    "did:web:acgs.example",
+                    "--subject",
+                    "system:bundle-demo",
+                    "--issued-at",
+                    "1764266000",
+                    "--external-aad-hex",
+                    "deadbeef",
+                    "--out",
+                    str(cose_path),
+                    "--json",
+                ]
+            )
+        )
+        assert rc_export == 0
+        export_meta = json.loads(capsys.readouterr().out)
+        assert export_meta["kind"] == "bundle"
+        assert export_meta["demo_key_used"] is True
+        assert export_meta["content_type"] == "application/acgs-compliance-bundle+json"
+        assert cose_path.exists()
+
+        # Verify JSON and text modes succeed offline
+        rc_verify = cmd_bundle(
+            parser.parse_args(
+                [
+                    "bundle",
+                    "scitt-verify",
+                    str(cose_path),
+                    "--keys",
+                    str(keys_path),
+                    "--expected-content-type",
+                    "application/acgs-compliance-bundle+json",
+                    "--expected-issuer",
+                    "did:web:acgs.example",
+                    "--external-aad-hex",
+                    "deadbeef",
+                    "--json",
+                ]
+            )
+        )
+        assert rc_verify == 0
+        ver_payload = json.loads(capsys.readouterr().out)
+        assert ver_payload["valid"] is True
+        assert ver_payload["issuer"] == "did:web:acgs.example"
+        assert ver_payload["subject"] == "system:bundle-demo"
+        assert ver_payload["issued_at"] == 1764266000
+
+        assert (
+            cmd_bundle(
+                parser.parse_args(
+                    [
+                        "bundle",
+                        "scitt-verify",
+                        str(cose_path),
+                        "--keys",
+                        str(keys_path),
+                        "--external-aad-hex",
+                        "deadbeef",
+                    ]
+                )
+            )
+            == 0
+        )
+        assert "VALID SCITT COSE_Sign1" in capsys.readouterr().out
+
+        # Wrong issuer, wrong content type, wrong external AAD, and tampered bytes all return rc=1
+        for extra_args in (
+            ["--expected-issuer", "did:web:other.example", "--external-aad-hex", "deadbeef"],
+            ["--expected-content-type", "application/json", "--external-aad-hex", "deadbeef"],
+            ["--external-aad-hex", "cafe"],
+        ):
+            rc_bad = cmd_bundle(
+                parser.parse_args(
+                    ["bundle", "scitt-verify", str(cose_path), "--keys", str(keys_path), "--json"]
+                    + extra_args
+                )
+            )
+            assert rc_bad == 1
+            assert json.loads(capsys.readouterr().out)["valid"] is False
+
+        tampered_cose = tmp_path / "tampered.cose"
+        raw = bytearray(cose_path.read_bytes())
+        raw[-1] ^= 0xFF
+        tampered_cose.write_bytes(bytes(raw))
+        assert (
+            cmd_bundle(
+                parser.parse_args(
+                    [
+                        "bundle",
+                        "scitt-verify",
+                        str(tampered_cose),
+                        "--keys",
+                        str(keys_path),
+                        "--external-aad-hex",
+                        "deadbeef",
+                    ]
+                )
+            )
+            == 1
+        )
+        assert "INVALID SCITT COSE_Sign1" in capsys.readouterr().err
+
+        # Signing via --signing-key-env over a standalone SignedReceipt
+        bundle_obj = json.loads(bundle_path.read_text(encoding="utf-8"))
+        decision_path = tmp_path / "decision.json"
+        decision_path.write_text(
+            json.dumps(bundle_obj["decisions"][0]["signed_receipt"]),
+            encoding="utf-8",
+        )
+        seed_bytes = b"\x7a" * 32
+        monkeypatch.setenv("ACGS_TEST_SCITT_SEED", seed_bytes.hex())
+        ext_signer = Ed25519ReceiptSigner.from_seed(seed_bytes, key_id="env-registrar-1")
+        ext_keys_path = tmp_path / "ext_keys.json"
+        ext_keys_path.write_text(
+            json.dumps({ext_signer.key_id: ext_signer.public_key_hex()}),
+            encoding="utf-8",
+        )
+        dec_cose = tmp_path / "decision.cose"
+        assert (
+            cmd_bundle(
+                parser.parse_args(
+                    [
+                        "bundle",
+                        "scitt-export",
+                        str(decision_path),
+                        "--signing-key-env",
+                        "ACGS_TEST_SCITT_SEED",
+                        "--key-id",
+                        "env-registrar-1",
+                        "--keys",
+                        str(keys_path),
+                        "--out",
+                        str(dec_cose),
+                    ]
+                )
+            )
+            == 0
+        )
+        assert "Exported SCITT COSE_Sign1" in capsys.readouterr().out
+        assert (
+            cmd_bundle(
+                parser.parse_args(
+                    [
+                        "bundle",
+                        "scitt-verify",
+                        str(dec_cose),
+                        "--keys",
+                        str(ext_keys_path),
+                        "--json",
+                    ]
+                )
+            )
+            == 0
+        )
+        dec_ver = json.loads(capsys.readouterr().out)
+        assert dec_ver["valid"] is True
+        assert dec_ver["content_type"] == "application/acgs-decision-receipt+json"
+
+    def test_scitt_cli_fail_closed_validation(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        pytest.importorskip("cryptography")
+        parser = build_parser()
+        bundle_path = tmp_path / "bundle.json"
+        keys_path = tmp_path / "keys.json"
+        assert (
+            cmd_bundle(
+                parser.parse_args(
+                    [
+                        "bundle",
+                        "demo",
+                        "--out",
+                        str(bundle_path),
+                        "--keys-out",
+                        str(keys_path),
+                        "--json",
+                    ]
+                )
+            )
+            == 0
+        )
+        _ = capsys.readouterr()
+
+        # Tampered bundle fails --keys pre-export verification
+        tampered_bundle = copy.deepcopy(json.loads(bundle_path.read_text(encoding="utf-8")))
+        tampered_bundle["decisions"][0]["proposed_method"] = "tampered"
+        tampered_bundle_path = tmp_path / "tampered_bundle.json"
+        tampered_bundle_path.write_text(json.dumps(tampered_bundle), encoding="utf-8")
+        assert (
+            cmd_bundle(
+                parser.parse_args(
+                    [
+                        "bundle",
+                        "scitt-export",
+                        str(tampered_bundle_path),
+                        "--demo-key",
+                        "--keys",
+                        str(keys_path),
+                        "--out",
+                        str(tmp_path / "out.cose"),
+                    ]
+                )
+            )
+            == 1
+        )
+        assert "pre-export verification" in capsys.readouterr().err
+
+        # Bad env seed, bad hex AAD, and empty COSE file fail closed
+        monkeypatch.setenv("ACGS_BAD_SEED", "not-64-hex")
+        assert (
+            cmd_bundle(
+                parser.parse_args(
+                    [
+                        "bundle",
+                        "scitt-export",
+                        str(bundle_path),
+                        "--signing-key-env",
+                        "ACGS_BAD_SEED",
+                        "--out",
+                        str(tmp_path / "out2.cose"),
+                    ]
+                )
+            )
+            == 1
+        )
+        assert "64-character hex" in capsys.readouterr().err
+
+        assert (
+            cmd_bundle(
+                parser.parse_args(
+                    [
+                        "bundle",
+                        "scitt-export",
+                        str(bundle_path),
+                        "--demo-key",
+                        "--external-aad-hex",
+                        "zz",
+                        "--out",
+                        str(tmp_path / "out3.cose"),
+                    ]
+                )
+            )
+            == 1
+        )
+        assert "hexadecimal" in capsys.readouterr().err
+
+        empty_cose = tmp_path / "empty.cose"
+        empty_cose.write_bytes(b"")
+        assert (
+            cmd_bundle(
+                parser.parse_args(
+                    ["bundle", "scitt-verify", str(empty_cose), "--keys", str(keys_path), "--json"]
+                )
+            )
+            == 1
+        )
+        assert json.loads(capsys.readouterr().out)["valid"] is False

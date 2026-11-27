@@ -11,7 +11,7 @@ make test-examples
 
 ## Offline-runnable examples (smoke-tested by `make test-examples`)
 
-All 29 scripts below run offline with no API keys or network services (`agent_quickstart/run.py` and `control_plane_demo.py` use `acgs-lite[crypto]`, which is included in `[dev]`).
+All 30 scripts below run offline with no API keys or network services (`agent_quickstart/run.py`, `commercial_evidence_pipeline.py`, and `control_plane_demo.py` use `acgs-lite[crypto]`, which is included in `[dev]`).
 
 | Example | What it shows |
 | --- | --- |
@@ -19,6 +19,7 @@ All 29 scripts below run offline with no API keys or network services (`agent_qu
 | [`examples/agent_quickstart/run.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/agent_quickstart/run.py) | Self-verifying quickstart covering `GovernedCallable` Ed25519 grants, MACI, and `AuditLog` |
 | [`examples/audit_trail/main.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/audit_trail/main.py) | Build, query, JSON-export, and verify hash-chained audit entries |
 | [`examples/basic_governance/main.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/basic_governance/main.py) | Govern a Python callable using inline, YAML, and default constitutions |
+| [`examples/commercial_evidence_pipeline.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/commercial_evidence_pipeline.py) | Five-stage offline pipeline: `FENCEABLE` receipts, OTel GenAI spans, CA ADMT bundle, SCITT `COSE_Sign1`, and `ControlPlaneBridgeClient` |
 | [`examples/compliance_eu_ai_act/main.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/compliance_eu_ai_act/main.py) | Infer EU AI Act risk tiers and run single- and multi-framework gap assessments |
 | [`examples/compliance_reports/run.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/compliance_reports/run.py) | Generate Markdown, text, and JSON compliance reports across 20 regulatory frameworks |
 | [`examples/control_plane_demo.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/control_plane_demo.py) | Run the governed self-improvement loop and verify adversarial attack denial |

@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -18,9 +20,12 @@ from typing import Any
 # Keep compliance/legitimacy imports lazy inside handlers so importing acgs_lite.cli
 # never expands the Trusted Computing Base closure (TestHigh2TrustedComputingBase).
 _BUNDLE_DEMO_SEED = b"acgs-bundle-demo-seed-2026-11-!!"[:32]
+_BUNDLE_DEMO_KEY_ID = "acgs-bundle-demo-k1"
 _PROFILE_CA_ADMT = "ca-admt-2027"
 _PROFILE_EU_AI_ACT = "eu-ai-act-art12-26"
 _PROFILE_CHOICES = (_PROFILE_CA_ADMT, _PROFILE_EU_AI_ACT)
+_SCITT_KIND_CHOICES = ("auto", "bundle", "decision", "outcome", "json")
+_ASCII_HEX_RE = re.compile(r"[0-9a-fA-F]+")
 
 
 class _BundleCliError(ValueError):
@@ -333,7 +338,7 @@ def _cmd_demo(args: argparse.Namespace) -> int:
     )
 
     try:
-        signer = Ed25519ReceiptSigner.from_seed(_BUNDLE_DEMO_SEED, key_id="acgs-bundle-demo-k1")
+        signer = Ed25519ReceiptSigner.from_seed(_BUNDLE_DEMO_SEED, key_id=_BUNDLE_DEMO_KEY_ID)
         trusted = {signer.key_id: signer.public_key_hex()}
 
         constitution = Constitution(
@@ -521,11 +526,236 @@ def _cmd_demo(args: argparse.Namespace) -> int:
         return 1
 
 
+def _parse_hex_bytes(raw: str | None, *, label: str) -> bytes:
+    if raw is None:
+        return b""
+    if not isinstance(raw, str):
+        raise _BundleCliError(f"{label} must be a hexadecimal string")
+    cleaned = raw.strip()
+    if not cleaned or len(cleaned) % 2 != 0 or _ASCII_HEX_RE.fullmatch(cleaned) is None:
+        raise _BundleCliError(f"{label} must be non-empty even-length hexadecimal")
+    return bytes.fromhex(cleaned)
+
+
+def _detect_scitt_kind(payload_obj: dict[str, Any]) -> str:
+    if payload_obj.get("schema_version") == "acgs-compliance-bundle-v1":
+        return "bundle"
+    inner = payload_obj.get("receipt")
+    if isinstance(inner, dict):
+        if "effect_key" in inner:
+            return "outcome"
+        if "receipt_hash" in inner:
+            return "decision"
+    return "json"
+
+
+def _load_scitt_signer(args: argparse.Namespace) -> Any:
+    from acgs_lite.legitimacy import Ed25519ReceiptSigner
+
+    raw_key_id = getattr(args, "key_id", None)
+    key_id: str | None = None
+    if raw_key_id is not None:
+        if not isinstance(raw_key_id, str) or not raw_key_id.strip():
+            raise _BundleCliError("--key-id must be a non-empty string")
+        key_id = raw_key_id.strip()
+
+    if getattr(args, "demo_key", False):
+        return Ed25519ReceiptSigner.from_seed(
+            _BUNDLE_DEMO_SEED,
+            key_id=key_id or _BUNDLE_DEMO_KEY_ID,
+        )
+
+    env_name = getattr(args, "signing_key_env", None)
+    if not isinstance(env_name, str) or not env_name.strip():
+        raise _BundleCliError("Specify either --demo-key or --signing-key-env")
+    env_var = env_name.strip()
+    seed_hex = os.environ.get(env_var, "").strip()
+    if len(seed_hex) != 64 or _ASCII_HEX_RE.fullmatch(seed_hex) is None:
+        raise _BundleCliError(
+            f"Environment variable {env_var!r} must contain a 64-character hex Ed25519 seed"
+        )
+    return Ed25519ReceiptSigner.from_seed(bytes.fromhex(seed_hex), key_id=key_id)
+
+
+def _cmd_scitt_export(args: argparse.Namespace) -> int:
+    from acgs_lite.compliance.receipt_bundle import verify_receipt_bundle
+    from acgs_lite.compliance.scitt import (
+        MEDIA_TYPE_COMPLIANCE_BUNDLE,
+        SCITTExportError,
+        export_scitt_cose_sign1,
+    )
+    from acgs_lite.legitimacy import (
+        ReceiptSigningUnavailable,
+        SignedOutcomeReceipt,
+        SignedReceipt,
+    )
+
+    try:
+        payload_raw = _load_json_value(Path(args.input), label="input")
+        if not isinstance(payload_raw, dict):
+            raise _BundleCliError("SCITT export input JSON must be an object")
+
+        kind = _detect_scitt_kind(payload_raw) if args.kind == "auto" else args.kind
+        trusted_keys = _load_trusted_verifiers(Path(args.keys)) if args.keys is not None else None
+
+        scitt_payload: Any
+        resolved_content_type = args.content_type
+        if kind == "decision":
+            signed_dec = SignedReceipt.from_dict(payload_raw)
+            if trusted_keys is not None:
+                trusted_pk = trusted_keys.get(signed_dec.key_id)
+                if not isinstance(trusted_pk, str) or not signed_dec.verify(trusted_pk):
+                    raise _BundleCliError(
+                        f"Input SignedReceipt failed pinned verification for key_id {signed_dec.key_id!r}"
+                    )
+            scitt_payload = signed_dec
+        elif kind == "outcome":
+            signed_out = SignedOutcomeReceipt.from_dict(payload_raw)
+            if trusted_keys is not None:
+                trusted_pk = trusted_keys.get(signed_out.key_id)
+                if not isinstance(trusted_pk, str) or not signed_out.verify(trusted_pk):
+                    raise _BundleCliError(
+                        "Input SignedOutcomeReceipt failed pinned verification for "
+                        f"key_id {signed_out.key_id!r}"
+                    )
+            scitt_payload = signed_out
+        elif kind == "bundle":
+            if trusted_keys is not None:
+                bundle_ver = verify_receipt_bundle(
+                    payload_raw,
+                    trusted_public_keys=trusted_keys,
+                )
+                if not bundle_ver.valid:
+                    raise _BundleCliError(
+                        "Input compliance bundle failed pre-export verification: "
+                        + "; ".join(bundle_ver.reasons)
+                    )
+            scitt_payload = payload_raw
+            if resolved_content_type is None:
+                resolved_content_type = MEDIA_TYPE_COMPLIANCE_BUNDLE
+        else:
+            scitt_payload = payload_raw
+
+        external_aad = _parse_hex_bytes(args.external_aad_hex, label="external-aad-hex")
+        signer = _load_scitt_signer(args)
+        envelope = export_scitt_cose_sign1(
+            scitt_payload,
+            signer,
+            content_type=resolved_content_type,
+            issuer=args.issuer,
+            subject=args.subject,
+            issued_at=args.issued_at,
+            external_aad=external_aad,
+        )
+
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(envelope.cose_bytes)
+
+        output_meta = {
+            **envelope.to_metadata_dict(),
+            "output_path": str(out_path),
+            "kind": kind,
+            "demo_key_used": bool(args.demo_key),
+        }
+        if getattr(args, "json_out", False):
+            print(json.dumps(output_meta, indent=2, sort_keys=True))
+        else:
+            print(
+                f"Exported SCITT COSE_Sign1 ({envelope.content_type}, key_id={envelope.key_id}) "
+                f"-> {out_path} [{len(envelope.cose_bytes)} bytes]"
+            )
+        return 0
+    except ReceiptSigningUnavailable as exc:
+        print(
+            f"Error: {exc}. Install cryptography via: pip install 'acgs-lite[crypto]'",
+            file=sys.stderr,
+        )
+        return 1
+    except (_BundleCliError, SCITTExportError, OSError, TypeError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
+def _cmd_scitt_verify(args: argparse.Namespace) -> int:
+    from acgs_lite.compliance.scitt import verify_scitt_cose_sign1
+    from acgs_lite.legitimacy import ReceiptSigningUnavailable
+
+    try:
+        cose_path = Path(args.cose)
+        try:
+            raw_bytes = cose_path.read_bytes()
+        except OSError as exc:
+            raise _BundleCliError(f"Failed to read COSE file {cose_path}: {exc}") from exc
+        if not raw_bytes:
+            raise _BundleCliError(f"COSE file {cose_path} is empty")
+
+        trusted_keys = _load_trusted_verifiers(Path(args.keys))
+        external_aad = _parse_hex_bytes(args.external_aad_hex, label="external-aad-hex")
+        result = verify_scitt_cose_sign1(
+            raw_bytes,
+            trusted_keys,
+            expected_content_type=args.expected_content_type,
+            expected_issuer=args.expected_issuer,
+            external_aad=external_aad,
+        )
+    except ReceiptSigningUnavailable as exc:
+        print(
+            f"Error: {exc}. Install cryptography via: pip install 'acgs-lite[crypto]'",
+            file=sys.stderr,
+        )
+        return 1
+    except (_BundleCliError, TypeError, ValueError) as exc:
+        if getattr(args, "json_out", False):
+            print(
+                json.dumps(
+                    {
+                        "valid": False,
+                        "key_id": None,
+                        "content_type": None,
+                        "payload_sha256": None,
+                        "issuer": None,
+                        "subject": None,
+                        "issued_at": None,
+                        "errors": [str(exc)],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    output = {
+        "valid": result.valid,
+        "key_id": result.key_id,
+        "content_type": result.content_type,
+        "payload_sha256": result.payload_sha256,
+        "issuer": result.issuer,
+        "subject": result.subject,
+        "issued_at": result.issued_at,
+        "errors": list(result.errors),
+    }
+    if getattr(args, "json_out", False):
+        print(json.dumps(output, indent=2, sort_keys=True))
+    elif result.valid:
+        print(
+            f"VALID SCITT COSE_Sign1 ({result.content_type}, key_id={result.key_id}, "
+            f"sha256={result.payload_sha256})"
+        )
+    else:
+        print("INVALID SCITT COSE_Sign1:", file=sys.stderr)
+        for err in result.errors:
+            print(f"  - {err}", file=sys.stderr)
+    return 0 if result.valid else 1
+
+
 def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    """Register ``acgs bundle`` subcommands (export, verify, demo)."""
+    """Register ``acgs bundle`` subcommands (export, verify, demo, scitt-export, scitt-verify)."""
     p = sub.add_parser(
         "bundle",
-        help="Export, verify, and demo deterministic compliance receipt bundles",
+        help="Export, verify, and demo deterministic compliance and SCITT receipt bundles",
     )
     bundle_sub = p.add_subparsers(dest="bundle_action", required=True)
 
@@ -585,6 +815,75 @@ def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None
     )
     p_demo.add_argument("--json", dest="json_out", action="store_true", help="Emit JSON output")
 
+    p_scitt_export = bundle_sub.add_parser(
+        "scitt-export",
+        help="Wrap a receipt, compliance bundle, or JSON artifact in RFC 9052 COSE_Sign1",
+    )
+    p_scitt_export.add_argument("input", help="Path to input JSON artifact")
+    p_scitt_export.add_argument("--out", required=True, help="Write COSE_Sign1 binary to this path")
+    key_group = p_scitt_export.add_mutually_exclusive_group(required=True)
+    key_group.add_argument(
+        "--demo-key",
+        action="store_true",
+        help="Sign with the offline demo seed matching `acgs bundle demo --keys-out`",
+    )
+    key_group.add_argument(
+        "--signing-key-env",
+        default=None,
+        help="Environment variable containing a 64-char hex Ed25519 signing seed",
+    )
+    p_scitt_export.add_argument("--key-id", default=None, help="Optional override for COSE kid")
+    p_scitt_export.add_argument(
+        "--kind",
+        default="auto",
+        choices=_SCITT_KIND_CHOICES,
+        help="Payload type override (default: auto)",
+    )
+    p_scitt_export.add_argument(
+        "--keys",
+        default=None,
+        help="Optional JSON object of pinned public keys for pre-export verification",
+    )
+    p_scitt_export.add_argument("--issuer", default=None, help="Optional SCITT CWT iss claim")
+    p_scitt_export.add_argument("--subject", default=None, help="Optional SCITT CWT sub claim")
+    p_scitt_export.add_argument(
+        "--issued-at", type=int, default=None, help="Optional SCITT CWT iat epoch seconds"
+    )
+    p_scitt_export.add_argument(
+        "--content-type", default=None, help="Optional COSE protected header content_type override"
+    )
+    p_scitt_export.add_argument(
+        "--external-aad-hex", default=None, help="Optional hex-encoded COSE external_aad bytes"
+    )
+    p_scitt_export.add_argument(
+        "--json", dest="json_out", action="store_true", help="Emit JSON output"
+    )
+
+    p_scitt_verify = bundle_sub.add_parser(
+        "scitt-verify",
+        help="Verify an RFC 9052 COSE_Sign1 SCITT envelope offline",
+    )
+    p_scitt_verify.add_argument("cose", help="Path to COSE_Sign1 binary file")
+    p_scitt_verify.add_argument(
+        "--keys", required=True, help="JSON object mapping trusted key_id -> hex public key"
+    )
+    p_scitt_verify.add_argument(
+        "--expected-content-type",
+        default=None,
+        help="Require exact COSE content_type protected header value",
+    )
+    p_scitt_verify.add_argument(
+        "--expected-issuer",
+        default=None,
+        help="Require exact SCITT CWT iss claim value",
+    )
+    p_scitt_verify.add_argument(
+        "--external-aad-hex", default=None, help="Optional hex-encoded COSE external_aad bytes"
+    )
+    p_scitt_verify.add_argument(
+        "--json", dest="json_out", action="store_true", help="Emit JSON output"
+    )
+
 
 def handler(args: argparse.Namespace) -> int:
     """Dispatch ``acgs bundle`` subcommands."""
@@ -595,5 +894,9 @@ def handler(args: argparse.Namespace) -> int:
         return _cmd_verify(args)
     if action == "demo":
         return _cmd_demo(args)
+    if action == "scitt-export":
+        return _cmd_scitt_export(args)
+    if action == "scitt-verify":
+        return _cmd_scitt_verify(args)
     print(f"Error: unsupported bundle action: {action!r}", file=sys.stderr)
     return 1

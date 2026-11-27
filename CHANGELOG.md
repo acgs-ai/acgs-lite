@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Experimental OpenTelemetry GenAI semantic convention spans
   (`GenAIGovernanceTracer`, `build_genai_governance_attributes` in
   `acgs_lite.integrations.otel`).
+- Auditor CLI `acgs bundle scitt-export` and `acgs bundle scitt-verify`
+  subcommands for wrapping and offline-verifying receipts, outcomes, and
+  compliance bundles as RFC 9052 `COSE_Sign1` EdDSA statements.
+- Five-stage offline end-to-end commercial pipeline example
+  (`examples/commercial_evidence_pipeline.py`).
 
 ## [4.1.0] - 2026-11-27
 
