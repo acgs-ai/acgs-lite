@@ -220,3 +220,17 @@ def test_webhook_main_with_live_url_fails_on_http_error_and_succeeds_when_ok(
     assert ok_out["all_passed"] is True
     assert ok_out["live_verification"]["passed"] is True
     assert ok_out["live_verification"]["idempotent_dedup_matched"] is True
+
+    # Live transport whose fence endpoint returns unknown after deliver must NOT pass
+    from examples.webhook_fenceable_provider.provider import run_live_webhook_verification
+
+    class _BrokenFenceTransport:
+        def deliver(self, **_: object) -> dict[str, object]:
+            return {"delivery_id": "whd_broken", "status": "delivered", "fenced": False}
+
+        def retrieve_and_fence(self, **_: object) -> tuple[EffectOutcome, str | None, bool]:
+            return EffectOutcome.UNKNOWN, "whd_broken", False
+
+    broken = run_live_webhook_verification(_BrokenFenceTransport())  # type: ignore[arg-type]
+    assert broken["reconcile_outcome"] == "unknown"
+    assert broken["passed"] is False

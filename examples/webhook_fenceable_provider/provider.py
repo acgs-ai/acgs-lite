@@ -594,7 +594,9 @@ def run_live_webhook_verification(
             "provider_reference": ref,
             "idempotent_dedup_matched": dedup_ok,
             "reconcile_outcome": outcome.value,
-            "passed": rec.state is EffectState.DONE and dedup_ok,
+            "passed": (
+                rec.state is EffectState.DONE and dedup_ok and outcome is EffectOutcome.DONE
+            ),
         }
 
     if db_path is not None:

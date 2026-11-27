@@ -482,8 +482,12 @@ def verify_receipt_bundle(
             if not ok:
                 reasons.append(f"decisions[{idx}] signature or hash verification failed")
                 continue
-            rec_id = receipt_identity(signed.receipt)
-            env_id = signed_envelope_identity(signed)
+            try:
+                rec_id = receipt_identity(signed.receipt)
+                env_id = signed_envelope_identity(signed)
+            except (TypeError, ValueError) as exc:
+                reasons.append(f"decisions[{idx}] invalid identity fields: {exc}")
+                continue
             adverse = signed.receipt.decision_type in ADVERSE_DECISION_STATES
             expected_summary: dict[str, Any] = {
                 "decision_identity": rec_id,

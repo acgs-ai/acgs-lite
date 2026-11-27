@@ -412,3 +412,10 @@ def test_verify_receipt_bundle_detects_tampering_never_raises() -> None:
     assert (
         verify_receipt_bundle(casefold_bundle.to_dict(), trusted_public_keys=trusted).valid is True
     )
+
+    # Malformed signed_at (unhashable/invalid) must return valid=False cleanly without ValueError
+    bad_signed_at = bundle.to_dict()
+    bad_signed_at["decisions"][0]["signed_receipt"]["signed_at"] = []
+    ver_bad_signed_at = verify_receipt_bundle(bad_signed_at, trusted_public_keys=trusted)
+    assert ver_bad_signed_at.valid is False
+    assert any("invalid identity fields" in r for r in ver_bad_signed_at.reasons)
