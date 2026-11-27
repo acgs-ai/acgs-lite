@@ -9,6 +9,7 @@ Constitutional Hash: 608508a9bd224290
 
 Commands:
     acgs demo                   Zero-config tour of signed receipts, effects, and MACI
+    acgs bundle                 Export, verify, and demo compliance receipt bundles
     acgs init                   Scaffold rules.yaml + CI governance job
     acgs assess                 Run multi-framework compliance assessment
     acgs report [--pdf|--md]    Generate auditor-ready compliance report
@@ -43,6 +44,7 @@ from typing import Any
 from acgs_lite.commands import (
     arckit,
     assess,
+    bundle,
     capabilities,
     demo,
     eu_ai_act,
@@ -81,6 +83,7 @@ from acgs_lite.licensing import (
 
 cmd_init = init.handler
 cmd_demo = demo.handler
+cmd_bundle = bundle.handler
 cmd_arckit = arckit.handler
 cmd_assess = assess.handler
 cmd_capabilities = capabilities.handler
@@ -256,6 +259,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     init.add_parser(sub)
     demo.add_parser(sub)
+    bundle.add_parser(sub)
     arckit.add_parser(sub)
     assess.add_parser(sub)
     capabilities.add_parser(sub)
@@ -285,6 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
 _COMMAND_MAP: dict[str, str] = {
     "init": "cmd_init",
     "demo": "cmd_demo",
+    "bundle": "cmd_bundle",
     "arckit": "cmd_arckit",
     "assess": "cmd_assess",
     "capabilities": "cmd_capabilities",
