@@ -8,6 +8,7 @@ from examples.stripe_fenceable_provider.provider import (
     StripePaymentIntentProvider,
     StripeTransport,
     run_conformance_suite,
+    run_live_transport_verification,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "StripePaymentIntentProvider",
     "StripeTransport",
     "run_conformance_suite",
+    "run_live_transport_verification",
 ]

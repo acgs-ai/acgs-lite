@@ -66,7 +66,8 @@ class StripeTransport(Protocol):
         amount_cents: int,
         currency: str,
         customer_id: str,
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any]:
+        """Create or idempotently retrieve a PaymentIntent by key."""
 
     def retrieve_and_fence(self, *, idempotency_key: str) -> tuple[EffectOutcome, str | None, bool]:
         """Return (outcome, payment_intent_id_or_none, fenced)."""
@@ -234,8 +235,10 @@ class LiveStripeTestTransport:
             status = str(first.get("status", ""))
             if status == "canceled":
                 return EffectOutcome.NOT_DONE, pi_id, True
-            if status in ("succeeded", "processing", "requires_capture"):
+            if status == "succeeded":
                 return EffectOutcome.DONE, pi_id, False
+            # Incomplete statuses ('processing', 'requires_capture', etc.) stay UNKNOWN.
+            return EffectOutcome.UNKNOWN, pi_id, False
         # Stripe's Search API does not atomically fence an absent Idempotency-Key;
         # fail closed by returning UNKNOWN rather than falsely claiming fenced=True.
         return EffectOutcome.UNKNOWN, None, False
@@ -280,7 +283,14 @@ class StripePaymentIntentProvider:
         intent_id = intent.get("id")
         if isinstance(intent_id, str) and intent_id:
             self._references[request.key] = intent_id
-        return ProviderResult(request.key, self.provider_id, EffectOutcome.DONE, fenced=True)
+        status = str(intent.get("status", ""))
+        if status == "succeeded":
+            return ProviderResult(request.key, self.provider_id, EffectOutcome.DONE, fenced=True)
+        if status == "canceled":
+            return ProviderResult(
+                request.key, self.provider_id, EffectOutcome.NOT_DONE, fenced=True
+            )
+        return ProviderResult(request.key, self.provider_id, EffectOutcome.UNKNOWN, fenced=False)
 
     def query_and_fence(self, request: EffectRequest) -> ProviderResult:
         outcome, intent_id, fenced = self._transport.retrieve_and_fence(idempotency_key=request.key)
@@ -530,13 +540,109 @@ def run_conformance_suite(db_path: Path | None = None) -> StripeConformanceResul
         return _exec(Path(tmp_dir) / "stripe_effects.sqlite")
 
 
+def run_live_transport_verification(
+    transport: StripeTransport,
+    *,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Exercise a StripeTransport end-to-end through ContractedEffectStore."""
+    provider = StripePaymentIntentProvider(transport)
+    signer = Ed25519ReceiptSigner.from_seed(b"acgs-stripe-live-verify-2026-11!"[:32])
+    constitution = Constitution(
+        name="stripe-live-verify",
+        version="2026.11",
+        rules=[
+            Rule(
+                id="no-large-wire",
+                text="Block wire transfers above limit",
+                severity=Severity.CRITICAL,
+                keywords=["wire transfer"],
+            )
+        ],
+    )
+    engine = GovernanceEngine(constitution, strict=False)
+    authority = ExecutionAuthority()
+    registry = ProviderContractRegistry()
+    registry.register(provider.contract)
+
+    def _run(path: Path) -> dict[str, Any]:
+        store = EffectStore(path)
+        store.create_budget("stripe-live", 10_000)
+        contracted = ContractedEffectStore(store, registry)
+        grant = _mint_grant(
+            engine=engine,
+            constitution=constitution,
+            authority=authority,
+            signer=signer,
+            customer_id="cus_live_smoke",
+            amount_cents=50,
+            scope="test-billing",
+        )
+        effect = store.reserve(
+            provider_id=provider.provider_id,
+            grant_identity=local_grant_identity(grant),
+            action={"customer_id": "cus_live_smoke", "amount_cents": 50, "currency": "usd"},
+            budget_id="stripe-live",
+            amount=50,
+        )
+        try:
+            rec = contracted.send(effect.key, provider, grant=grant)
+            dup_intent = transport.create_payment_intent(
+                idempotency_key=effect.key,
+                amount_cents=50,
+                currency="usd",
+                customer_id="cus_live_smoke",
+            )
+            reconcile_outcome, _, _ = transport.retrieve_and_fence(idempotency_key=effect.key)
+        except Exception as exc:
+            return {
+                "transport": type(transport).__name__,
+                "effect_key": effect.key,
+                "passed": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        ref = provider.reference_for(effect.key)
+        dedup_ok = isinstance(ref, str) and bool(ref) and dup_intent.get("id") == ref
+        return {
+            "transport": type(transport).__name__,
+            "effect_key": effect.key,
+            "state": rec.state.value,
+            "provider_reference": ref,
+            "idempotent_dedup_matched": dedup_ok,
+            "reconcile_outcome": reconcile_outcome.value,
+            "passed": rec.state is EffectState.DONE and dedup_ok,
+        }
+
+    if db_path is not None:
+        return _run(db_path)
+    with tempfile.TemporaryDirectory(prefix="acgs-stripe-live-") as tmp_dir:
+        return _run(Path(tmp_dir) / "stripe_live.sqlite")
+
+
 def main() -> int:
-    test_key = os.environ.get("STRIPE_TEST_API_KEY")
-    if test_key:
-        LiveStripeTestTransport(test_key)
     res = run_conformance_suite()
-    print(json.dumps(res.__dict__, indent=2))
-    return 0 if res.all_passed else 1
+    test_key = os.environ.get("STRIPE_TEST_API_KEY")
+    if not test_key:
+        print(json.dumps(res.__dict__, indent=2))
+        return 0 if res.all_passed else 1
+
+    try:
+        transport = LiveStripeTestTransport(test_key)
+        live = run_live_transport_verification(transport)
+    except Exception as exc:
+        live = {
+            "transport": "LiveStripeTestTransport",
+            "passed": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    all_passed = bool(res.all_passed and live["passed"])
+    payload = {
+        "all_passed": all_passed,
+        "sandbox_conformance": res.__dict__,
+        "live_verification": live,
+    }
+    print(json.dumps(payload, indent=2))
+    return 0 if all_passed else 1
 
 
 if __name__ == "__main__":
