@@ -170,7 +170,18 @@ test("worker replaces Cloudflare Static Assets default Cache-Control and handles
   assert.equal(notModRes.headers.get("X-Frame-Options"), "DENY");
 });
 
-test("wrangler.jsonc enables run_worker_first so static assets receive Worker headers", () => {
+test("worker CSP forbids unsafe-inline in script-src", () => {
+  const csp = SECURITY_HEADERS["Content-Security-Policy"];
+  const scriptSrc = csp
+    .split(";")
+    .map((d) => d.trim())
+    .find((d) => d.startsWith("script-src "));
+  assert.equal(scriptSrc, "script-src 'self'");
+  assert.ok(!scriptSrc.includes("'unsafe-inline'"));
+  assert.ok(!scriptSrc.includes("'unsafe-eval'"));
+});
+
+test("wrangler.jsonc scopes run_worker_first to root redirects so static /docs/* offload to _headers", () => {
   const wrangler = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
-  assert.equal(wrangler.assets?.run_worker_first, true);
+  assert.deepEqual(wrangler.assets?.run_worker_first, ["/", "/docs"]);
 });
