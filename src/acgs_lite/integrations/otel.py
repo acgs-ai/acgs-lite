@@ -511,9 +511,7 @@ def _validate_extra_attributes(
             raise ValueError("extra_attributes keys must be non-empty strings")
         if key.startswith(_RESERVED_GENAI_PREFIXES):
             raise ValueError(f"extra_attributes cannot override reserved attribute {key!r}")
-        if isinstance(val, bool):
-            validated[key] = val
-        elif isinstance(val, int):
+        if isinstance(val, (bool, int)):
             validated[key] = val
         elif isinstance(val, float):
             if not math.isfinite(val):
@@ -765,7 +763,11 @@ class GenAIGovernanceTracer:
             extra_attributes=extra_attributes,
         )
         span_name = f"{GEN_AI_OPERATION_EXECUTE_TOOL} {tool_name}"
-        with self._tracer.start_as_current_span(span_name) as span:
+        with self._tracer.start_as_current_span(
+            span_name,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
             for key, val in attrs.items():
                 span.set_attribute(key, val)
             _apply_span_status(span, attrs)
@@ -794,7 +796,11 @@ class GenAIGovernanceTracer:
         initial_attrs = handle.attributes
         span_name = f"{GEN_AI_OPERATION_EXECUTE_TOOL} {tool_name}"
         caught: BaseException | None = None
-        with self._tracer.start_as_current_span(span_name) as span:
+        with self._tracer.start_as_current_span(
+            span_name,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
             for key, val in initial_attrs.items():
                 span.set_attribute(key, val)
             try:
@@ -807,4 +813,3 @@ class GenAIGovernanceTracer:
                 for key, val in final_attrs.items():
                     span.set_attribute(key, val)
                 _apply_span_status(span, final_attrs, exc=caught)
-

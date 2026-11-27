@@ -47,6 +47,11 @@ def _sample_receipt(
         denial_or_review_rationale="sensitive" if decision_type != "ALLOW" else None,
         execution_boundary=boundary,
         issued_at="2026-11-27T12:00:00+00:00",
+        schema_version=2,
+        grant_id="grant-otel-1",
+        policy_digest="d" * 64,
+        method_id="issue_refund",
+        argument_digest="e" * 64,
     )
     return receipt, sign_receipt(receipt, signer, signed_at="2026-11-27T12:00:00+00:00")
 
@@ -163,7 +168,11 @@ def test_genai_tracer_records_ok_and_error_spans_with_mock_provider() -> None:
             contract_class="FENCEABLE",
         )
         assert attrs["gen_ai.tool.name"] == "issue_refund"
-        mock_tracer.start_as_current_span.assert_called_with("execute_tool issue_refund")
+        mock_tracer.start_as_current_span.assert_called_with(
+            "execute_tool issue_refund",
+            record_exception=False,
+            set_status_on_exception=False,
+        )
         mock_span.set_attribute.assert_any_call("acgs.governance.decision", "ALLOW")
         status_ok = mock_span.set_status.call_args.args[0]
         assert status_ok.status_code is StatusCode.OK
@@ -178,17 +187,55 @@ def test_genai_tracer_records_ok_and_error_spans_with_mock_provider() -> None:
         assert status_err.status_code is StatusCode.ERROR
 
         # Context manager attaches decision + outcome lazily and marks exception as ERROR
-        with tracer.trace_governed_tool(tool_name="issue_refund", agent_id="agent-1") as span_handle:
+        with tracer.trace_governed_tool(
+            tool_name="issue_refund", agent_id="agent-1"
+        ) as span_handle:
             span_handle.attach_decision(signed_allow)
-            span_handle.attach_outcome(_sample_outcome(signer, raw_allow, outcome=EffectOutcome.DONE))
+            span_handle.attach_outcome(
+                _sample_outcome(signer, raw_allow, outcome=EffectOutcome.DONE)
+            )
         assert mock_span.set_status.call_args.args[0].status_code is StatusCode.OK
+
+        def _raise_boom() -> None:
+            raise RuntimeError("boom")
 
         with (
             pytest.raises(RuntimeError, match="boom"),
             tracer.trace_governed_tool(tool_name="issue_refund") as _h,
         ):
-            raise RuntimeError("boom")
-        assert mock_span.set_status.call_args.args[0].status_code is StatusCode.ERROR
+            _raise_boom()
+        assert mock_span.set_status.call_args_list[-1].args[0].status_code is StatusCode.ERROR
+
+
+def test_genai_tracer_real_sdk_does_not_leak_exception_secrets() -> None:
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry.trace import StatusCode
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = GenAIGovernanceTracer(tracer_provider=provider)
+
+    def _fail_with_secret() -> None:
+        raise RuntimeError("raw args: card=secret-123")
+
+    with (
+        pytest.raises(RuntimeError, match="card=secret-123"),
+        tracer.trace_governed_tool(tool_name="charge_card", agent_id="agent-9"),
+    ):
+        _fail_with_secret()
+
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+    assert span.status.status_code is StatusCode.ERROR
+    assert span.status.description == "RuntimeError"
+    assert span.events == ()
+    assert "secret-123" not in repr(span.attributes)
+    assert "secret-123" not in (span.status.description or "")
 
 
 def test_genai_tracer_noop_fallback_when_otel_unavailable() -> None:

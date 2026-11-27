@@ -22,7 +22,6 @@ import hashlib
 import hmac
 import json
 import re
-import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -83,10 +82,10 @@ def _encode_uint(major: int, value: int) -> bytes:
     if value <= 0xFF:
         return bytes([prefix | 24, value])
     if value <= 0xFFFF:
-        return struct.pack(">BH", prefix | 25, value)
+        return bytes([prefix | 25]) + value.to_bytes(2, "big")
     if value <= 0xFFFFFFFF:
-        return struct.pack(">BI", prefix | 26, value)
-    return struct.pack(">BQ", prefix | 27, value)
+        return bytes([prefix | 26]) + value.to_bytes(4, "big")
+    return bytes([prefix | 27]) + value.to_bytes(8, "big")
 
 
 def _cbor_encode(value: Any, *, _depth: int = 0) -> bytes:
@@ -113,15 +112,23 @@ def _cbor_encode(value: Any, *, _depth: int = 0) -> bytes:
         return header + b"".join(parts)
     if isinstance(value, Mapping):
         encoded_pairs: list[tuple[bytes, bytes]] = []
-        seen_keys: set[tuple[type[Any], Any]] = set()
-        for key, item in value.items():
-            if type(key) not in (int, str, bytes):
-                raise TypeError(f"unsupported CBOR map key type: {type(key).__name__}")
-            typed_key = (type(key), key)
+        seen_keys: set[tuple[type[Any], int | str | bytes]] = set()
+        for raw_key, item in value.items():
+            if type(raw_key) is int:
+                hashable_key: int | str | bytes = raw_key
+                typed_key: tuple[type[Any], int | str | bytes] = (int, raw_key)
+            elif type(raw_key) is str:
+                hashable_key = raw_key
+                typed_key = (str, raw_key)
+            elif type(raw_key) is bytes:
+                hashable_key = raw_key
+                typed_key = (bytes, raw_key)
+            else:
+                raise TypeError(f"unsupported CBOR map key type: {type(raw_key).__name__}")
             if typed_key in seen_keys:
-                raise ValueError(f"duplicate CBOR map key: {key!r}")
+                raise ValueError(f"duplicate CBOR map key: {hashable_key!r}")
             seen_keys.add(typed_key)
-            key_bytes = _cbor_encode(key, _depth=_depth + 1)
+            key_bytes = _cbor_encode(hashable_key, _depth=_depth + 1)
             val_bytes = _cbor_encode(item, _depth=_depth + 1)
             encoded_pairs.append((key_bytes, val_bytes))
         # RFC 8949 §4.2.1 bytewise lexicographical ordering of encoded keys.
@@ -159,17 +166,17 @@ class _CBORDecoder:
                 raise _CBORDecodeError("non-canonical 1-byte CBOR integer")
             return val
         if ai == 25:
-            (val,) = struct.unpack(">H", self._read_exact(2))
+            val = int.from_bytes(self._read_exact(2), "big")
             if val < 256:
                 raise _CBORDecodeError("non-canonical 2-byte CBOR integer")
             return val
         if ai == 26:
-            (val,) = struct.unpack(">I", self._read_exact(4))
+            val = int.from_bytes(self._read_exact(4), "big")
             if val < 65536:
                 raise _CBORDecodeError("non-canonical 4-byte CBOR integer")
             return val
         if ai == 27:
-            (val,) = struct.unpack(">Q", self._read_exact(8))
+            val = int.from_bytes(self._read_exact(8), "big")
             if val < 4294967296:
                 raise _CBORDecodeError("non-canonical 8-byte CBOR integer")
             return val
@@ -224,16 +231,26 @@ class _CBORDecoder:
             if arg * 2 > remaining:
                 raise _CBORDecodeError("CBOR map count exceeds remaining input")
             out: dict[Any, Any] = {}
-            seen_keys: set[tuple[type[Any], Any]] = set()
+            seen_keys: set[tuple[type[Any], int | str | bytes]] = set()
             for _ in range(arg):
-                key = self.decode_item(depth=depth + 1)
-                if type(key) not in (int, str, bytes):
-                    raise _CBORDecodeError(f"unsupported decoded CBOR map key type: {type(key).__name__}")
-                typed_key = (type(key), key)
+                raw_key = self.decode_item(depth=depth + 1)
+                if type(raw_key) is int:
+                    hashable_key: int | str | bytes = raw_key
+                    typed_key: tuple[type[Any], int | str | bytes] = (int, raw_key)
+                elif type(raw_key) is str:
+                    hashable_key = raw_key
+                    typed_key = (str, raw_key)
+                elif type(raw_key) is bytes:
+                    hashable_key = raw_key
+                    typed_key = (bytes, raw_key)
+                else:
+                    raise _CBORDecodeError(
+                        f"unsupported decoded CBOR map key type: {type(raw_key).__name__}"
+                    )
                 if typed_key in seen_keys:
-                    raise _CBORDecodeError(f"duplicate CBOR map key: {key!r}")
+                    raise _CBORDecodeError(f"duplicate CBOR map key: {hashable_key!r}")
                 seen_keys.add(typed_key)
-                out[key] = self.decode_item(depth=depth + 1)
+                out[hashable_key] = self.decode_item(depth=depth + 1)
             return out
         if major == 6:
             return _CborTag(tag=arg, value=self.decode_item(depth=depth + 1))
@@ -477,7 +494,11 @@ def _verify_embedded_payload(
 
     if content_type == MEDIA_TYPE_COMPLIANCE_BUNDLE:
         digest = payload_obj.get("bundle_digest")
-        if not isinstance(digest, str) or not digest.startswith("sha256:") or len(digest) != 71:
+        if (
+            not isinstance(digest, str)
+            or not digest.startswith("sha256:")
+            or _HEX64_RE.fullmatch(digest[7:]) is None
+        ):
             return "embedded ComplianceReceiptBundle missing valid bundle_digest"
         try:
             unsigned = {k: v for k, v in payload_obj.items() if k != "bundle_digest"}

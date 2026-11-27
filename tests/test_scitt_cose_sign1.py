@@ -35,7 +35,6 @@ from acgs_lite.compliance.scitt import (
     _CborTag,
 )
 from acgs_lite.legitimacy import (
-    ContractedEffectStore,
     DecisionReceipt,
     Ed25519ReceiptSigner,
     EffectOutcome,
@@ -89,7 +88,7 @@ def _make_signed_receipt(signer: Ed25519ReceiptSigner) -> SignedReceipt:
         proposed_method="charge",
         decision_type="ALLOW",
         authority_basis="constitution:default",
-        matched_constraints=(),
+        matched_constraints=("RULE-1",),
         policy_version="1.0.0",
         denial_or_review_rationale=None,
         execution_boundary=boundary,
@@ -111,9 +110,9 @@ def _make_signed_outcome(
     store.reserve(
         provider_id=provider.provider_id,
         grant_identity="grant-scitt-1",
-        action_json='{"op":"charge"}',
+        action={"op": "charge"},
         budget_id="b1",
-        cost=1,
+        amount=1,
     )
     outcome = OutcomeReceipt(
         effect_key="acgs:effect:v1:" + "a" * 64,
@@ -146,10 +145,10 @@ def test_deterministic_cbor_roundtrip_and_canonical_key_order() -> None:
     map_encoded = _cbor_encode({"z": 1, "a": 2, 15: 3, 1: 4})
     assert map_encoded.startswith(b"\xa4\x01\x04\x0f\x03")
 
-    # Python bool vs int collision protection
-    assert _cbor_encode({True: "bool", 1: "int"}) != _cbor_encode({1: "int"})
+    # Python bool keys are rejected cleanly as CBOR map keys
+    bool_map: dict[Any, Any] = {True: "bool", "ok": 1}
     with pytest.raises(TypeError, match="unsupported CBOR map key type"):
-        _cbor_encode({True: "bool", "ok": 1})
+        _cbor_encode(bool_map)
 
 
 def test_cbor_decoder_rejects_malformed_and_non_canonical_inputs() -> None:
@@ -184,8 +183,8 @@ def test_export_and_verify_signed_receipt_outcome_bundle_and_mapping(tmp_path: P
     signed_outcome = _make_signed_outcome(tmp_path, signer, signed_decision)
 
     bundle = export_receipt_bundle(
-        decisions=[signed_decision],
-        outcomes=[signed_outcome],
+        [signed_decision],
+        outcome_receipts=[signed_outcome],
         profile=PROFILE_CA_ADMT_2027,
         system_id="scitt-demo",
         trusted_public_keys=trusted,
@@ -319,11 +318,23 @@ def test_verify_scitt_fails_closed_on_tampering_aad_and_untrusted_keys() -> None
     assert res_inner_tamper.valid is False
     assert any("SignedReceipt" in err for err in res_inner_tamper.errors)
 
-    # Malformed bytes never raise
+    # Malformed bytes and non-ASCII bundle digests never raise
     res_garbage = verify_scitt_cose_sign1(b"\xff\x00not-cbor", {"k1": signer.public_key_hex()})
     assert res_garbage.valid is False
     res_empty_keys = verify_scitt_cose_sign1(env.cose_bytes, {})
     assert res_empty_keys.valid is False
+
+    non_ascii_bundle = export_scitt_cose_sign1(
+        {"bundle_digest": "sha256:" + "\u00e9" * 64},
+        signer,
+        content_type=MEDIA_TYPE_COMPLIANCE_BUNDLE,
+    )
+    res_non_ascii_bundle = verify_scitt_cose_sign1(
+        non_ascii_bundle.cose_bytes,
+        {"k1": signer.public_key_hex()},
+    )
+    assert res_non_ascii_bundle.valid is False
+    assert any("bundle_digest" in err for err in res_non_ascii_bundle.errors)
 
 
 def test_export_scitt_fail_closed_validation(tmp_path: Path) -> None:
