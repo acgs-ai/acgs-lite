@@ -237,7 +237,7 @@ jobs:
           python3 scripts/generate_cf_headers.py --check
       - name: Check documentation links
         run: python3 scripts/check_links.py
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Test Cloudflare Worker
