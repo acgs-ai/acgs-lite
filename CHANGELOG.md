@@ -33,8 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`examples/commercial_evidence_pipeline.py`).
 - `acgs_lite.tool_calls`: a public module that evaluates one tool call against a
   constitution. `ToolCallGovernor.evaluate(tool_name, arguments)` returns a
-  `GovernanceDecision` with the verdict `ALLOW`, `DENY` or `REVIEW`, and never
-  raises: any error while formatting or validating gives `DENY`.
+  `GovernanceDecision` with the verdict `ALLOW`, `DENY` or `REVIEW`, and is
+  fail-closed: an `Exception` while formatting or validating gives `DENY`.
   `format_tool_call` renders a tool call as the text the rules are matched
   against. The code is the `_governance.py` module that the framework adapter
   packages each carried as a private copy, moved here unchanged together with

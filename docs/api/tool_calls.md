@@ -32,10 +32,23 @@ A blocking rule is never downgraded to `REVIEW` because a review rule matched to
 
 ## Failure behaviour
 
-`ToolCallGovernor.evaluate` never raises. If formatting or validation fails for
-any reason, the verdict is `DENY` and `GovernanceDecision.error` holds the
+`ToolCallGovernor.evaluate` is fail-closed. If formatting or validation raises
+an `Exception`, the verdict is `DENY` and `GovernanceDecision.error` holds the
 exception type and message. Arguments nested deeper than `MAX_ARGUMENT_DEPTH`
 levels are denied, not partially rendered.
+
+Three cases still propagate out of `evaluate`. In each the caller gets an
+exception, not an `ALLOW`:
+
+- cancellation signals such as `KeyboardInterrupt` and `asyncio.CancelledError`;
+- an exception whose own `__str__` raises while the `DENY` decision is built;
+- a logging filter or handler on the `acgs_lite.tool_calls` logger that raises.
+
+Treat an exception from `evaluate` as a denial.
+
+A rule's workflow action decides the verdict, not its severity alone: a
+`CRITICAL` rule with the workflow action `warn` gives `ALLOW` with the rule in
+`warning_rule_ids`, because the engine reports it as a warning.
 
 `GovernanceDecision.reason` names the matched rules. It never contains argument
 values.
