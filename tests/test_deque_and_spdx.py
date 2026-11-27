@@ -192,7 +192,7 @@ class TestConcurrentDequeSafety:
         tl = ViolationTimeline(max_entries=16)
         barrier = threading.Barrier(3)
         done = threading.Event()
-        errors: list[BaseException] = []
+        errors: list[Exception] = []
 
         def writer() -> None:
             try:
@@ -205,7 +205,7 @@ class TestConcurrentDequeSafety:
                     )
                     if i % 20 == 0:
                         threading.Event().wait(0.0001)
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
             finally:
                 done.set()
@@ -222,7 +222,7 @@ class TestConcurrentDequeSafety:
                     assert len(tl.get_timeline()) <= 16
                     assert len(tl.get_timeline(last_n=5)) <= 5
                     passes += 1
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
 
         threads = [
@@ -243,7 +243,7 @@ class TestConcurrentDequeSafety:
         session = GovernanceSession("agent-concurrent", max_history=20, deny_threshold=0.5)
         barrier = threading.Barrier(3)
         done = threading.Event()
-        errors: list[BaseException] = []
+        errors: list[Exception] = []
 
         def writer() -> None:
             try:
@@ -257,7 +257,7 @@ class TestConcurrentDequeSafety:
                     )
                     if i % 20 == 0:
                         threading.Event().wait(0.0001)
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
             finally:
                 done.set()
@@ -270,7 +270,7 @@ class TestConcurrentDequeSafety:
                     report = session.analyze()
                     assert report["total_decisions"] <= 20
                     passes += 1
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
 
         threads = [
@@ -291,7 +291,7 @@ class TestConcurrentDequeSafety:
         ledger = AuditLedger(max_entries=20)
         barrier = threading.Barrier(3)
         done = threading.Event()
-        errors: list[BaseException] = []
+        errors: list[Exception] = []
 
         def writer() -> None:
             try:
@@ -306,7 +306,7 @@ class TestConcurrentDequeSafety:
                     )
                     if i % 20 == 0:
                         threading.Event().wait(0.0001)
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
             finally:
                 done.set()
@@ -321,7 +321,7 @@ class TestConcurrentDequeSafety:
                     assert len(ledger.export()) <= 20
                     assert len(ledger) <= 20
                     passes += 1
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
 
         threads = [
@@ -342,7 +342,7 @@ class TestConcurrentDequeSafety:
         fc = GovernanceForecaster(max_windows=15)
         barrier = threading.Barrier(3)
         done = threading.Event()
-        errors: list[BaseException] = []
+        errors: list[Exception] = []
 
         def writer() -> None:
             try:
@@ -351,7 +351,7 @@ class TestConcurrentDequeSafety:
                     fc.record_window(f"w-{i}", allow=80, deny=i % 20, escalate=i % 5)
                     if i % 20 == 0:
                         threading.Event().wait(0.0001)
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
             finally:
                 done.set()
@@ -367,7 +367,7 @@ class TestConcurrentDequeSafety:
                     assert len(fc.history()) <= 15
                     assert "GovernanceForecaster(" in repr(fc)
                     passes += 1
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
 
         threads = [
@@ -388,7 +388,7 @@ class TestConcurrentDequeSafety:
         cl = GovernanceChangelog(max_entries=20)
         barrier = threading.Barrier(3)
         done = threading.Event()
-        errors: list[BaseException] = []
+        errors: list[Exception] = []
 
         def writer() -> None:
             try:
@@ -402,7 +402,7 @@ class TestConcurrentDequeSafety:
                     )
                     if i % 20 == 0:
                         threading.Event().wait(0.0001)
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
             finally:
                 done.set()
@@ -417,7 +417,7 @@ class TestConcurrentDequeSafety:
                     assert len(cl.export()) <= 20
                     assert len(cl) <= 20
                     passes += 1
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
 
         threads = [
@@ -440,7 +440,7 @@ class TestConcurrentDequeSafety:
         writers_done = threading.Event()
         lock = threading.Lock()
         remaining_writers = 2
-        errors: list[BaseException] = []
+        errors: list[Exception] = []
 
         def call_writer() -> None:
             nonlocal remaining_writers
@@ -450,7 +450,7 @@ class TestConcurrentDequeSafety:
                     logger.log_call(f"call-{i}", call=lambda v=i: f"out-{v}", input_text=f"in-{i}")
                     if i % 15 == 0:
                         threading.Event().wait(0.0001)
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
             finally:
                 with lock:
@@ -467,7 +467,7 @@ class TestConcurrentDequeSafety:
                         ctx.set_output(f"res-{i}")
                     if i % 15 == 0:
                         threading.Event().wait(0.0001)
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
             finally:
                 with lock:
@@ -489,7 +489,7 @@ class TestConcurrentDequeSafety:
                     assert len(logger.records) <= 25
                     assert "Article12Logger(" in repr(logger)
                     passes += 1
-            except BaseException as exc:  # pragma: no cover - test failure guard
+            except Exception as exc:  # pragma: no cover - test failure guard
                 errors.append(exc)
 
         threads = [
