@@ -56,9 +56,23 @@ DEFAULT_SKIP_PATHS: frozenset[str] = frozenset(
 BODY_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
+# Values of the X-Governance-Valid response header. The header describes the
+# request body only: "true" and "false" mean validation ran and did or did not
+# find a blocking violation; "unchecked" means nothing was validated (no body,
+# an empty body, or validation itself failed).
+GOVERNANCE_VALID = "true"
+GOVERNANCE_INVALID = "false"
+GOVERNANCE_UNCHECKED = "unchecked"
+
+
 def _validate_non_strict(engine: GovernanceEngine, text: str, *, agent_id: str) -> Any:
     """Validate text in non-strict mode via per-call override (no instance mutation)."""
     return engine.validate(text, agent_id=agent_id, strict=False)
+
+
+def _header_state(result: Any) -> str:
+    """Map a validation result to an X-Governance-Valid header value."""
+    return GOVERNANCE_VALID if getattr(result, "valid", False) is True else GOVERNANCE_INVALID
 
 
 class GovernanceASGIMiddleware:
@@ -160,7 +174,7 @@ class GovernanceASGIMiddleware:
             return
 
         # For body methods, validate request body
-        governance_valid = True
+        governance_state = GOVERNANCE_UNCHECKED
         governance_violations: list[str] = []
 
         if method in BODY_METHODS:
@@ -169,7 +183,7 @@ class GovernanceASGIMiddleware:
 
             if body_chunks:
                 request_text = b"".join(body_chunks).decode("utf-8", errors="replace")
-                self._validate_text(request_text, f"{self.agent_id}:request")
+                governance_state = self._validate_text(request_text, f"{self.agent_id}:request")
 
             if self.validate_responses:
                 # We need to buffer response too
@@ -180,7 +194,7 @@ class GovernanceASGIMiddleware:
                         # Add governance headers
                         extra_headers = [
                             (b"x-governance-hash", self.constitution.hash.encode()),
-                            (b"x-governance-valid", str(governance_valid).lower().encode()),
+                            (b"x-governance-valid", governance_state.encode()),
                         ]
                         if governance_violations:
                             extra_headers.append(
@@ -220,7 +234,7 @@ class GovernanceASGIMiddleware:
                         existing.extend(
                             [
                                 (b"x-governance-hash", self.constitution.hash.encode()),
-                                (b"x-governance-valid", b"true"),
+                                (b"x-governance-valid", GOVERNANCE_UNCHECKED.encode()),
                             ]
                         )
                         message = {**message, "headers": existing}
@@ -230,8 +244,12 @@ class GovernanceASGIMiddleware:
             else:
                 await self.app(scope, receive, send)
 
-    def _validate_text(self, text: str, agent_id: str) -> None:
-        """Validate text, catching errors gracefully."""
+    def _validate_text(self, text: str, agent_id: str) -> str:
+        """Validate text and return the X-Governance-Valid value for it.
+
+        A blocking violation raises in strict mode. Any other failure is logged
+        and reported as unchecked, never as valid.
+        """
         try:
             # Try to parse as JSON and extract meaningful text
             try:
@@ -247,11 +265,12 @@ class GovernanceASGIMiddleware:
                 pass  # Use raw text
 
             if text.strip():
-                self.engine.validate(text, agent_id=agent_id)
+                return _header_state(self.engine.validate(text, agent_id=agent_id))
         except ConstitutionalViolationError:
             raise
         except Exception as e:
-            logger.debug("Governance middleware validation error: %s", e)
+            logger.warning("Governance middleware validation error: %s", e)
+        return GOVERNANCE_UNCHECKED
 
     def _validate_output(self, text: str) -> None:
         """Validate output text non-blocking."""
@@ -325,6 +344,7 @@ class GovernanceWSGIMiddleware:
             return self.app(environ, start_response)
 
         # Validate request body for body methods
+        governance_state = GOVERNANCE_UNCHECKED
         if method in BODY_METHODS:
             content_length = int(environ.get("CONTENT_LENGTH", 0) or 0)
             if content_length > 0:
@@ -335,20 +355,22 @@ class GovernanceWSGIMiddleware:
                 try:
                     text = body.decode("utf-8", errors="replace")
                     if text.strip():
-                        _validate_non_strict(
-                            self.engine,
-                            text[:2000],
-                            agent_id=f"{self.agent_id}:request",
+                        governance_state = _header_state(
+                            _validate_non_strict(
+                                self.engine,
+                                text[:2000],
+                                agent_id=f"{self.agent_id}:request",
+                            )
                         )
                 except ConstitutionalViolationError:
                     raise
                 except Exception as e:
-                    logger.debug("WSGI governance validation error: %s", e)
+                    logger.warning("WSGI governance validation error: %s", e)
 
         # Add governance headers to response
         def governed_start_response(status: str, headers: list[tuple[str, str]], *args: Any) -> Any:
             headers.append(("X-Governance-Hash", self.constitution.hash))
-            headers.append(("X-Governance-Valid", "true"))
+            headers.append(("X-Governance-Valid", governance_state))
             return start_response(status, headers, *args)
 
         return self.app(environ, governed_start_response)

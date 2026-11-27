@@ -55,6 +55,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for `/validate`. Apps started with `require_auth=False` and no key are
   unchanged.
 
+### Fixed
+
+- `GovernanceWSGIMiddleware` and `GovernanceASGIMiddleware` no longer send
+  `X-Governance-Valid: true` on every response. The header now reports what
+  request validation found:
+  - `true`: the request body was validated and no blocking rule matched.
+  - `false`: the request body was validated and a blocking rule matched. In
+    non-strict mode the request is still passed to the application, as before.
+  - `unchecked`: nothing was validated. This covers requests without a body
+    (including every `GET`), empty bodies, and validation that raised an error.
+
+  Before, both middlewares discarded the validation result, so a request that
+  violated the constitution, or one that was never validated, was labelled
+  `true`. Code that reads the header must treat any value other than `true` as
+  not validated. The header describes the request only, not the response body,
+  and the WSGI middleware validates the first 2000 characters of the body.
+- Validation errors in both middlewares are now logged at `WARNING` instead of
+  `DEBUG`.
+
 ## [4.0.0] - 2026-11-10
 
 Upgrading from 3.0.x: follow the
