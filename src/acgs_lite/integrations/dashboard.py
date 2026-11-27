@@ -29,6 +29,7 @@ Usage::
 from __future__ import annotations
 
 import json
+import threading
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
@@ -86,16 +87,17 @@ class DashboardMetrics:
 class ViolationTimeline:
     """Chronological record of governance violations.
 
-    Thread-safe for single-writer / multi-reader patterns (CPython GIL).
+    Thread-safe for concurrent writers and readers.
     Older entries are evicted when *max_entries* is exceeded.
     """
 
-    __slots__ = ("_entries", "_max_entries")
+    __slots__ = ("_entries", "_max_entries", "_lock")
 
     def __init__(self, *, max_entries: int = 1000) -> None:
         limit = max(0, max_entries)
         self._entries: deque[dict[str, Any]] = deque(maxlen=limit)
         self._max_entries = limit
+        self._lock = threading.RLock()
 
     def record(
         self,
@@ -118,7 +120,8 @@ class ViolationTimeline:
             "agent_id": agent_id,
             "timestamp": ts,
         }
-        self._entries.append(entry)
+        with self._lock:
+            self._entries.append(entry)
 
     def record_from_result(self, result: ValidationResult) -> None:
         """Bulk-record all violations from a ValidationResult."""
@@ -130,35 +133,40 @@ class ViolationTimeline:
         last_n: int | None = None,
     ) -> list[dict[str, Any]]:
         """Return chronological violation entries."""
-        if last_n is None:
-            return list(self._entries)
-        if last_n <= 0:
+        if last_n is not None and last_n <= 0:
             return []
-        if last_n >= len(self._entries):
-            return list(self._entries)
-        recent = list(islice(reversed(self._entries), last_n))
+        with self._lock:
+            if last_n is None or last_n >= len(self._entries):
+                return list(self._entries)
+            recent = list(islice(reversed(self._entries), last_n))
         recent.reverse()
         return recent
 
     def get_by_severity(self, severity: str) -> list[dict[str, Any]]:
         """Filter entries by severity level."""
-        return [e for e in self._entries if e["severity"] == severity]
+        with self._lock:
+            entries = list(self._entries)
+        return [e for e in entries if e["severity"] == severity]
 
     def get_by_agent(self, agent_id: str) -> list[dict[str, Any]]:
         """Filter entries by agent identifier."""
-        return [e for e in self._entries if e["agent_id"] == agent_id]
+        with self._lock:
+            entries = list(self._entries)
+        return [e for e in entries if e["agent_id"] == agent_id]
 
     def summary(self) -> dict[str, Any]:
         """Violation counts by severity and by hour bucket."""
+        with self._lock:
+            entries = list(self._entries)
         by_severity: dict[str, int] = defaultdict(int)
         by_hour: dict[str, int] = defaultdict(int)
-        for entry in self._entries:
+        for entry in entries:
             by_severity[entry["severity"]] += 1
             ts = entry.get("timestamp", "")
             hour = ts[:13] if len(ts) >= 13 else ts
             by_hour[hour] += 1
         return {
-            "total": len(self._entries),
+            "total": len(entries),
             "by_severity": dict(by_severity),
             "by_hour": dict(by_hour),
         }

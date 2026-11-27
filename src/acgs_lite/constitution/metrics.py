@@ -8,12 +8,12 @@ Constitutional Hash: 608508a9bd224290
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from itertools import islice
 from operator import itemgetter
 from typing import Any
 
@@ -264,7 +264,7 @@ class GovernanceSession:
             print("Governance anomaly detected!")
     """
 
-    __slots__ = ("agent_id", "_max_history", "_decisions", "_deny_threshold")
+    __slots__ = ("agent_id", "_max_history", "_decisions", "_deny_threshold", "_lock")
 
     def __init__(
         self,
@@ -285,6 +285,7 @@ class GovernanceSession:
         self._max_history = limit
         self._deny_threshold = deny_threshold
         self._decisions: deque[dict[str, Any]] = deque(maxlen=limit)
+        self._lock = threading.RLock()
 
     def record(
         self,
@@ -309,7 +310,8 @@ class GovernanceSession:
             "severity": severity,
             "timestamp_ns": time.monotonic_ns(),
         }
-        self._decisions.append(entry)
+        with self._lock:
+            self._decisions.append(entry)
 
     def analyze(self) -> dict[str, Any]:
         """Analyze the session for patterns and anomalies.
@@ -325,7 +327,9 @@ class GovernanceSession:
                 - ``anomalies``: list of detected anomaly descriptions
                 - ``recent_denials``: last 5 denial actions (for investigation)
         """
-        total = len(self._decisions)
+        with self._lock:
+            decisions = list(self._decisions)
+        total = len(decisions)
         if total == 0:
             return {
                 "agent_id": self.agent_id,
@@ -342,7 +346,7 @@ class GovernanceSession:
         rule_hits: dict[str, int] = {}
         denials: list[dict[str, Any]] = []
 
-        for d in self._decisions:
+        for d in decisions:
             counts[d["decision"]] = counts.get(d["decision"], 0) + 1
             if d["decision"] in ("deny", "escalate"):
                 for rid in d["rule_ids"]:
@@ -360,9 +364,7 @@ class GovernanceSession:
             anomalies.append(
                 f"High deny rate: {deny_rate:.1%} exceeds threshold {self._deny_threshold:.1%}"
             )
-        if total >= 10 and all(
-            d["decision"] == "deny" for d in islice(reversed(self._decisions), 5)
-        ):
+        if total >= 10 and all(d["decision"] == "deny" for d in decisions[-5:]):
             anomalies.append(
                 "5 consecutive denials detected — possible policy conflict or rogue agent"
             )
@@ -535,12 +537,13 @@ class AuditLedger:
         agent_log = ledger.query(agent_id="agent-2")
     """
 
-    __slots__ = ("_entries", "_max_entries")
+    __slots__ = ("_entries", "_max_entries", "_lock")
 
     def __init__(self, *, max_entries: int = 10000) -> None:
         limit = max(0, max_entries)
         self._entries: deque[AuditEntry] = deque(maxlen=limit)
         self._max_entries = limit
+        self._lock = threading.RLock()
 
     def record(
         self,
@@ -577,7 +580,8 @@ class AuditLedger:
             severity=severity,
             workflow_action=workflow_action,
         )
-        self._entries.append(entry)
+        with self._lock:
+            self._entries.append(entry)
         return entry
 
     def query(
@@ -601,8 +605,10 @@ class AuditLedger:
         Returns:
             List of matching AuditEntry objects, chronological order.
         """
+        with self._lock:
+            entries = list(self._entries)
         results: list[AuditEntry] = []
-        for e in self._entries:
+        for e in entries:
             if since is not None and e.timestamp < since:
                 continue
             if until is not None and e.timestamp >= until:
@@ -623,7 +629,9 @@ class AuditLedger:
             dict with total, by_decision counts, unique agents,
             time range, and top triggered rules.
         """
-        total = len(self._entries)
+        with self._lock:
+            entries = list(self._entries)
+        total = len(entries)
         if total == 0:
             return {
                 "total": 0,
@@ -637,7 +645,7 @@ class AuditLedger:
         agents: set[str] = set()
         rule_hits: dict[str, int] = {}
 
-        for e in self._entries:
+        for e in entries:
             counts[e.decision] = counts.get(e.decision, 0) + 1
             if e.agent_id:
                 agents.add(e.agent_id)
@@ -651,22 +659,26 @@ class AuditLedger:
             "by_decision": counts,
             "agents": sorted(agents),
             "time_range": {
-                "earliest": self._entries[0].timestamp,
-                "latest": self._entries[-1].timestamp,
+                "earliest": entries[0].timestamp,
+                "latest": entries[-1].timestamp,
             },
             "top_rules": [{"rule_id": r, "hits": h} for r, h in top_rules],
         }
 
     def export(self) -> list[dict[str, Any]]:
         """Export all entries as dicts for JSON serialization."""
-        return [e.to_dict() for e in self._entries]
+        with self._lock:
+            entries = list(self._entries)
+        return [e.to_dict() for e in entries]
 
     def clear(self) -> None:
         """Clear all entries."""
-        self._entries.clear()
+        with self._lock:
+            self._entries.clear()
 
     def __len__(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
 
 class GovernanceSLO:
@@ -1189,9 +1201,11 @@ class GovernanceForecaster:
     max_windows: int = 100  # rolling history limit
 
     _windows: deque[dict[str, Any]] = field(init=False, repr=False)
+    _lock: threading.RLock = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self._windows = deque(maxlen=max(0, self.max_windows))
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Data ingestion
@@ -1237,9 +1251,10 @@ class GovernanceForecaster:
             **(metadata or {}),
         }
         target_maxlen = max(0, self.max_windows)
-        if self._windows.maxlen != target_maxlen:
-            self._windows = deque(self._windows, maxlen=target_maxlen)
-        self._windows.append(window)
+        with self._lock:
+            if self._windows.maxlen != target_maxlen:
+                self._windows = deque(self._windows, maxlen=target_maxlen)
+            self._windows.append(window)
 
         return {
             "deny_rate": deny_rate,
@@ -1274,9 +1289,17 @@ class GovernanceForecaster:
         intercept = y_mean - slope * x_mean
         return slope, intercept
 
-    def _extrapolate(self, field: str, steps: int) -> list[float]:
+    def _extrapolate(
+        self,
+        field: str,
+        steps: int,
+        windows: list[dict[str, Any]] | None = None,
+    ) -> list[float]:
         """Extrapolate *field* forward *steps* windows using linear trend."""
-        values = [w[field] for w in self._windows]
+        if windows is None:
+            with self._lock:
+                windows = list(self._windows)
+        values = [w[field] for w in windows]
         if not values:
             return [0.0] * steps
         slope, intercept = self._linear_trend(values)
@@ -1318,11 +1341,13 @@ class GovernanceForecaster:
             }
         """
         steps = max(1, min(50, steps))
-        n = len(self._windows)
+        with self._lock:
+            windows = list(self._windows)
+        n = len(windows)
 
-        deny_proj = self._extrapolate("deny_rate", steps)
-        esc_proj = self._extrapolate("escalate_rate", steps)
-        comp_proj = self._extrapolate("compliance_rate", steps)
+        deny_proj = self._extrapolate("deny_rate", steps, windows)
+        esc_proj = self._extrapolate("escalate_rate", steps, windows)
+        comp_proj = self._extrapolate("compliance_rate", steps, windows)
 
         def _trend_label(values: list[float], field: str) -> str:
             if n < 2:
@@ -1334,9 +1359,9 @@ class GovernanceForecaster:
                 return "decreasing"
             return "stable"
 
-        deny_vals = [w["deny_rate"] for w in self._windows]
-        esc_vals = [w["escalate_rate"] for w in self._windows]
-        comp_vals = [w["compliance_rate"] for w in self._windows]
+        deny_vals = [w["deny_rate"] for w in windows]
+        esc_vals = [w["escalate_rate"] for w in windows]
+        comp_vals = [w["compliance_rate"] for w in windows]
 
         alerts: list[dict[str, Any]] = []
         DENY_ALERT_THRESHOLD = 0.30
@@ -1404,13 +1429,15 @@ class GovernanceForecaster:
                 "average": {"deny_rate": 0.15, "escalate_rate": 0.08, ...},
             }
         """
-        if not self._windows:
+        with self._lock:
+            windows = list(self._windows)
+        if not windows:
             return {"windows_recorded": 0, "latest": {}, "average": {}}
-        n = len(self._windows)
-        latest = self._windows[-1]
-        avg_deny = sum(w["deny_rate"] for w in self._windows) / n
-        avg_esc = sum(w["escalate_rate"] for w in self._windows) / n
-        avg_comp = sum(w["compliance_rate"] for w in self._windows) / n
+        n = len(windows)
+        latest = windows[-1]
+        avg_deny = sum(w["deny_rate"] for w in windows) / n
+        avg_esc = sum(w["escalate_rate"] for w in windows) / n
+        avg_comp = sum(w["compliance_rate"] for w in windows) / n
         return {
             "windows_recorded": n,
             "latest": {
@@ -1427,7 +1454,10 @@ class GovernanceForecaster:
 
     def history(self) -> list[dict[str, Any]]:
         """Return a copy of the full window history."""
-        return list(self._windows)
+        with self._lock:
+            return list(self._windows)
 
     def __repr__(self) -> str:
-        return f"GovernanceForecaster(windows={len(self._windows)}, max_windows={self.max_windows})"
+        with self._lock:
+            count = len(self._windows)
+        return f"GovernanceForecaster(windows={count}, max_windows={self.max_windows})"
