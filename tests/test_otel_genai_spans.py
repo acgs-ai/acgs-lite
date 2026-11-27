@@ -145,6 +145,7 @@ def test_build_genai_attributes_validation() -> None:
 
 def test_genai_tracer_records_ok_and_error_spans_with_mock_provider() -> None:
     pytest.importorskip("cryptography")
+    pytest.importorskip("opentelemetry.sdk.trace")
     from opentelemetry.trace import StatusCode
 
     signer = Ed25519ReceiptSigner.from_seed(b"\x88" * 32, key_id="otel-key-2")

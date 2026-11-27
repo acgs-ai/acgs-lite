@@ -25,6 +25,7 @@ from acgs_lite.compliance import (
 from acgs_lite.compliance.scitt import (
     COSE_HEADER_ALG,
     COSE_HEADER_CONTENT_TYPE,
+    COSE_HEADER_CRIT,
     COSE_HEADER_CWT_CLAIMS,
     COSE_HEADER_KID,
     CWT_CLAIM_IAT,
@@ -335,6 +336,46 @@ def test_verify_scitt_fails_closed_on_tampering_aad_and_untrusted_keys() -> None
     )
     assert res_non_ascii_bundle.valid is False
     assert any("bundle_digest" in err for err in res_non_ascii_bundle.errors)
+
+    # Embedded decision receipt with non-string public_key=null fails closed without TypeError
+    null_pk_dict: dict[str, Any] = signed.to_dict()
+    null_pk_dict["public_key"] = None
+    null_pk_env = export_scitt_cose_sign1(
+        null_pk_dict,
+        signer,
+        content_type=MEDIA_TYPE_DECISION_RECEIPT,
+    )
+    res_null_pk = verify_scitt_cose_sign1(null_pk_env.cose_bytes, {"k1": signer.public_key_hex()})
+    assert res_null_pk.valid is False
+    assert any("SignedReceipt" in err for err in res_null_pk.errors)
+
+    # Huge integer payload exceeding Python's JSON int-str limit fails closed without ValueError
+    huge_int_payload = b'{"big":' + b"9" * 5000 + b"}"
+    huge_sig_structure = _cbor_encode(["Signature1", prot_bstr, b"", huge_int_payload])
+    huge_sig = bytes.fromhex(signer.sign(huge_sig_structure))
+    huge_cose = _cbor_encode(_CborTag(18, [prot_bstr, {}, huge_int_payload, huge_sig]))
+    res_huge_int = verify_scitt_cose_sign1(huge_cose, {"k1": signer.public_key_hex()})
+    assert res_huge_int.valid is False
+    assert any("JSON" in err for err in res_huge_int.errors)
+
+    # Unsupported critical COSE header parameter (RFC 9052 §3.1) is rejected even with valid sig
+    crit_protected = _cbor_encode(
+        {
+            COSE_HEADER_ALG: COSE_ALG_EDDSA,
+            COSE_HEADER_CRIT: [999],
+            COSE_HEADER_CONTENT_TYPE: MEDIA_TYPE_JSON,
+            COSE_HEADER_KID: b"k1",
+            999: "required-unknown-ext",
+        }
+    )
+    crit_payload = b'{"ok":true}'
+    crit_sig = bytes.fromhex(
+        signer.sign(_cbor_encode(["Signature1", crit_protected, b"", crit_payload]))
+    )
+    crit_cose = _cbor_encode(_CborTag(18, [crit_protected, {}, crit_payload, crit_sig]))
+    res_crit = verify_scitt_cose_sign1(crit_cose, {"k1": signer.public_key_hex()})
+    assert res_crit.valid is False
+    assert any("critical COSE header" in err for err in res_crit.errors)
 
 
 def test_export_scitt_fail_closed_validation(tmp_path: Path) -> None:

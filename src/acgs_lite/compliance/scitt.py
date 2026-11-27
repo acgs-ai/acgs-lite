@@ -38,10 +38,20 @@ from acgs_lite.legitimacy.signing import (
 
 SCITT_COSE_SIGN1_TAG = 18
 COSE_HEADER_ALG = 1
+COSE_HEADER_CRIT = 2
 COSE_HEADER_CONTENT_TYPE = 3
 COSE_HEADER_KID = 4
 COSE_HEADER_CWT_CLAIMS = 15
 COSE_ALG_EDDSA = -8
+
+_SUPPORTED_CRITICAL_HEADERS = frozenset(
+    {
+        COSE_HEADER_ALG,
+        COSE_HEADER_CONTENT_TYPE,
+        COSE_HEADER_KID,
+        COSE_HEADER_CWT_CLAIMS,
+    }
+)
 
 CWT_CLAIM_ISS = 1
 CWT_CLAIM_SUB = 2
@@ -477,18 +487,24 @@ def _verify_embedded_payload(
     if content_type == MEDIA_TYPE_DECISION_RECEIPT:
         try:
             signed = SignedReceipt.from_dict(payload_obj)
-        except ValueError as exc:
+            ok = signed.verify_integrity()
+        except ReceiptSigningUnavailable:
+            raise
+        except (TypeError, ValueError) as exc:
             return f"invalid embedded SignedReceipt: {exc}"
-        if not signed.verify_integrity():
+        if not ok:
             return "embedded SignedReceipt failed integrity verification"
         return None
 
     if content_type == MEDIA_TYPE_OUTCOME_RECEIPT:
         try:
             outcome = SignedOutcomeReceipt.from_dict(payload_obj)
-        except ValueError as exc:
+            ok = outcome.verify(outcome.public_key)
+        except ReceiptSigningUnavailable:
+            raise
+        except (TypeError, ValueError) as exc:
             return f"invalid embedded SignedOutcomeReceipt: {exc}"
-        if not outcome.verify(outcome.public_key):
+        if not ok:
             return "embedded SignedOutcomeReceipt failed signature verification"
         return None
 
@@ -562,6 +578,24 @@ def verify_scitt_cose_sign1(
         return _fail_result("COSE protected header must decode to a CBOR map")
 
     errors: list[str] = []
+    if COSE_HEADER_CRIT in unprotected_map:
+        errors.append("COSE crit header (key 2) must only appear in protected headers")
+    if COSE_HEADER_CRIT in protected:
+        crit_raw = protected[COSE_HEADER_CRIT]
+        if not isinstance(crit_raw, list) or not crit_raw:
+            errors.append("COSE crit header (key 2) must be a non-empty CBOR array")
+        else:
+            for hdr_id in crit_raw:
+                is_valid_label = (
+                    type(hdr_id) is int or isinstance(hdr_id, str)
+                ) and not isinstance(hdr_id, bool)
+                if not is_valid_label:
+                    errors.append(f"invalid critical COSE header identifier: {hdr_id!r}")
+                elif hdr_id not in _SUPPORTED_CRITICAL_HEADERS or hdr_id not in protected:
+                    errors.append(
+                        f"unsupported or absent critical COSE header parameter: {hdr_id!r}"
+                    )
+
     alg = protected.get(COSE_HEADER_ALG)
     if type(alg) is not int or alg != COSE_ALG_EDDSA:
         errors.append(f"unsupported COSE alg {alg!r}; expected {COSE_ALG_EDDSA} (EdDSA)")
@@ -652,7 +686,7 @@ def verify_scitt_cose_sign1(
     parsed_payload: dict[str, Any] | None = None
     try:
         decoded_json = json.loads(payload_bstr.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         errors.append(f"payload is not valid UTF-8 JSON: {exc}")
     else:
         if not isinstance(decoded_json, dict):
@@ -681,6 +715,7 @@ __all__ = [
     "COSE_ALG_EDDSA",
     "COSE_HEADER_ALG",
     "COSE_HEADER_CONTENT_TYPE",
+    "COSE_HEADER_CRIT",
     "COSE_HEADER_CWT_CLAIMS",
     "COSE_HEADER_KID",
     "CWT_CLAIM_IAT",
