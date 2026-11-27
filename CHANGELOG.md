@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Deterministic regulatory receipt bundles (`acgs_lite.compliance.receipt_bundle`
+  for `ca-admt-2027` and `eu-ai-act-art12-26`) and the `acgs bundle` auditor
+  CLI subcommand (`export`, `verify`, and `demo`).
+- Fail-closed SDK client for commercial `acgs-control-plane` bridge APIs
+  (`acgs_lite.control_plane.cloud_bridge.ControlPlaneBridgeClient` for signed
+  receipt ingest, Ed25519/ETag active policy bundle sync, and MACI-checked
+  escalation decisions).
+- Additional `FENCEABLE` reference provider conformance suites under
+  `examples/webhook_fenceable_provider/` (HMAC-SHA256 signed webhook) and
+  `examples/github_fenceable_provider/` (GitHub PR/issue comment fencing proxy).
+- RFC 9052 SCITT `COSE_Sign1` EdDSA (`alg = -8`) exporter and offline verifier
+  for signed receipts and compliance bundles (`acgs_lite.compliance.scitt`).
+- Experimental OpenTelemetry GenAI semantic convention spans
+  (`GenAIGovernanceTracer`, `build_genai_governance_attributes` in
+  `acgs_lite.integrations.otel`).
+
 ## [4.1.0] - 2026-11-27
 
 ### Added

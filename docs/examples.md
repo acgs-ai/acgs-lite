@@ -58,3 +58,13 @@ Each file below carries a `# requires: ...` comment near the top of the source f
 | [`examples/phoenix_acgs_governed_agent/governance_span.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/phoenix_acgs_governed_agent/governance_span.py) | `acgs-lite[otel]` (`opentelemetry-api`) | Context manager emitting `acgs.governed_execution` spans with outcome and receipt attributes |
 | [`examples/phoenix_acgs_governed_agent/run.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/phoenix_acgs_governed_agent/run.py) | `acgs-lite[otel]` (`opentelemetry-sdk`); optional `arize-phoenix`, `OPENAI_API_KEY` | Run allow, deny, review, and fail-closed scenarios with console or Phoenix OTLP span export |
 | [`examples/phoenix_acgs_governed_agent/test_phoenix_integration.py`](https://github.com/acgs-ai/acgs-lite/blob/main/examples/phoenix_acgs_governed_agent/test_phoenix_integration.py) | `pytest`, `acgs-lite[otel]` (`opentelemetry-sdk`) | Integration test suite asserting span names, statuses, and governance attributes via `InMemorySpanExporter` |
+
+## Reference `FENCEABLE` provider conformance suites
+
+All three suites run offline out of the box via their local sandbox/proxy servers (`--live` flags opt into external endpoints fail-closed):
+
+| Suite | Command | What it verifies |
+| --- | --- | --- |
+| [`examples/stripe_fenceable_provider/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/stripe_fenceable_provider) | `python -m examples.stripe_fenceable_provider` | Stripe PaymentIntent `FENCEABLE` adapter, key deduplication, `UNKNOWN` query/fence reconciliation, and fail-closed live transport |
+| [`examples/webhook_fenceable_provider/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/webhook_fenceable_provider) | `python -m examples.webhook_fenceable_provider` | HMAC-SHA256 signed webhook delivery `FENCEABLE` adapter, redirect blocking, and `retrieve_and_fence` conformance |
+| [`examples/github_fenceable_provider/`](https://github.com/acgs-ai/acgs-lite/tree/main/examples/github_fenceable_provider) | `python -m examples.github_fenceable_provider` | GitHub PR/issue comment `FENCEABLE` proxy (`GitHubFencingProxyServer`) with fail-closed refusal of raw `api.github.com` |

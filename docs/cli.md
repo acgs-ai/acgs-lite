@@ -14,6 +14,37 @@ Scaffold a new governance project. Creates a default `rules.yaml` and a `.github
 acgs init --name "my-secure-agent"
 ```
 
+### `acgs demo`
+Run a zero-config offline interactive tour of 5 governance and effect scenarios
+(signed decision/outcome receipts, at-most-once retry and `UNKNOWN`
+reconciliation, DENY before side-effect dispatch, missing/denied receipt
+refusal, and MACI role separation).
+```bash
+acgs demo
+acgs demo --json
+```
+
+### `acgs bundle`
+Export, verify offline, or demo SHA-256-manifested compliance receipt bundles
+(`ca-admt-2027` and `eu-ai-act-art12-26`).
+```bash
+# Offline self-check and tamper test
+acgs bundle demo --profile ca-admt-2027 --json
+
+# Export a bundle from serialized SignedReceipt JSON/JSONL records
+acgs bundle export \
+  --receipts decisions.json \
+  --outcomes outcomes.json \
+  --keys trusted_keys.json \
+  --profile eu-ai-act-art12-26 \
+  --system-id payments-agent \
+  --retention-days 180 \
+  --out bundle.json
+
+# Verify an exported bundle offline against pinned public keys
+acgs bundle verify bundle.json --keys trusted_keys.json --json
+```
+
 ### `acgs assess`
 Run a multi-framework compliance assessment against your active constitution.
 ```bash

@@ -62,3 +62,32 @@ report = assessor.assess({
 for gap in report.cross_framework_gaps:
     print(f"{gap.framework}: {gap.item} -- {gap.remediation}")
 ```
+
+## Verifiable Receipt Bundles & SCITT `COSE_Sign1`
+
+For auditors and offline evidence interchange, `acgs_lite.compliance` provides
+deterministic SHA-256-manifested bundles and RFC 9052 SCITT `COSE_Sign1`
+EdDSA (`alg = -8`) envelopes from signed 4.x receipts:
+
+```bash
+# Zero-config bundle generation, offline verification, and tamper-detection demo
+acgs bundle demo --profile ca-admt-2027 --json
+```
+
+```python
+from acgs_lite.compliance import (
+    export_receipt_bundle,
+    export_scitt_cose_sign1,
+    verify_receipt_bundle,
+    verify_scitt_cose_sign1,
+)
+
+# Bundle profiles: "ca-admt-2027" or "eu-ai-act-art12-26"
+# export_scitt_cose_sign1(signed_receipt, signer, issuer="did:web:acgs.example")
+# verify_scitt_cose_sign1(envelope.cose_bytes, {signer.key_id: signer.public_key_hex()})
+```
+
+!!! warning "Evidence format, not legal certification"
+    Receipt bundles and SCITT `COSE_Sign1` envelopes provide cryptographically
+    verifiable runtime decision and outcome evidence; they are not legal advice
+    or third-party regulatory certification.

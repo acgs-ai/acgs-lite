@@ -77,7 +77,33 @@ from acgs_lite.compliance.multi_framework import MultiFrameworkAssessor
 from acgs_lite.compliance.nist_ai_rmf import NISTAIRMFFramework
 from acgs_lite.compliance.nyc_ll144 import NYCLL144Framework
 from acgs_lite.compliance.oecd_ai import OECDAIFramework
+from acgs_lite.compliance.receipt_bundle import (
+    BUNDLE_SCHEMA_VERSION,
+    EU_AI_ACT_RETENTION_FLOOR_DAYS,
+    PROFILE_CA_ADMT_2027,
+    PROFILE_EU_AI_ACT_ART12_26,
+    SELF_ASSESSMENT_NOTICE,
+    SUPPORTED_BUNDLE_PROFILES,
+    BundleExportError,
+    ComplianceReceiptBundle,
+    ReceiptBundleVerification,
+    export_receipt_bundle,
+    verify_receipt_bundle,
+)
 from acgs_lite.compliance.report_exporter import ComplianceReportExporter
+from acgs_lite.compliance.scitt import (
+    COSE_ALG_EDDSA,
+    MEDIA_TYPE_COMPLIANCE_BUNDLE,
+    MEDIA_TYPE_DECISION_RECEIPT,
+    MEDIA_TYPE_JSON,
+    MEDIA_TYPE_OUTCOME_RECEIPT,
+    SCITT_COSE_SIGN1_TAG,
+    SCITTExportError,
+    SCITTReceiptEnvelope,
+    SCITTVerificationResult,
+    export_scitt_cose_sign1,
+    verify_scitt_cose_sign1,
+)
 from acgs_lite.compliance.singapore_maigf import SingaporeMAIGFFramework
 from acgs_lite.compliance.soc2_ai import SOC2AIFramework
 from acgs_lite.compliance.uk_ai_framework import UKAIFramework
@@ -128,4 +154,28 @@ __all__ = [
     "EnvironmentVarCollector",
     "ComplianceEvidenceEngine",
     "collect_evidence",
+    # Regulatory receipt bundles
+    "BUNDLE_SCHEMA_VERSION",
+    "EU_AI_ACT_RETENTION_FLOOR_DAYS",
+    "PROFILE_CA_ADMT_2027",
+    "PROFILE_EU_AI_ACT_ART12_26",
+    "SELF_ASSESSMENT_NOTICE",
+    "SUPPORTED_BUNDLE_PROFILES",
+    "BundleExportError",
+    "ComplianceReceiptBundle",
+    "ReceiptBundleVerification",
+    "export_receipt_bundle",
+    "verify_receipt_bundle",
+    # SCITT COSE_Sign1 envelopes
+    "COSE_ALG_EDDSA",
+    "MEDIA_TYPE_COMPLIANCE_BUNDLE",
+    "MEDIA_TYPE_DECISION_RECEIPT",
+    "MEDIA_TYPE_JSON",
+    "MEDIA_TYPE_OUTCOME_RECEIPT",
+    "SCITT_COSE_SIGN1_TAG",
+    "SCITTExportError",
+    "SCITTReceiptEnvelope",
+    "SCITTVerificationResult",
+    "export_scitt_cose_sign1",
+    "verify_scitt_cose_sign1",
 ]
