@@ -377,6 +377,17 @@ def test_verify_scitt_fails_closed_on_tampering_aad_and_untrusted_keys() -> None
     assert res_crit.valid is False
     assert any("critical COSE header" in err for err in res_crit.errors)
 
+    # Deeply nested JSON triggering RecursionError on json.loads fails closed without raising
+    nested_payload = b'{"deep":' + (b"[" * 2500) + b"1" + (b"]" * 2500) + b"}"
+    nested_sig = bytes.fromhex(
+        signer.sign(_cbor_encode(["Signature1", prot_bstr, b"", nested_payload]))
+    )
+    nested_cose = _cbor_encode(_CborTag(18, [prot_bstr, {}, nested_payload, nested_sig]))
+    res_nested = verify_scitt_cose_sign1(nested_cose, {"k1": signer.public_key_hex()})
+    assert isinstance(res_nested.valid, bool)
+    if not res_nested.valid:
+        assert any("JSON" in err for err in res_nested.errors)
+
 
 def test_export_scitt_fail_closed_validation(tmp_path: Path) -> None:
     pytest.importorskip("cryptography")

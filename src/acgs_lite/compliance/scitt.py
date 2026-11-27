@@ -519,7 +519,7 @@ def _verify_embedded_payload(
         try:
             unsigned = {k: v for k, v in payload_obj.items() if k != "bundle_digest"}
             expected = "sha256:" + hashlib.sha256(_canonical_json_bytes(unsigned)).hexdigest()
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, RecursionError) as exc:
             return f"embedded ComplianceReceiptBundle canonical JSON error: {exc}"
         if not hmac.compare_digest(expected.encode("ascii"), digest.lower().encode("ascii")):
             return "embedded ComplianceReceiptBundle bundle_digest mismatch"
@@ -686,7 +686,7 @@ def verify_scitt_cose_sign1(
     parsed_payload: dict[str, Any] | None = None
     try:
         decoded_json = json.loads(payload_bstr.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
         errors.append(f"payload is not valid UTF-8 JSON: {exc}")
     else:
         if not isinstance(decoded_json, dict):
