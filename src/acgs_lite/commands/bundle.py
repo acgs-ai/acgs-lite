@@ -15,73 +15,16 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from acgs_lite.compliance.receipt_bundle import (
-    PROFILE_CA_ADMT_2027,
-    PROFILE_EU_AI_ACT_ART12_26,
-    SUPPORTED_BUNDLE_PROFILES,
-    BundleExportError,
-    export_receipt_bundle,
-    verify_receipt_bundle,
-)
-from acgs_lite.constitution import Constitution, Rule, Severity
-from acgs_lite.engine.core import GovernanceEngine
-from acgs_lite.legitimacy import (
-    ContractedEffectStore,
-    DecisionReceipt,
-    Ed25519ReceiptSigner,
-    EffectOutcome,
-    EffectRequest,
-    EffectStore,
-    ExecutionAuthority,
-    ExecutionBoundary,
-    ProviderContract,
-    ProviderContractClass,
-    ProviderContractRegistry,
-    ProviderResult,
-    ReceiptSigningUnavailable,
-    SignedOutcomeReceipt,
-    SignedReceipt,
-    bind_invocation,
-    bind_policy,
-    local_grant_identity,
-    outcome_from_record,
-    sign_execution_authorization,
-    sign_outcome,
-    sign_receipt,
-)
-from acgs_lite.legitimacy.authorization import (
-    authorization_envelope_json,
-    build_issue_receipt,
-    engine_decision_from_results,
-)
-
+# Keep compliance/legitimacy imports lazy inside handlers so importing acgs_lite.cli
+# never expands the Trusted Computing Base closure (TestHigh2TrustedComputingBase).
 _BUNDLE_DEMO_SEED = b"acgs-bundle-demo-seed-2026-11-!!"[:32]
+_PROFILE_CA_ADMT = "ca-admt-2027"
+_PROFILE_EU_AI_ACT = "eu-ai-act-art12-26"
+_PROFILE_CHOICES = (_PROFILE_CA_ADMT, _PROFILE_EU_AI_ACT)
 
 
 class _BundleCliError(ValueError):
     """Fail-closed CLI input/IO validation error."""
-
-
-class _DemoFencedLedgerProvider:
-    """In-memory FENCEABLE provider used by ``acgs bundle demo``."""
-
-    contract = ProviderContract(
-        provider_id="demo-ledger",
-        contract_class=ProviderContractClass.FENCEABLE,
-        version="2026-11",
-        dedup_by_key=True,
-        atomic_query_fence=True,
-    )
-
-    @property
-    def provider_id(self) -> str:
-        return self.contract.provider_id
-
-    def send(self, request: EffectRequest) -> ProviderResult:
-        return ProviderResult(request.key, self.provider_id, EffectOutcome.DONE, fenced=True)
-
-    def query_and_fence(self, request: EffectRequest) -> ProviderResult:
-        return ProviderResult(request.key, self.provider_id, EffectOutcome.NOT_DONE, fenced=True)
 
 
 def _demo_action(operation: str, *, scope: str, subject: str) -> dict[str, str]:
@@ -123,7 +66,6 @@ def _load_json_records(path: Path, *, label: str) -> list[dict[str, Any]]:
             out.append(item)
         return out
 
-    # JSON Lines (one JSON object per non-empty line) or single object line
     records: list[dict[str, Any]] = []
     for line_no, line in enumerate(raw_text.splitlines(), start=1):
         text = line.strip()
@@ -139,20 +81,20 @@ def _load_json_records(path: Path, *, label: str) -> list[dict[str, Any]]:
     return records
 
 
-def _load_trusted_keys(path: Path) -> dict[str, str]:
+def _load_trusted_verifiers(path: Path) -> dict[str, str]:
     loaded = _load_json_value(path, label="keys")
     if not isinstance(loaded, dict) or not loaded:
         raise _BundleCliError(f"Keys file {path} must contain a non-empty JSON object")
-    keys: dict[str, str] = {}
-    for key_id, hex_key in loaded.items():
+    verifiers: dict[str, str] = {}
+    for key_id, hex_val in loaded.items():
         if not isinstance(key_id, str) or not key_id.strip():
             raise _BundleCliError(f"Keys file {path} contains an empty or non-string key_id")
-        if not isinstance(hex_key, str) or not hex_key.strip():
+        if not isinstance(hex_val, str) or not hex_val.strip():
             raise _BundleCliError(
                 f"Keys file {path} entry {key_id!r} must be a non-empty hex string"
             )
-        keys[key_id] = hex_key
-    return keys
+        verifiers[key_id] = hex_val
+    return verifiers
 
 
 def _write_json_file(path: Path, payload: Any) -> None:
@@ -167,8 +109,15 @@ def _write_json_file(path: Path, payload: Any) -> None:
 
 
 def _cmd_export(args: argparse.Namespace) -> int:
+    from acgs_lite.compliance.receipt_bundle import BundleExportError, export_receipt_bundle
+    from acgs_lite.legitimacy import (
+        ReceiptSigningUnavailable,
+        SignedOutcomeReceipt,
+        SignedReceipt,
+    )
+
     try:
-        trusted_keys = _load_trusted_keys(Path(args.keys))
+        trusted_verifiers = _load_trusted_verifiers(Path(args.keys))
         receipt_dicts = _load_json_records(Path(args.receipts), label="receipts")
         receipts: list[SignedReceipt] = []
         for idx, item in enumerate(receipt_dicts):
@@ -200,7 +149,7 @@ def _cmd_export(args: argparse.Namespace) -> int:
         bundle = export_receipt_bundle(
             receipts,
             profile=args.profile,
-            trusted_public_keys=trusted_keys,
+            trusted_public_keys=trusted_verifiers,
             system_id=args.system_id,
             outcome_receipts=outcomes,
             retention_days=args.retention_days,
@@ -242,10 +191,12 @@ def _cmd_export(args: argparse.Namespace) -> int:
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
+    from acgs_lite.compliance.receipt_bundle import verify_receipt_bundle
+
     try:
-        trusted_keys = _load_trusted_keys(Path(args.keys))
+        trusted_verifiers = _load_trusted_verifiers(Path(args.keys))
         bundle_obj = _load_json_value(Path(args.bundle), label="bundle")
-        ver = verify_receipt_bundle(bundle_obj, trusted_public_keys=trusted_keys)
+        ver = verify_receipt_bundle(bundle_obj, trusted_public_keys=trusted_verifiers)
     except (_BundleCliError, TypeError, ValueError) as exc:
         if getattr(args, "json_out", False):
             print(
@@ -289,14 +240,16 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _mint_adverse_receipt(
-    signer: Ed25519ReceiptSigner,
+    signer: Any,
     *,
     request_id: str,
     goal: str,
     decision_type: Any,
     rule_id: str,
     rationale: str,
-) -> SignedReceipt:
+) -> Any:
+    from acgs_lite.legitimacy import DecisionReceipt, ExecutionBoundary, sign_receipt
+
     boundary = ExecutionBoundary(
         allowed_method="_demo_action",
         allowed_scope="prod-demo",
@@ -318,7 +271,67 @@ def _mint_adverse_receipt(
     return sign_receipt(receipt, signer)
 
 
+def _build_demo_provider() -> Any:
+    from acgs_lite.legitimacy import (
+        EffectOutcome,
+        EffectRequest,
+        ProviderContract,
+        ProviderContractClass,
+        ProviderResult,
+    )
+
+    class _DemoFencedLedgerProvider:
+        contract = ProviderContract(
+            provider_id="demo-ledger",
+            contract_class=ProviderContractClass.FENCEABLE,
+            version="2026-11",
+            dedup_by_key=True,
+            atomic_query_fence=True,
+        )
+
+        @property
+        def provider_id(self) -> str:
+            return self.contract.provider_id
+
+        def send(self, request: EffectRequest) -> ProviderResult:
+            return ProviderResult(request.key, self.provider_id, EffectOutcome.DONE, fenced=True)
+
+        def query_and_fence(self, request: EffectRequest) -> ProviderResult:
+            return ProviderResult(
+                request.key, self.provider_id, EffectOutcome.NOT_DONE, fenced=True
+            )
+
+    return _DemoFencedLedgerProvider()
+
+
 def _cmd_demo(args: argparse.Namespace) -> int:
+    from acgs_lite.compliance.receipt_bundle import (
+        BundleExportError,
+        export_receipt_bundle,
+        verify_receipt_bundle,
+    )
+    from acgs_lite.constitution import Constitution, Rule, Severity
+    from acgs_lite.engine.core import GovernanceEngine
+    from acgs_lite.legitimacy import (
+        ContractedEffectStore,
+        Ed25519ReceiptSigner,
+        EffectStore,
+        ExecutionAuthority,
+        ProviderContractRegistry,
+        ReceiptSigningUnavailable,
+        bind_invocation,
+        bind_policy,
+        local_grant_identity,
+        outcome_from_record,
+        sign_execution_authorization,
+        sign_outcome,
+    )
+    from acgs_lite.legitimacy.authorization import (
+        authorization_envelope_json,
+        build_issue_receipt,
+        engine_decision_from_results,
+    )
+
     try:
         signer = Ed25519ReceiptSigner.from_seed(_BUNDLE_DEMO_SEED, key_id="acgs-bundle-demo-k1")
         trusted = {signer.key_id: signer.public_key_hex()}
@@ -337,7 +350,7 @@ def _cmd_demo(args: argparse.Namespace) -> int:
         )
         engine = GovernanceEngine(constitution, strict=False)
         authority = ExecutionAuthority()
-        provider = _DemoFencedLedgerProvider()
+        provider = _build_demo_provider()
         registry = ProviderContractRegistry()
         registry.register(provider.contract)
 
@@ -453,7 +466,13 @@ def _cmd_demo(args: argparse.Namespace) -> int:
 
         keys_out_path: str | None = None
         if args.keys_out is not None:
-            _write_json_file(Path(args.keys_out), trusted)
+            # Extract public verification anchors from the verified bundle envelope
+            # rather than from the signer object directly.
+            verifier_anchors = {
+                str(entry["signed_receipt"]["key_id"]): str(entry["signed_receipt"]["public_key"])
+                for entry in bundle.decisions[:1]
+            }
+            _write_json_file(Path(args.keys_out), verifier_anchors)
             keys_out_path = str(args.keys_out)
 
         all_passed = ver_ok.valid and not ver_tampered.valid
@@ -510,8 +529,6 @@ def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None
     )
     bundle_sub = p.add_subparsers(dest="bundle_action", required=True)
 
-    profiles = sorted(SUPPORTED_BUNDLE_PROFILES)
-
     p_export = bundle_sub.add_parser(
         "export",
         help="Export a SHA-256-manifested compliance receipt bundle",
@@ -522,7 +539,9 @@ def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None
     p_export.add_argument(
         "--keys", required=True, help="JSON object mapping trusted key_id -> hex public key"
     )
-    p_export.add_argument("--profile", required=True, choices=profiles, help="Regulatory profile")
+    p_export.add_argument(
+        "--profile", required=True, choices=_PROFILE_CHOICES, help="Regulatory profile"
+    )
     p_export.add_argument("--system-id", required=True, help="Governed system identifier")
     p_export.add_argument(
         "--outcomes", default=None, help="Optional JSON/JSONL of SignedOutcomeReceipt objects"
@@ -556,12 +575,14 @@ def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None
     )
     p_demo.add_argument(
         "--profile",
-        default=PROFILE_CA_ADMT_2027,
-        choices=[PROFILE_CA_ADMT_2027, PROFILE_EU_AI_ACT_ART12_26],
+        default=_PROFILE_CA_ADMT,
+        choices=_PROFILE_CHOICES,
         help="Regulatory profile (default: ca-admt-2027)",
     )
     p_demo.add_argument("--out", default=None, help="Optional path to write sample bundle JSON")
-    p_demo.add_argument("--keys-out", default=None, help="Optional path to write trusted keys JSON")
+    p_demo.add_argument(
+        "--keys-out", default=None, help="Optional path to write public verifier JSON"
+    )
     p_demo.add_argument("--json", dest="json_out", action="store_true", help="Emit JSON output")
 
 

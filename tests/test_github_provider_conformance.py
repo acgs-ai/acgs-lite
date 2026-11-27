@@ -32,9 +32,10 @@ from acgs_lite.legitimacy import (  # noqa: E402
 )
 from examples.github_fenceable_provider import (  # noqa: E402
     GitHubCommentProvider,
+    GitHubFencingProxyServer,
+    GitHubFencingProxyTransport,
     GitHubIdempotencyConflictError,
     InMemoryGitHubAPI,
-    LiveGitHubTransport,
     run_github_conformance_suite,
     run_live_github_verification,
 )
@@ -128,13 +129,30 @@ def test_a2_github_timeout_before_commit_fences_key(tmp_path: Path) -> None:
         )
 
 
-def test_live_github_transport_https_and_status_mapping(
-    monkeypatch: pytest.MonkeyPatch,
+def test_github_fencing_proxy_server_and_transport_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    pytest.importorskip("cryptography")
+    # Direct GitHub REST host lacks /comments/fence and MUST be rejected fail-closed
+    with pytest.raises(ValueError, match="Direct GitHub hosts"):
+        GitHubFencingProxyTransport("https://api.github.com", token="tok")
     with pytest.raises(ValueError, match="https://"):
-        LiveGitHubTransport("http://api.github.com", token="tok")
+        GitHubFencingProxyTransport("http://gh-proxy.example.com", token="tok")
     with pytest.raises(ValueError, match="non-empty bearer token"):
-        LiveGitHubTransport("https://api.github.com", token=" ")
+        GitHubFencingProxyTransport("https://gh-proxy.example.com", token=" ")
+
+    # Real loopback proxy HTTP round-trip (POST /comments, dedup, POST /comments/fence, 409 conflict)
+    with GitHubFencingProxyServer(expected_token="proxy-tok") as proxy:
+        transport = GitHubFencingProxyTransport(proxy.base_url, token="proxy-tok")
+        res = run_live_github_verification(transport, db_path=tmp_path / "proxy_live.sqlite")
+        assert res["passed"] is True
+        assert res["idempotent_dedup_matched"] is True
+        assert res["reconcile_outcome"] == "done"
+
+        with pytest.raises(ValueError, match="owner/name"):
+            transport.create_comment(
+                idempotency_key="k", repo="../escape/repo", issue_number=1, body="x"
+            )
 
     class _FakeResp:
         def __init__(self, body: dict[str, object]) -> None:
@@ -149,12 +167,7 @@ def test_live_github_transport_https_and_status_mapping(
         def read(self) -> bytes:
             return self._body
 
-    transport = LiveGitHubTransport("https://api.github.com", token="tok")
-    with pytest.raises(ValueError, match="owner/name"):
-        transport.create_comment(
-            idempotency_key="k", repo="../escape/repo", issue_number=1, body="x"
-        )
-
+    proxy_transport = GitHubFencingProxyTransport("https://gh-proxy.example.com", token="tok")
     for status, fenced_flag, expected in [
         ("created", False, EffectOutcome.DONE),
         ("canceled", True, EffectOutcome.NOT_DONE),
@@ -168,7 +181,7 @@ def test_live_github_transport_https_and_status_mapping(
                 {"comment_id": "ic_1", "status": _s, "fenced": _f}
             ),
         )
-        outcome, _, _ = transport.find_or_fence_comment(
+        outcome, _, _ = proxy_transport.find_or_fence_comment(
             idempotency_key="acgs:effect:v1:abc", repo="acgs-ai/acgs-lite", issue_number=1
         )
         assert outcome is expected
@@ -194,16 +207,16 @@ def test_github_send_requires_explicit_boolean_fenced_confirmation() -> None:
     assert res.fenced is False
 
 
-def test_github_main_with_live_url_and_redirect_refusal(
+def test_github_main_with_live_proxy_and_broken_recovery(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     pytest.importorskip("cryptography")
-    monkeypatch.setenv("ACGS_GITHUB_TEST_URL", "https://api.github.example")
-    monkeypatch.setenv("ACGS_GITHUB_TEST_TOKEN", "ghs_test_token")
+    monkeypatch.setenv("ACGS_GITHUB_PROXY_URL", "https://gh-proxy.example.com")
+    monkeypatch.setenv("ACGS_GITHUB_PROXY_TOKEN", "ghs_test_token")
 
     def _fail(req: object, timeout: float = 10.0) -> object:
         raise urllib.error.HTTPError(
-            "https://api.github.example/repos/acgs-ai/acgs-lite/issues/1/comments",
+            "https://gh-proxy.example.com/repos/acgs-ai/acgs-lite/issues/1/comments",
             502,
             "Bad Gateway",
             {},  # type: ignore[arg-type]
@@ -239,7 +252,6 @@ def test_github_main_with_live_url_and_redirect_refusal(
     assert ok_out["all_passed"] is True
     assert ok_out["live_verification"]["passed"] is True
 
-    # Broken fence recovery returning UNKNOWN must fail live verification
     class _BrokenFenceTransport:
         def create_comment(self, **_: object) -> dict[str, object]:
             return {"comment_id": "ic_broken", "status": "created", "fenced": False}
@@ -252,7 +264,7 @@ def test_github_main_with_live_url_and_redirect_refusal(
     assert broken["passed"] is False
 
 
-def test_live_github_transport_refuses_redirects_before_leaking_token(
+def test_github_proxy_transport_refuses_redirects_before_leaking_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.undo()
@@ -289,7 +301,9 @@ def test_live_github_transport_refuses_redirects_before_leaking_token(
     t1.start()
     t2.start()
     try:
-        transport = LiveGitHubTransport(f"http://127.0.0.1:{redir_port}", token="ghs_super_secret")
+        transport = GitHubFencingProxyTransport(
+            f"http://127.0.0.1:{redir_port}", token="ghs_super_secret"
+        )
         with pytest.raises(RuntimeError, match="redirect refused"):
             transport.create_comment(
                 idempotency_key="ghk-redir",

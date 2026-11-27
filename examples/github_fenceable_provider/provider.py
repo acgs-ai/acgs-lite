@@ -10,12 +10,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 import threading
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -214,24 +216,36 @@ class InMemoryGitHubAPI:
             return EffectOutcome.NOT_DONE, None, True
 
 
-class LiveGitHubTransport:
-    """Real HTTPS GitHub/proxy transport using stdlib ``urllib.request`` without redirects."""
+class GitHubFencingProxyTransport:
+    """HTTP transport targeting a stateful GitHub fencing proxy.
+
+    Public GitHub REST API (``https://api.github.com``) does not natively provide
+    atomic ``/comments/fence`` or ``X-Idempotency-Key`` deduplication, so direct
+    ``github.com`` URLs are rejected fail-closed. Point this transport at a proxy
+    implementing ``/repos/{owner}/{name}/issues/{issue}/comments`` and
+    ``.../comments/fence`` (see :class:`GitHubFencingProxyServer`).
+    """
 
     def __init__(
         self,
-        base_url: str,
+        proxy_url: str,
         *,
         token: str,
         timeout_seconds: float = 10.0,
     ) -> None:
-        parsed = urllib.parse.urlsplit(base_url)
+        parsed = urllib.parse.urlsplit(proxy_url)
         host = (parsed.hostname or "").lower()
+        if host == "github.com" or host.endswith(".github.com"):
+            raise ValueError(
+                "Direct GitHub hosts do not implement /comments/fence; "
+                "configure a stateful FENCEABLE fencing proxy endpoint instead"
+            )
         is_local = host in ("localhost", "127.0.0.1", "::1")
         if parsed.scheme != "https" and not is_local:
-            raise ValueError("LiveGitHubTransport requires an https:// endpoint URL")
+            raise ValueError("GitHubFencingProxyTransport requires an https:// proxy URL")
         if not isinstance(token, str) or not token.strip():
-            raise ValueError("LiveGitHubTransport requires a non-empty bearer token")
-        self._base_url = base_url.rstrip("/")
+            raise ValueError("GitHubFencingProxyTransport requires a non-empty bearer token")
+        self._base_url = proxy_url.rstrip("/")
         self._token = token
         self._timeout = timeout_seconds
 
@@ -314,6 +328,114 @@ class LiveGitHubTransport:
         if status in ("canceled", "fenced") and fenced:
             return EffectOutcome.NOT_DONE, comment_id, True
         return EffectOutcome.UNKNOWN, comment_id, False
+
+
+_COMMENT_PATH_RE = re.compile(r"^/repos/([^/]+)/([^/]+)/issues/([1-9][0-9]*)/comments$")
+_FENCE_PATH_RE = re.compile(r"^/repos/([^/]+)/([^/]+)/issues/([1-9][0-9]*)/comments/fence$")
+
+
+class GitHubFencingProxyServer:
+    """Reference loopback HTTP fencing proxy implementing GitHub ``/comments`` + ``/comments/fence``."""
+
+    def __init__(
+        self,
+        *,
+        expected_token: str,
+        backend: InMemoryGitHubAPI | None = None,
+        host: str = "127.0.0.1",
+        port: int = 0,
+    ) -> None:
+        if not expected_token.strip():
+            raise ValueError("expected_token must be non-empty")
+        self.backend = backend if backend is not None else InMemoryGitHubAPI()
+        self._expected_auth = f"Bearer {expected_token}"
+        proxy = self
+
+        class _Handler(BaseHTTPRequestHandler):
+            def _send_json(self, code: int, payload: dict[str, Any]) -> None:
+                raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def do_POST(self) -> None:
+                if self.headers.get("Authorization") != proxy._expected_auth:
+                    self._send_json(401, {"detail": "unauthorized"})
+                    return
+                parsed_url = urllib.parse.urlsplit(self.path)
+                length = int(self.headers.get("Content-Length", "0"))
+                raw_body = self.rfile.read(length) if length > 0 else b""
+
+                m_comment = _COMMENT_PATH_RE.match(parsed_url.path)
+                if m_comment:
+                    owner = urllib.parse.unquote(m_comment.group(1))
+                    name = urllib.parse.unquote(m_comment.group(2))
+                    issue_number = int(m_comment.group(3))
+                    data = json.loads(raw_body.decode("utf-8"))
+                    idem = self.headers.get("X-Idempotency-Key") or str(
+                        data.get("idempotency_key", "")
+                    )
+                    try:
+                        res = proxy.backend.create_comment(
+                            idempotency_key=idem,
+                            repo=f"{owner}/{name}",
+                            issue_number=issue_number,
+                            body=str(data.get("body", "")),
+                        )
+                    except GitHubIdempotencyConflictError as exc:
+                        self._send_json(409, {"detail": str(exc)})
+                        return
+                    self._send_json(201, res)
+                    return
+
+                m_fence = _FENCE_PATH_RE.match(parsed_url.path)
+                if m_fence:
+                    owner = urllib.parse.unquote(m_fence.group(1))
+                    name = urllib.parse.unquote(m_fence.group(2))
+                    issue_number = int(m_fence.group(3))
+                    qs = urllib.parse.parse_qs(parsed_url.query)
+                    idem = (
+                        self.headers.get("X-Idempotency-Key")
+                        or (qs.get("idempotency_key") or [""])[0]
+                    )
+                    outcome, ref, fenced = proxy.backend.find_or_fence_comment(
+                        idempotency_key=idem,
+                        repo=f"{owner}/{name}",
+                        issue_number=issue_number,
+                    )
+                    status = "created" if outcome is EffectOutcome.DONE else "canceled"
+                    self._send_json(
+                        200,
+                        {"comment_id": ref, "status": status, "fenced": fenced},
+                    )
+                    return
+
+                self._send_json(404, {"detail": "not found"})
+
+            def log_message(self, format: str, *args: object) -> None:
+                return None
+
+        self._server = ThreadingHTTPServer((host, port), _Handler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    @property
+    def base_url(self) -> str:
+        host, port = self._server.server_address[:2]
+        host_str = host.decode("ascii") if isinstance(host, bytes) else host
+        return f"http://{host_str}:{port}"
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+    def __enter__(self) -> GitHubFencingProxyServer:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
 
 class GitHubCommentProvider:
@@ -741,20 +863,20 @@ def run_live_github_verification(
 
 def main() -> int:
     res = run_github_conformance_suite()
-    live_url = os.environ.get("ACGS_GITHUB_TEST_URL")
+    live_url = os.environ.get("ACGS_GITHUB_PROXY_URL")
     if not live_url:
         print(json.dumps(res.__dict__, indent=2))
         return 0 if res.all_passed else 1
 
-    token = os.environ.get("ACGS_GITHUB_TEST_TOKEN", "")
-    repo = os.environ.get("ACGS_GITHUB_TEST_REPO", "acgs-ai/acgs-lite")
+    token = os.environ.get("ACGS_GITHUB_PROXY_TOKEN", "")
+    repo = os.environ.get("ACGS_GITHUB_PROXY_REPO", "acgs-ai/acgs-lite")
     try:
-        issue_number = int(os.environ.get("ACGS_GITHUB_TEST_ISSUE", "1"))
-        transport = LiveGitHubTransport(live_url, token=token)
+        issue_number = int(os.environ.get("ACGS_GITHUB_PROXY_ISSUE", "1"))
+        transport = GitHubFencingProxyTransport(live_url, token=token)
         live = run_live_github_verification(transport, repo=repo, issue_number=issue_number)
     except Exception as exc:
         live = {
-            "transport": "LiveGitHubTransport",
+            "transport": "GitHubFencingProxyTransport",
             "passed": False,
             "error": f"{type(exc).__name__}: {exc}",
         }
