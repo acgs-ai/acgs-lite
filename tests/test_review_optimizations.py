@@ -999,8 +999,16 @@ class TestEngineHaltRustParityAndFallbacks:
     def test_constitutions_over_63_rules_enforce_all_rules_without_rust_i64_overflow(
         self,
     ) -> None:
-        """Constitutions with >63 active rules must never suffer Rust i64 bitmask overflow."""
-        for count in (63, 64, 65):
+        """Constitutions with >63 active rules use Rust u128 up to 127 and fall back safely past 127."""
+        from acgs_lite.engine.matcher import _HAS_RUST, _rust
+
+        rust_u128 = (
+            _HAS_RUST
+            and _rust is not None
+            and callable(getattr(_rust.GovernanceValidator, "validate_hot_u128", None))
+        )
+        rust_max = 127 if rust_u128 else 63
+        for count in (63, 64, 65, 127, 128):
             rules = [
                 Rule(
                     id=f"R-{i:03d}",
@@ -1012,8 +1020,10 @@ class TestEngineHaltRustParityAndFallbacks:
             ]
             constitution = Constitution(name=f"rules-{count}", rules=rules)
             engine = GovernanceEngine(constitution, strict=False, warmup=False, freeze_gc=False)
-            if count > 63:
+            if count > rust_max:
                 assert engine._rust_validator is None
+            elif _HAS_RUST:
+                assert engine._rust_validator is not None
             for idx in (0, 62, count - 1):
                 res = engine.validate(f"trigger kw{idx:03d}")
                 assert res.valid is False, f"count={count} idx={idx} failed open"
