@@ -6,9 +6,9 @@ Ported unchanged from the adapter packages' tests for their private
 
 from __future__ import annotations
 
+import functools
 import itertools
 import logging
-import re
 import time
 from typing import Any
 
@@ -329,9 +329,49 @@ class TestFailClosed:
 
 # ── Identifier pattern (not in the adapter tests) ────────────────────────────
 
-_ORIGINAL_IDENTIFIER_VALUE = re.compile(
-    r"^[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+|[A-Z][a-z0-9]+)+$"
-)
+_LETTERS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+_UPPER = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+_LOWER_OR_DIGIT = frozenset("abcdefghijklmnopqrstuvwxyz0123456789")
+_ALNUM = _LETTERS | frozenset("0123456789")
+
+
+def _original_identifier_match(text: str) -> bool:
+    """Reference for the adapters' original pattern, written without a regex.
+
+    The original is a letter, then letters or digits, then one or more groups, where
+    a group is a separator (``_`` or ``-``) plus letters or digits, or an upper-case
+    letter plus lower-case letters or digits. It is spelled out here because the
+    pattern itself backtracks exponentially.
+    """
+    size = len(text)
+
+    @functools.cache
+    def groups_from(start: int) -> bool:
+        if start >= size:
+            return False
+        if text[start] in "_-":
+            allowed = _ALNUM
+        elif text[start] in _UPPER:
+            allowed = _LOWER_OR_DIGIT
+        else:
+            return False
+        end = start + 1
+        while end < size and text[end] in allowed:
+            end += 1
+            if end == size or groups_from(end):
+                return True
+        return False
+
+    if not text or text[0] not in _LETTERS:
+        return False
+    prefix_end = 1
+    while True:
+        if groups_from(prefix_end):
+            return True
+        if prefix_end < size and text[prefix_end] in _ALNUM:
+            prefix_end += 1
+        else:
+            return False
 
 
 def test_identifier_pattern_matches_the_same_strings_as_the_original() -> None:
@@ -341,8 +381,7 @@ def test_identifier_pattern_matches_the_same_strings_as_the_original() -> None:
         candidate
         for length in range(7)
         for candidate in map("".join, itertools.product("aA0-_!", repeat=length))
-        if bool(_IDENTIFIER_VALUE.match(candidate))
-        != bool(_ORIGINAL_IDENTIFIER_VALUE.match(candidate))
+        if bool(_IDENTIFIER_VALUE.match(candidate)) != _original_identifier_match(candidate)
     ]
     assert differences == []
 

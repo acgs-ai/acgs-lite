@@ -54,9 +54,6 @@ ToolCallFormatter = Callable[[str, Any], str]
 MAX_ARGUMENT_DEPTH = 32
 """Nesting depth above which a tool call is rejected instead of being partially rendered."""
 
-_DENY_ACTIONS = frozenset(
-    {ViolationAction.BLOCK, ViolationAction.BLOCK_AND_NOTIFY, ViolationAction.HALT}
-)
 _REVIEW_ACTIONS = frozenset({ViolationAction.REQUIRE_HUMAN_REVIEW, ViolationAction.ESCALATE})
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
