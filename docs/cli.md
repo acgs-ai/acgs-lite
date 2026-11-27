@@ -43,6 +43,12 @@ acgs bundle export \
 
 # Verify an exported bundle offline against pinned public keys
 acgs bundle verify bundle.json --keys trusted_keys.json --json
+
+# Wrap a bundle or receipt as an RFC 9052 SCITT COSE_Sign1 EdDSA statement
+acgs bundle scitt-export bundle.json --demo-key --issuer did:web:acgs.example --out bundle.cose --json
+
+# Verify a SCITT COSE_Sign1 statement offline
+acgs bundle scitt-verify bundle.cose --keys trusted_keys.json --expected-issuer did:web:acgs.example --json
 ```
 
 ### `acgs assess`
