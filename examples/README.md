@@ -80,6 +80,14 @@ python examples/mcp_agent_client.py
 | [`mock_stub_testing/`](mock_stub_testing/) | `typing.Protocol` + `InMemory*` stub pattern for production-grade testing | ⭐⭐⭐ Advanced |
 | [`lean_runtime/`](lean_runtime/) | Lean runtime wrapper + `acgs lean-smoke` setup for real Lean/Lake projects | ⭐⭐ Intermediate |
 
+## `FENCEABLE` Provider Conformance Suites (Receipted Effects)
+
+| Provider | Reference Module | Conformance Test |
+|----------|------------------|------------------|
+| **Stripe Payments** | [`stripe_fenceable_provider/`](stripe_fenceable_provider/) | [`tests/test_stripe_provider_conformance.py`](../tests/test_stripe_provider_conformance.py) |
+| **Signed Outbound Webhooks** | [`webhook_fenceable_provider/`](webhook_fenceable_provider/) | [`tests/test_webhook_provider_conformance.py`](../tests/test_webhook_provider_conformance.py) |
+| **GitHub Issue/PR Comments** | [`github_fenceable_provider/`](github_fenceable_provider/) | [`tests/test_github_provider_conformance.py`](../tests/test_github_provider_conformance.py) |
+
 ## Integration Demos
 
 | File | Description |
