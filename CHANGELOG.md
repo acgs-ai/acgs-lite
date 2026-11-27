@@ -32,29 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Five-stage offline end-to-end commercial pipeline example
   (`examples/commercial_evidence_pipeline.py`).
 
-## [4.1.0] - 2026-11-27
-
-### Added
-
-- Zero-config `acgs demo [--json]` CLI command running 5 offline governance
-  and effect scenarios (ALLOW + signed receipts with offline public-key
-  verification, at-most-once retry & `UNKNOWN` reconciliation, DENY before
-  side-effect dispatch, missing/denied receipt refusal, and MACI
-  `proposer != validator != executor` separation).
-- Stripe-compatible `FENCEABLE` reference provider and conformance suite under
-  `examples/stripe_fenceable_provider/` (`StripePaymentIntentProvider`,
-  `InMemoryStripeSandbox`, fail-closed `LiveStripeTestTransport`, and
-  `run_conformance_suite`).
-
-### Security
-
-- `create_governance_app` now applies the `X-API-Key` check to the OpenShell
-  governance router. With `api_key` / `ACGS_API_KEY` set, every `/governance/*`
-  route returns 401 without the key; before, those routes were served without
-  it. Clients that call `/governance/*` must send the same `X-API-Key` header as
-  for `/validate`. Apps started with `require_auth=False` and no key are
-  unchanged.
-
 ### Fixed
 
 - `GovernanceWSGIMiddleware` and `GovernanceASGIMiddleware` no longer send
@@ -79,6 +56,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   those values only. The header describes the request, not the response body.
 - Errors raised while validating a request body are now logged at `WARNING`
   instead of `DEBUG` in both middlewares.
+
+## [4.1.0] - 2026-11-27
+
+### Added
+
+- Zero-config `acgs demo [--json]` CLI command running 5 offline governance
+  and effect scenarios (ALLOW + signed receipts with offline public-key
+  verification, at-most-once retry & `UNKNOWN` reconciliation, DENY before
+  side-effect dispatch, missing/denied receipt refusal, and MACI
+  `proposer != validator != executor` separation).
+- Stripe-compatible `FENCEABLE` reference provider and conformance suite under
+  `examples/stripe_fenceable_provider/` (`StripePaymentIntentProvider`,
+  `InMemoryStripeSandbox`, fail-closed `LiveStripeTestTransport`, and
+  `run_conformance_suite`).
+
+### Security
+
+- `create_governance_app` now applies the `X-API-Key` check to the OpenShell
+  governance router. With `api_key` / `ACGS_API_KEY` set, every `/governance/*`
+  route returns 401 without the key; before, those routes were served without
+  it. Clients that call `/governance/*` must send the same `X-API-Key` header as
+  for `/validate`. Apps started with `require_auth=False` and no key are
+  unchanged.
 
 ## [4.0.0] - 2026-11-10
 
