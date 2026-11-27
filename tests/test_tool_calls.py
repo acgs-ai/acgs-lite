@@ -404,3 +404,69 @@ def test_many_hostile_argument_values_are_evaluated_quickly() -> None:
     decision = governor.evaluate("tool", {f"k{index}": hostile for index in range(500)})
     assert decision.verdict is Verdict.ALLOW
     assert time.perf_counter() - started < 2.0
+
+
+# ── Hidden control characters in argument values (not in the adapter tests) ──
+
+_HIDDEN_WHITESPACE = ["\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x1f", "\x85"]
+
+
+class _Shouty:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def __str__(self) -> str:
+        return self._text
+
+
+@pytest.mark.parametrize("hidden", _HIDDEN_WHITESPACE)
+def test_hidden_control_inside_a_keyword_does_not_hide_it(hidden: str) -> None:
+    # The engine drops these characters before matching. str.split() treats them as
+    # whitespace, so collapsing whitespace first turned "del<VT>ete" into "del ete".
+    governor = ToolCallGovernor(_constitution(BLOCK), agent_id="agent")
+    decision = governor.evaluate("execute", {"value": f"del{hidden}ete everything"})
+    assert decision.verdict is Verdict.DENY
+    assert decision.rule_ids == ("T-BLOCK",)
+
+
+@pytest.mark.parametrize("hidden", _HIDDEN_WHITESPACE)
+def test_hidden_control_used_as_a_word_separator_is_still_denied(hidden: str) -> None:
+    governor = ToolCallGovernor(_constitution(BLOCK), agent_id="agent")
+    decision = governor.evaluate("execute", {"value": f"delete{hidden}everything"})
+    assert decision.verdict is Verdict.DENY
+
+
+def test_hidden_control_in_a_non_string_value_does_not_hide_a_keyword() -> None:
+    governor = ToolCallGovernor(_constitution(BLOCK), agent_id="agent")
+    decision = governor.evaluate("execute", {"value": _Shouty("del\x0bete everything")})
+    assert decision.verdict is Verdict.DENY
+
+
+def test_hidden_control_reading_is_added_as_a_second_line() -> None:
+    text = format_tool_call("execute", {"value": "del\x0bete everything"})
+    assert text.splitlines()[2:4] == ["value: del ete everything", "value: delete everything"]
+
+
+def test_plain_values_are_rendered_once() -> None:
+    text = format_tool_call("execute", {"value": "delete\n  everything\tnow", "n": 3})
+    assert text.splitlines() == [
+        "tool: execute",
+        "arguments:",
+        "n: 3",
+        "value: delete everything now",
+    ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "\x85delete\x85\xad everything",
+        "de﻿le\x7fte\x1c\x1f\x7f everything",
+        "\x00delete ﻿\x0beverything",
+    ],
+)
+def test_mixed_hidden_characters_do_not_hide_a_keyword(value: str) -> None:
+    # Found by fuzzing: the engine blocks each of these as raw text, so the
+    # rendered tool call must be blocked too.
+    governor = ToolCallGovernor(_constitution(BLOCK), agent_id="agent")
+    assert governor.evaluate("execute", {"value": value}).verdict is Verdict.DENY

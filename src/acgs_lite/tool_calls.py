@@ -35,6 +35,7 @@ from typing import Any
 from acgs_lite.constitution import Constitution, Rule
 from acgs_lite.constitution.rule import ViolationAction
 from acgs_lite.engine import GovernanceEngine, ValidationResult
+from acgs_lite.engine.core import normalize_for_matching
 from acgs_lite.errors import ConstitutionalViolationError
 
 __all__ = [
@@ -115,6 +116,27 @@ def _render_scalar(value: Any) -> str:
     return " ".join(str(value).split())
 
 
+def _render_hidden_dropped(value: Any, rendered: str) -> str | None:
+    """
+    Return a second rendering of ``value`` when hidden characters change how it reads.
+
+    ``_render_scalar`` collapses whitespace with ``str.split``, which also treats control
+    characters such as vertical tab, form feed and the ``\\x1c``-``\\x1f`` separators as
+    whitespace. The engine does not: it drops them before matching. Collapsing first
+    therefore turns ``del<VT>ete`` into ``del ete`` and hides the word from the rules.
+    This renders the value with those characters dropped first, as the engine reads it,
+    and returns it only when it differs from what the engine sees in ``rendered``.
+    """
+    if value is None or isinstance(value, bool | int | float):
+        return None
+    dropped = " ".join(
+        normalize_for_matching(value if isinstance(value, str) else str(value)).split()
+    )
+    if dropped == normalize_for_matching(rendered):
+        return None
+    return dropped
+
+
 def _flatten(value: Any, path: str, depth: int) -> Iterator[tuple[str, Any]]:
     """Yield ``(dotted_path, leaf_value)`` pairs for nested mappings and sequences."""
     if depth > MAX_ARGUMENT_DEPTH:
@@ -142,7 +164,9 @@ def format_tool_call(tool_name: str, arguments: Any) -> str:
     Render a tool call as the text that ACGS keyword and pattern rules are matched against.
 
     The output has one ``path: value`` line per argument leaf, so argument names and values are
-    both visible to rules, and multi-line values are collapsed onto one line. Identifiers
+    both visible to rules, and multi-line values are collapsed onto one line. A value that
+    contains hidden control characters is rendered a second time with them dropped, so that
+    they can neither split a word nor join two. Identifiers
     (the tool name, argument names and single-token string values) that contain separators or
     camelCase are repeated in a trailing ``normalized:`` line as plain words, so that a rule
     keyword such as ``skip audit`` also matches a tool named ``skip_audit``.
@@ -171,6 +195,9 @@ def format_tool_call(tool_name: str, arguments: Any) -> str:
     for path, leaf in leaves:
         rendered = _render_scalar(leaf)
         lines.append(f"{path}: {rendered}")
+        hidden_dropped = _render_hidden_dropped(leaf, rendered)
+        if hidden_dropped is not None:
+            lines.append(f"{path}: {hidden_dropped}")
         identifiers.append(path)
         if (
             isinstance(leaf, str)

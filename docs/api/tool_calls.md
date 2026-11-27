@@ -60,6 +60,20 @@ values.
 `disableLogging` as plain words, so a keyword rule for `skip audit` matches
 both. Pass `tool_call_formatter=` to `ToolCallGovernor` to replace it.
 
+Whitespace in a value is collapsed to single spaces. A value that contains
+hidden control characters (vertical tab, form feed, the `\x1c`-`\x1f`
+separators, NEL and similar) is rendered twice: once with them treated as
+spaces, and once with them dropped, which is how the engine reads them. A rule
+that matches either reading applies, so such a character can neither split a
+keyword nor join two words to avoid one.
+
+## Limits
+
+- **Conditional rules are not applied.** `evaluate` passes no context to the
+  engine, so a rule with a `condition` (for example `{"env": "production"}`)
+  is skipped, whatever the arguments contain. Do not rely on conditional rules
+  for tool calls evaluated through this module.
+
 ## Reference
 
 ::: acgs_lite.tool_calls.ToolCallGovernor

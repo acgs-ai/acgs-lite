@@ -38,9 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `format_tool_call` renders a tool call as the text the rules are matched
   against. The code is the `_governance.py` module that the framework adapter
   packages each carried as a private copy, moved here together with its tests,
-  so adapters can import it instead. One change from the copies: the pattern
+  so adapters can import it instead. Two changes from the copies: the pattern
   that recognises identifier-like argument values is rewritten to match the
-  same strings without exponential backtracking. The module is not re-exported
+  same strings without exponential backtracking, and a value with hidden
+  control characters is also rendered with them dropped, so `del<VT>ete` can no
+  longer hide `delete` from a keyword rule. Conditional rules are not applied,
+  because no context is passed to the engine. The module is not re-exported
   from the top-level `acgs_lite` package. See
   [Tool-Call Governance](https://github.com/acgs-ai/acgs-lite/blob/main/docs/api/tool_calls.md).
 
