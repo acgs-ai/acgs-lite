@@ -61,7 +61,10 @@ _REVIEW_ACTIONS = frozenset({ViolationAction.REQUIRE_HUMAN_REVIEW, ViolationActi
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _SEPARATORS = re.compile(r"[\s_\-./:\[\]]+")
-_IDENTIFIER_VALUE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+|[A-Z][a-z0-9]+)+$")
+# Matches the same strings as the adapters' original pattern
+# ``^[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+|[A-Z][a-z0-9]+)+$``, whose repeated
+# alternation backtracked exponentially. Here the two branches cannot overlap.
+_IDENTIFIER_VALUE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:(?:[_-][A-Za-z0-9]+)+|[A-Z][a-z0-9]+)$")
 _MAX_IDENTIFIER_VALUE_LENGTH = 64
 
 

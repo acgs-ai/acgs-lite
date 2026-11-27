@@ -37,8 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fail-closed: an `Exception` while formatting or validating gives `DENY`.
   `format_tool_call` renders a tool call as the text the rules are matched
   against. The code is the `_governance.py` module that the framework adapter
-  packages each carried as a private copy, moved here unchanged together with
-  its tests, so adapters can import it instead. The module is not re-exported
+  packages each carried as a private copy, moved here together with its tests,
+  so adapters can import it instead. One change from the copies: the pattern
+  that recognises identifier-like argument values is rewritten to match the
+  same strings without exponential backtracking. The module is not re-exported
   from the top-level `acgs_lite` package. See
   [Tool-Call Governance](https://github.com/acgs-ai/acgs-lite/blob/main/docs/api/tool_calls.md).
 

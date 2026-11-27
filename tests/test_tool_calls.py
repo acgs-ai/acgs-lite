@@ -6,7 +6,10 @@ Ported unchanged from the adapter packages' tests for their private
 
 from __future__ import annotations
 
+import itertools
 import logging
+import re
+import time
 from typing import Any
 
 import pytest
@@ -322,3 +325,43 @@ class TestFailClosed:
         decision = governor.evaluate("t", {})
         assert decision.verdict is Verdict.DENY
         assert decision.rule_ids == ("unknown",)
+
+
+# ── Identifier pattern (not in the adapter tests) ────────────────────────────
+
+_ORIGINAL_IDENTIFIER_VALUE = re.compile(
+    r"^[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+|[A-Z][a-z0-9]+)+$"
+)
+
+
+def test_identifier_pattern_matches_the_same_strings_as_the_original() -> None:
+    from acgs_lite.tool_calls import _IDENTIFIER_VALUE
+
+    differences = [
+        candidate
+        for length in range(7)
+        for candidate in map("".join, itertools.product("aA0-_!", repeat=length))
+        if bool(_IDENTIFIER_VALUE.match(candidate))
+        != bool(_ORIGINAL_IDENTIFIER_VALUE.match(candidate))
+    ]
+    assert differences == []
+
+
+def test_identifier_pattern_does_not_backtrack_exponentially() -> None:
+    from acgs_lite.tool_calls import _IDENTIFIER_VALUE
+
+    # The original pattern roughly doubles its time with every repetition and
+    # needs several seconds for this input.
+    hostile = "A-" + "0A0-" * 25
+    started = time.perf_counter()
+    assert _IDENTIFIER_VALUE.match(hostile) is None
+    assert time.perf_counter() - started < 1.0
+
+
+def test_many_hostile_argument_values_are_evaluated_quickly() -> None:
+    governor = ToolCallGovernor(_constitution(BLOCK), agent_id="agent")
+    hostile = ("A-" + "0A0-" * 15)[:64]
+    started = time.perf_counter()
+    decision = governor.evaluate("tool", {f"k{index}": hostile for index in range(500)})
+    assert decision.verdict is Verdict.ALLOW
+    assert time.perf_counter() - started < 2.0
