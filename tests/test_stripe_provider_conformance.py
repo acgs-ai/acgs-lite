@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+import sys
 import urllib.request
 from pathlib import Path
 
 import pytest
 
-from acgs_lite import Constitution, GovernanceEngine, Rule, Severity
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from acgs_lite import Constitution, GovernanceEngine, Rule, Severity  # noqa: E402
 from acgs_lite.legitimacy import (
     ContractedEffectStore,
     Ed25519ReceiptSigner,
