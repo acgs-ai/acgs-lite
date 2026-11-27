@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-11-27
+
+### Added
+
+- Zero-config `acgs demo [--json]` CLI command running 5 offline governance
+  and effect scenarios (ALLOW + signed receipts with offline public-key
+  verification, at-most-once retry & `UNKNOWN` reconciliation, DENY before
+  side-effect dispatch, missing/denied receipt refusal, and MACI
+  `proposer != validator != executor` separation).
+- Stripe-compatible `FENCEABLE` reference provider and conformance suite under
+  `examples/stripe_fenceable_provider/` (`StripePaymentIntentProvider`,
+  `InMemoryStripeSandbox`, fail-closed `LiveStripeTestTransport`, and
+  `run_conformance_suite`).
+
 ### Security
 
 - `create_governance_app` now applies the `X-API-Key` check to the OpenShell

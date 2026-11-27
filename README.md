@@ -1,5 +1,7 @@
 # ACGS-Lite: Constitutional Governance Membrane for Agent Execution
 
+<!-- mcp-name: io.github.acgs-ai/acgs-lite -->
+
 [![PyPI](https://img.shields.io/pypi/v/acgs-lite?color=blue&style=for-the-badge)](https://pypi.org/project/acgs-lite/)
 [![Python](https://img.shields.io/pypi/pyversions/acgs-lite?style=for-the-badge)](https://pypi.org/project/acgs-lite/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-green.svg?style=for-the-badge)](https://www.apache.org/licenses/LICENSE-2.0)
@@ -23,7 +25,7 @@ LLM reasoning → constitutional check → decision receipt → governed executi
 
 ### Current status & non-claims
 
-- **Package:** `acgs-lite` on PyPI. This README describes 4.0.0. Apache-2.0. Beta.
+- **Package:** `acgs-lite` on PyPI. This README describes 4.1.0. Apache-2.0. Beta.
 - **4.0.0 hardening:** the production execution-grant, trusted-context,
   durable-audit, and recovery contracts described below first ship in 4.0.0, a
   breaking release. They are not present in the v3.0.1 wheel. See the
@@ -39,7 +41,7 @@ LLM reasoning → constitutional check → decision receipt → governed executi
 
 ### Minimal quickstart
 
-Works after `pip install acgs-lite==4.0.0`. Default engine is fail-closed: the
+Works after `pip install acgs-lite==4.1.0`. Default engine is fail-closed: the
 last line **raises**.
 
 <!-- doc-test: published-engine-check -->
@@ -239,6 +241,9 @@ supported-version, scope, and disclosure-window policy is in
 
 **After `pip install` (no clone):**
 
+- **Zero-config interactive CLI demo** — `acgs demo` (5 offline scenarios covering
+  signed decision/outcome receipts, `UNKNOWN` reconciliation, fail-closed refusals,
+  and MACI role separation; use `pip install "acgs-lite[crypto]"` for Ed25519 signing)
 - **Minimal fail-closed check** — the snippet above
 - **5-minute membrane** — [docs/guides/five-minute-membrane.md](https://github.com/acgs-ai/acgs-lite/blob/v4.0.0/docs/guides/five-minute-membrane.md)
   (ALLOW / TRANSFORM / DENY / missing-receipt refusal + audit chain)
@@ -358,7 +363,7 @@ TASK: Install and verify ACGS-Lite constitutional AI governance.
 
 STEPS:
 1. Install the package:
-   pip install acgs-lite==4.0.0
+   pip install acgs-lite==4.1.0
 
 2. Pip-only proof (no clone). Paste and run the minimal README snippet.
    The last line must raise ConstitutionalViolationError for "wire transfer $1000".
