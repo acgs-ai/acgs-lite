@@ -9,9 +9,11 @@ Constitutional Hash: 608508a9bd224290
 from __future__ import annotations
 
 import time
+from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from itertools import islice
 from operator import itemgetter
 from typing import Any
 
@@ -279,9 +281,10 @@ class GovernanceSession:
             deny_threshold: Deny rate above which an anomaly is flagged (0.0-1.0).
         """
         self.agent_id = agent_id
-        self._max_history = max_history
+        limit = max(0, max_history)
+        self._max_history = limit
         self._deny_threshold = deny_threshold
-        self._decisions: list[dict[str, Any]] = []
+        self._decisions: deque[dict[str, Any]] = deque(maxlen=limit)
 
     def record(
         self,
@@ -307,8 +310,6 @@ class GovernanceSession:
             "timestamp_ns": time.monotonic_ns(),
         }
         self._decisions.append(entry)
-        if len(self._decisions) > self._max_history:
-            self._decisions = self._decisions[-self._max_history :]
 
     def analyze(self) -> dict[str, Any]:
         """Analyze the session for patterns and anomalies.
@@ -359,7 +360,9 @@ class GovernanceSession:
             anomalies.append(
                 f"High deny rate: {deny_rate:.1%} exceeds threshold {self._deny_threshold:.1%}"
             )
-        if total >= 10 and all(d["decision"] == "deny" for d in self._decisions[-5:]):
+        if total >= 10 and all(
+            d["decision"] == "deny" for d in islice(reversed(self._decisions), 5)
+        ):
             anomalies.append(
                 "5 consecutive denials detected — possible policy conflict or rogue agent"
             )
@@ -535,8 +538,9 @@ class AuditLedger:
     __slots__ = ("_entries", "_max_entries")
 
     def __init__(self, *, max_entries: int = 10000) -> None:
-        self._entries: list[AuditEntry] = []
-        self._max_entries = max_entries
+        limit = max(0, max_entries)
+        self._entries: deque[AuditEntry] = deque(maxlen=limit)
+        self._max_entries = limit
 
     def record(
         self,
@@ -574,8 +578,6 @@ class AuditLedger:
             workflow_action=workflow_action,
         )
         self._entries.append(entry)
-        if len(self._entries) > self._max_entries:
-            self._entries = self._entries[-self._max_entries :]
         return entry
 
     def query(
@@ -1186,7 +1188,10 @@ class GovernanceForecaster:
 
     max_windows: int = 100  # rolling history limit
 
-    _windows: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
+    _windows: deque[dict[str, Any]] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._windows = deque(maxlen=max(0, self.max_windows))
 
     # ------------------------------------------------------------------
     # Data ingestion
@@ -1231,11 +1236,10 @@ class GovernanceForecaster:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             **(metadata or {}),
         }
+        target_maxlen = max(0, self.max_windows)
+        if self._windows.maxlen != target_maxlen:
+            self._windows = deque(self._windows, maxlen=target_maxlen)
         self._windows.append(window)
-
-        # Trim rolling history
-        if len(self._windows) > self.max_windows:
-            self._windows = self._windows[-self.max_windows :]
 
         return {
             "deny_rate": deny_rate,

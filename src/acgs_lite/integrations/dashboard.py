@@ -29,10 +29,11 @@ Usage::
 from __future__ import annotations
 
 import json
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from itertools import islice
 from typing import Any
 
 from acgs_lite.audit import AuditLog
@@ -92,8 +93,9 @@ class ViolationTimeline:
     __slots__ = ("_entries", "_max_entries")
 
     def __init__(self, *, max_entries: int = 1000) -> None:
-        self._entries: list[dict[str, Any]] = []
-        self._max_entries = max_entries
+        limit = max(0, max_entries)
+        self._entries: deque[dict[str, Any]] = deque(maxlen=limit)
+        self._max_entries = limit
 
     def record(
         self,
@@ -117,8 +119,6 @@ class ViolationTimeline:
             "timestamp": ts,
         }
         self._entries.append(entry)
-        if len(self._entries) > self._max_entries:
-            self._entries = self._entries[-self._max_entries :]
 
     def record_from_result(self, result: ValidationResult) -> None:
         """Bulk-record all violations from a ValidationResult."""
@@ -132,7 +132,13 @@ class ViolationTimeline:
         """Return chronological violation entries."""
         if last_n is None:
             return list(self._entries)
-        return list(self._entries[-last_n:])
+        if last_n <= 0:
+            return []
+        if last_n >= len(self._entries):
+            return list(self._entries)
+        recent = list(islice(reversed(self._entries), last_n))
+        recent.reverse()
+        return recent
 
     def get_by_severity(self, severity: str) -> list[dict[str, Any]]:
         """Filter entries by severity level."""

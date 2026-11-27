@@ -9,6 +9,7 @@ Constitutional Hash: 608508a9bd224290
 from __future__ import annotations
 
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -170,8 +171,9 @@ class GovernanceChangelog:
     __slots__ = ("_entries", "_max_entries")
 
     def __init__(self, *, max_entries: int = 10_000) -> None:
-        self._entries: list[ChangelogEntry] = []
-        self._max_entries = max_entries
+        limit = max(0, max_entries)
+        self._entries: deque[ChangelogEntry] = deque(maxlen=limit)
+        self._max_entries = limit
 
     def record(
         self,
@@ -210,8 +212,6 @@ class GovernanceChangelog:
             constitution_hash_after=constitution_hash_after,
         )
         self._entries.append(entry)
-        if len(self._entries) > self._max_entries:
-            self._entries = self._entries[-self._max_entries :]
         return entry
 
     def query(

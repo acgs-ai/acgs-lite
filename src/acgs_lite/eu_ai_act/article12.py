@@ -36,6 +36,7 @@ import json
 import logging
 import time
 import uuid
+from collections import deque
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -144,8 +145,9 @@ class Article12Logger:
         self.tenant_id = tenant_id
         self.rule_version = rule_version
         self.max_records = max_records
-        self._records: list[Article12Record] = []
-        self._chain_hashes: list[str] = []
+        limit = max(0, max_records)
+        self._records: deque[Article12Record] = deque(maxlen=limit)
+        self._chain_hashes: deque[str] = deque(maxlen=limit)
 
     def log_call(
         self,
@@ -236,29 +238,30 @@ class Article12Logger:
 
     def _append(self, record: Article12Record) -> None:
         """Append a record and update the chain hash."""
+        limit = max(0, self.max_records)
+        if self._records.maxlen != limit:
+            self._records = deque(self._records, maxlen=limit)
+            self._chain_hashes = deque(self._chain_hashes, maxlen=limit)
         chain_input = f"{record.prev_record_hash}|{record.record_hash}"
         chain_hash = hashlib.sha256(chain_input.encode()).hexdigest()[:16]
         self._records.append(record)
         self._chain_hashes.append(chain_hash)
-
-        # Trim old records if over limit (keep most recent)
-        if len(self._records) > self.max_records:
-            self._records = self._records[-self.max_records :]
-            self._chain_hashes = self._chain_hashes[-self.max_records :]
 
     def verify_chain(self) -> bool:
         """Verify the tamper-evident chain integrity.
 
         Returns True if no records have been modified since creation.
         """
+        if len(self._records) != len(self._chain_hashes):
+            return False
         if not self._records:
             return True
 
-        for i, record in enumerate(self._records):
+        for record, expected_hash in zip(self._records, self._chain_hashes, strict=True):
             prev_hash = record.prev_record_hash
             chain_input = f"{prev_hash}|{record.record_hash}"
             expected = hashlib.sha256(chain_input.encode()).hexdigest()[:16]
-            if expected != self._chain_hashes[i]:
+            if expected != expected_hash:
                 return False
 
         return True
