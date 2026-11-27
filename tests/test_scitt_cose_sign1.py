@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -377,16 +378,60 @@ def test_verify_scitt_fails_closed_on_tampering_aad_and_untrusted_keys() -> None
     assert res_crit.valid is False
     assert any("critical COSE header" in err for err in res_crit.errors)
 
-    # Deeply nested JSON triggering RecursionError on json.loads fails closed without raising
+    # Deeply nested JSON triggering RecursionError on 3.10/3.11 (or accepted cleanly on 3.12+)
+    json_prot = _cbor_encode(
+        {
+            COSE_HEADER_ALG: COSE_ALG_EDDSA,
+            COSE_HEADER_CONTENT_TYPE: MEDIA_TYPE_JSON,
+            COSE_HEADER_KID: b"k1",
+        }
+    )
     nested_payload = b'{"deep":' + (b"[" * 2500) + b"1" + (b"]" * 2500) + b"}"
     nested_sig = bytes.fromhex(
-        signer.sign(_cbor_encode(["Signature1", prot_bstr, b"", nested_payload]))
+        signer.sign(_cbor_encode(["Signature1", json_prot, b"", nested_payload]))
     )
-    nested_cose = _cbor_encode(_CborTag(18, [prot_bstr, {}, nested_payload, nested_sig]))
+    nested_cose = _cbor_encode(_CborTag(18, [json_prot, {}, nested_payload, nested_sig]))
     res_nested = verify_scitt_cose_sign1(nested_cose, {"k1": signer.public_key_hex()})
     assert isinstance(res_nested.valid, bool)
     if not res_nested.valid:
         assert any("JSON" in err for err in res_nested.errors)
+
+    # Outer SCITT signature over a bundle with recomputed bundle_digest still rejects forged inner receipts
+    bundle_forged_unsigned: dict[str, Any] = {
+        "schema_version": "acgs-compliance-bundle-v1",
+        "profile": PROFILE_CA_ADMT_2027,
+        "system_id": "forged-bundle",
+        "generated_at": "2026-11-27T12:00:00Z",
+        "self_assessment_notice": (
+            "Cryptographically verifiable runtime decision/outcome record bundle; "
+            "not legal advice or third-party regulatory certification."
+        ),
+        "decisions": [{"signed_receipt": null_pk_dict}],
+        "adverse_decisions": [],
+        "outcomes": [],
+        "oversight": {},
+        "section_digests": {},
+    }
+    forged_digest = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(bundle_forged_unsigned, sort_keys=True, separators=(",", ":")).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+    )
+    bundle_forged = {**bundle_forged_unsigned, "bundle_digest": forged_digest}
+    forged_bundle_env = export_scitt_cose_sign1(
+        bundle_forged,
+        signer,
+        content_type=MEDIA_TYPE_COMPLIANCE_BUNDLE,
+    )
+    res_forged_bundle = verify_scitt_cose_sign1(
+        forged_bundle_env.cose_bytes,
+        {"k1": signer.public_key_hex()},
+    )
+    assert res_forged_bundle.valid is False
+    assert any("ComplianceReceiptBundle" in err for err in res_forged_bundle.errors)
 
 
 def test_export_scitt_fail_closed_validation(tmp_path: Path) -> None:

@@ -19,14 +19,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import hmac
 import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from acgs_lite.compliance.receipt_bundle import ComplianceReceiptBundle
+from acgs_lite.compliance.receipt_bundle import ComplianceReceiptBundle, verify_receipt_bundle
 from acgs_lite.legitimacy.outcome import SignedOutcomeReceipt
 from acgs_lite.legitimacy.signing import (
     SIGNATURE_ALGORITHM,
@@ -483,6 +482,7 @@ def _fail_result(
 def _verify_embedded_payload(
     content_type: str,
     payload_obj: dict[str, Any],
+    trusted_verifiers: Mapping[str, str],
 ) -> str | None:
     if content_type == MEDIA_TYPE_DECISION_RECEIPT:
         try:
@@ -509,20 +509,14 @@ def _verify_embedded_payload(
         return None
 
     if content_type == MEDIA_TYPE_COMPLIANCE_BUNDLE:
-        digest = payload_obj.get("bundle_digest")
-        if (
-            not isinstance(digest, str)
-            or not digest.startswith("sha256:")
-            or _HEX64_RE.fullmatch(digest[7:]) is None
-        ):
-            return "embedded ComplianceReceiptBundle missing valid bundle_digest"
-        try:
-            unsigned = {k: v for k, v in payload_obj.items() if k != "bundle_digest"}
-            expected = "sha256:" + hashlib.sha256(_canonical_json_bytes(unsigned)).hexdigest()
-        except (TypeError, ValueError, RecursionError) as exc:
-            return f"embedded ComplianceReceiptBundle canonical JSON error: {exc}"
-        if not hmac.compare_digest(expected.encode("ascii"), digest.lower().encode("ascii")):
-            return "embedded ComplianceReceiptBundle bundle_digest mismatch"
+        bundle_verification = verify_receipt_bundle(
+            payload_obj,
+            trusted_public_keys=trusted_verifiers,
+        )
+        if not bundle_verification.valid:
+            return "embedded ComplianceReceiptBundle failed verification: " + "; ".join(
+                bundle_verification.reasons
+            )
     return None
 
 
@@ -694,7 +688,9 @@ def verify_scitt_cose_sign1(
         else:
             parsed_payload = decoded_json
             if content_type is not None:
-                embedded_err = _verify_embedded_payload(content_type, parsed_payload)
+                embedded_err = _verify_embedded_payload(
+                    content_type, parsed_payload, trusted_verifiers
+                )
                 if embedded_err is not None:
                     errors.append(embedded_err)
 
