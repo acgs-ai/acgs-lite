@@ -512,7 +512,7 @@ def run_demo_suite() -> dict[str, Any]:
     }
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the demo subcommand."""
     p = sub.add_parser(
         "demo",
