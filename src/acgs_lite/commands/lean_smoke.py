@@ -14,7 +14,7 @@ import sys
 from acgs_lite.lean_verify import run_lean_runtime_smoke_check
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the lean-smoke subcommand."""
     p = sub.add_parser(
         "lean-smoke",

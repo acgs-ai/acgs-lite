@@ -29,7 +29,7 @@ _LIFECYCLE_ACTIONS = {
 }
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the lifecycle subcommand."""
     p = sub.add_parser(
         "lifecycle", help="Manage policy promotion lifecycle (draft→review→staged→active)"

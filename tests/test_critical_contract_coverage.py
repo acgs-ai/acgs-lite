@@ -7,26 +7,14 @@ DelegationGrant, DelegationRegistry.
 
 from __future__ import annotations
 
-import importlib.util
 import re
-import sys
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
 from acgs_lite.errors import MACIViolationError
-
-_LEGACY_NAME = "acgs_lite._legacy_maci_contract"
-_LEGACY_PATH = Path(__file__).resolve().parents[1] / "src" / "acgs_lite" / "maci.py"
-_LEGACY_SPEC = importlib.util.spec_from_file_location(_LEGACY_NAME, _LEGACY_PATH)
-assert _LEGACY_SPEC is not None and _LEGACY_SPEC.loader is not None
-_LEGACY_MODULE = importlib.util.module_from_spec(_LEGACY_SPEC)
-sys.modules[_LEGACY_NAME] = _LEGACY_MODULE
-_LEGACY_SPEC.loader.exec_module(_LEGACY_MODULE)
-
-from acgs_lite._legacy_maci_contract import (
+from acgs_lite.maci import (
     ActionRiskTier,
     DelegationGrant,
     DelegationRegistry,

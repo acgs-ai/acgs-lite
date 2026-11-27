@@ -179,7 +179,7 @@ class ACGSGovernedDataset(_StreamingDatasetBase):  # type: ignore[misc,valid-typ
         return self._samples_filtered
 
     @property
-    def audit_entries(self) -> list:
+    def audit_entries(self) -> list[Any]:
         """All audit log entries recorded during this dataset lifetime."""
         return self._audit_log.entries
 

@@ -11,6 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 
+from acgs_lite._compat import constant_time_compare
 from acgs_lite._meta import CONSTITUTIONAL_HASH
 
 _SUPPORTED_RULES = ["ACGS-001", "ACGS-002", "ACGS-003"]
@@ -41,7 +42,7 @@ def _require_federation_auth(
         return
 
     expected_value = f"Bearer {expected_token}"
-    if authorization != expected_value:
+    if authorization is None or not constant_time_compare(authorization, expected_value):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized federation request",

@@ -41,6 +41,8 @@ except ImportError:
 
 import yaml
 
+from acgs_lite._compat import constant_time_compare
+
 try:
     from fastapi import APIRouter, HTTPException, Request, Response
 except ImportError as _exc:
@@ -205,7 +207,7 @@ def _verify_hmac(body: bytes, signature: str) -> None:
     """Verify HMAC-SHA256 signature of the raw request body."""
     secret = _get_signing_secret()
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, signature):
+    if not constant_time_compare(expected, signature):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
 

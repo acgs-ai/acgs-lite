@@ -43,7 +43,9 @@ impl Decision {
             Decision::Deny { violations, .. } => {
                 let mut bitmask: u128 = 0;
                 for v in violations {
-                    bitmask |= 1u128 << v.rule_idx;
+                    if v.rule_idx < 128 {
+                        bitmask |= 1u128 << v.rule_idx;
+                    }
                 }
                 // The PyO3 legacy tuple still exposes an i64 here for backward
                 // compatibility. Bits above 63 truncate at this boundary, while

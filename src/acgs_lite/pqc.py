@@ -8,6 +8,8 @@ from __future__ import annotations
 import hmac
 from typing import Protocol
 
+from acgs_lite._compat import constant_time_compare
+
 
 class PQCSigner(Protocol):
     def sign(self, data: bytes) -> str: ...
@@ -21,7 +23,7 @@ class InMemoryPQCSigner:
 
     def verify(self, data: bytes, sig: str) -> bool:
         expected = self.sign(data)
-        return hmac.compare_digest(expected, sig)
+        return constant_time_compare(expected, sig)
 
 
 try:
@@ -42,8 +44,8 @@ else:
 
         def sign(self, data: bytes) -> str:
             with _OQSSignature(self._algorithm, secret_key=self._secret_key) as signer:
-                return signer.sign(data).hex()
+                return str(signer.sign(data).hex())
 
         def verify(self, data: bytes, sig: str) -> bool:
             with _OQSSignature(self._algorithm) as verifier:
-                return verifier.verify(data, bytes.fromhex(sig), self._public_key)
+                return bool(verifier.verify(data, bytes.fromhex(sig), self._public_key))

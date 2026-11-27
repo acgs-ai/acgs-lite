@@ -1,115 +1,99 @@
-# ACGS-2 Governance Engine (Rust/PyO3)
+# ACGS-Lite Governance Engine (Rust Workspace)
 
 ## Overview
 
-This is the high-performance governance validation engine for ACGS-2, implemented in Rust as a PyO3 native extension for IP protection and maximum throughput.
+Optional high-performance Rust workspace for ACGS-Lite governance validation.
+The pure-Rust core crate (`acgs-validator-core`) has zero FFI dependencies and
+powers the PyO3 Python companion (`acgs_lite_rust`), the WASM binding
+(`acgs-validator-wasm`), and the SpacetimeDB reducer module.
 
 **Constitutional Hash:** `608508a9bd224290`
 
-## Modules
+## Workspace Members
+
+| Member | Crate | Purpose |
+|--------|-------|---------|
+| `core/` | `acgs-validator-core` | Pure-Rust Aho-Corasick + regex hot-path validator, context matching, and constitutional hashing |
+| `pyo3/` | `acgs_lite_rust` | PyO3 abi3 Python companion wheel built with `maturin` |
+| `wasm/` | `acgs-validator-wasm` | `wasm-bindgen` binding for edge runtimes (Cloudflare Workers) |
+| `spacetime_governance/` | `spacetime-governance` | SpacetimeDB MACI governance tables and reducers |
+
+### Core Modules (`rust/core/src/`)
 
 | Module | Purpose |
 |--------|---------|
-| `validator.rs` | Core governance validation engine with hot/full validation paths |
-| `severity.rs` | Severity levels (ALLOW, DENY, DENY_CRITICAL) and classification |
-| `verbs.rs` | Verb-based rule matching and action verification |
-| `result.rs` | Validation result types and response structures |
-| `context.rs` | Constitutional context and scope handling |
-| `hash.rs` | Constitutional hash verification (SHA256) |
+| `validator.rs` | Core governance validation engine (`validate_hot`, `validate_hot_u128`, `validate_full`, `validate`) |
+| `severity.rs` | Severity levels (`Critical`, `High`, `Medium`, `Low`) and decision codes (`ALLOW`, `DENY_CRITICAL`, `DENY`) |
+| `verbs.rs` | Positive/negative verb and security-keyword detection (mirrors Python `constitution`) |
+| `result.rs` | Validation result types (`Decision`, `Violation`, `ValidationResult`, `ViolationRecord`) |
+| `context.rs` | `action_detail` / `action_description` context matching with UTF-8 safe truncation |
+| `hash.rs` | Streaming SHA-256 constitutional hash computation |
 
 ## Build
 
-Build the extension in release mode:
+Build the PyO3 companion wheel in release mode from the repository root:
 
 ```bash
-cd packages/acgs-lite/rust
-maturin build --release
+maturin build --release --locked --manifest-path rust/pyo3/Cargo.toml --out dist/rust-wheels
+pip install dist/rust-wheels/acgs_lite_rust-*.whl
 ```
 
-The compiled wheel is placed in `target/wheels/`.
+## Testing & Linting
 
-## Installation
-
-Install the compiled wheel:
+Run Rust unit tests and clippy checks from `rust/`:
 
 ```bash
-pip install target/wheels/acgs_lite_rust-*.whl
+cd rust
+cargo test --locked -p acgs-validator-core
+cargo clippy --locked -p acgs-validator-core -p acgs_lite_rust -p acgs-validator-wasm --all-targets -- -D warnings
+cargo fmt --check
 ```
 
-Or during development with editable install:
+Run Python integration tests against the installed wheel from the repository root:
 
 ```bash
-pip install -e .
+python -m pytest tests/test_coverage_rust_ext.py tests/test_coverage_engine_extra.py -v
 ```
 
-## Testing
+## Python Companion API
 
-Run Rust unit tests:
-
-```bash
-cd packages/acgs-lite/rust
-cargo test
-```
-
-Run integration tests from Python:
-
-```bash
-python -m pytest tests/core/shared/test_governance_engine.py -v
-```
-
-## Python API
-
-### GovernanceValidator
-
-Main class for governance validation.
+`acgs_lite.engine.GovernanceEngine` automatically uses `acgs_lite_rust` when installed
+(for constitutions with up to 63 active rules on the legacy `i64` hot-path ABI). Direct usage:
 
 ```python
-from acgs_lite_rust import GovernanceValidator, ALLOW, DENY, DENY_CRITICAL
+from acgs_lite_rust import ALLOW, DENY, DENY_CRITICAL, GovernanceValidator
 
-validator = GovernanceValidator()
+# Decision code constants:
+# ALLOW = 0          — action passes governance checks
+# DENY_CRITICAL = 1  — critical violation under strict mode (data = rule_idx)
+# DENY = 2           — one or more violations matched (data = fired rule bitmask)
 
-# Fast path validation (hot)
-result = validator.validate_hot(
-    content="user message",
-    context={"policy_id": "pol_123"}
+validator = GovernanceValidator(
+    kw_to_idxs={"bypass": [(0, True)]},
+    anchor_dispatch_py=[],
+    no_anchor_pats_py=[],
+    rule_data_py=[("SEC-001", "Do not bypass controls", "high", "security", False)],
+    positive_verbs_py=["run", "audit", "verify"],
+    strict=True,
+    context_rules_py=[],
+    const_hash="608508a9bd224290",
 )
 
-# Full validation with all checks
-result = validator.validate_full(
-    content="user message",
-    context={"policy_id": "pol_123", "user_role": "admin"}
-)
-
-# Result contains:
-# - severity: ALLOW, DENY, or DENY_CRITICAL
-# - matched_rules: list of rule IDs that matched
-# - reasoning: explanation of decision
-```
-
-### Severity Constants
-
-```python
-from acgs_lite_rust import ALLOW, DENY, DENY_CRITICAL
-
-# ALLOW (0) — Message passes governance checks
-# DENY (1) — Message violates policy but recoverable
-# DENY_CRITICAL (2) — Message violates critical governance rule
+decision, data = validator.validate_hot("bypass safety controls")
+assert decision == DENY and data == 0b1
+# For constitutions with 64..127 rules, use validate_hot_u128() to avoid i64 truncation:
+decision_u128, mask_u128 = validator.validate_hot_u128("bypass safety controls")
+assert decision_u128 == DENY and mask_u128 == 0b1
 ```
 
 ## Fallback Behavior
 
-When the Rust extension is not available (build failure, Python version mismatch), the system falls back to the pure Python implementation in `packages/acgs-lite/src/acgs_lite/engine/core.py`. The Python fallback aims to maintain feature parity with the Rust version (see tests for covered surface).
+When `acgs_lite_rust` is not installed (or when a rule uses regex constructs unsupported
+by Rust's `regex` crate such as look-around/backreferences, or when non-ASCII normalization
+is required), `src/acgs_lite/engine/core.py` transparently falls back to the pure-Python
+matcher.
 
-## Performance
+## Build Configuration
 
-Indicative targets:
-- Hot path (fast validation): <0.5ms P99
-- Full path (complete validation): <2ms P99
-- Throughput: >5000 validations/sec
-
-## Development Notes
-
-- **PyO3 version**: 0.23 with abi3 (stable ABI) for Python 3.8+
-- **Optimization level**: 3 (O3) with LTO and single codegen unit
-- **Panic mode**: abort (prevents unwinding into Python)
-- **Note**: Candle ML dependencies currently disabled (exp81 rebuild pending)
+- **PyO3 version**: `0.29` with `abi3-py38` stable ABI
+- **Release profile**: `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`, `panic = "abort"`

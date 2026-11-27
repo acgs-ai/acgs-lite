@@ -53,12 +53,10 @@ pub fn process_context(
                 continue;
             }
             if matches_with_signals(rule, &val_lower, has_neg, has_pos) {
-                // Safe UTF-8 truncation: byte-slice at char boundary to avoid panic
-                let matched_content = if value.chars().count() > 100 {
-                    let truncated: String = value.chars().take(100).collect();
-                    format!("context[{}]: {}...", key, truncated)
-                } else {
-                    format!("context[{}]: {}", key, value)
+                // Safe UTF-8 truncation in O(min(len, 100)) without an extra String alloc.
+                let matched_content = match value.char_indices().nth(100) {
+                    Some((byte_idx, _)) => format!("context[{}]: {}...", key, &value[..byte_idx]),
+                    None => format!("context[{}]: {}", key, value),
                 };
                 violations.push(Violation {
                     rule_idx: 0, // context violations don't have a rule_idx in the _rule_data sense
@@ -147,5 +145,43 @@ mod tests {
         let v = process_context(&pairs, &rules);
         // "implement" is positive, but "self-approve" contains negative → flagged
         assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn test_security_keyword_overrides_positive_verb_in_context() {
+        let rules = vec![make_rule(&["password"], &[])];
+        let pairs = vec![(
+            "action_detail".into(),
+            "share password with external team".into(),
+        )];
+        let v = process_context(&pairs, &rules);
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn test_perform_positive_verb_in_context() {
+        let rules = vec![make_rule(&["production access"], &[])];
+        let pairs = vec![(
+            "action_detail".into(),
+            "perform production access now".into(),
+        )];
+        let v = process_context(&pairs, &rules);
+        // "perform" is a positive verb (Python parity) and keyword has no negative -> skipped
+        assert_eq!(v.len(), 0);
+    }
+
+    #[test]
+    fn test_multibyte_utf8_context_truncation() {
+        let rules = vec![make_rule(&["bypass"], &[])];
+        let long_utf8 = format!("bypass {}", "é".repeat(120));
+        let pairs = vec![("action_detail".into(), long_utf8)];
+        let v = process_context(&pairs, &rules);
+        assert_eq!(v.len(), 1);
+        assert!(v[0]
+            .matched_content
+            .starts_with("context[action_detail]: bypass "));
+        assert!(v[0].matched_content.ends_with("..."));
+        // Prefix "context[action_detail]: " (24 chars) + 100 chars + "..." (3 chars)
+        assert_eq!(v[0].matched_content.chars().count(), 24 + 100 + 3);
     }
 }

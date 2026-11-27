@@ -447,7 +447,10 @@ def _as_dict(payload: Any) -> dict[str, Any]:
     if isinstance(payload, (bytes, bytearray)):
         payload = payload.decode("utf-8")
     if isinstance(payload, str):
-        return json.loads(payload)
+        decoded = json.loads(payload)
+        if isinstance(decoded, dict):
+            return decoded
+        raise TypeError(f"Unexpected JSONB payload type: {type(decoded).__name__}")
     if isinstance(payload, dict):
         return payload
     raise TypeError(f"Unexpected JSONB payload type: {type(payload).__name__}")

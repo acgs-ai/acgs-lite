@@ -236,7 +236,7 @@ class GovernedLitAPI(_LitAPIBase):  # type: ignore[misc,valid-type]
     # ------------------------------------------------------------------
 
     @property
-    def audit_entries(self) -> list:
+    def audit_entries(self) -> list[Any]:
         """Audit entries recorded during this worker lifetime."""
         if self._audit_log is None:
             return []

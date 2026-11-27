@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the lint subcommand."""
     p = sub.add_parser("lint", help="Lint governance rules for quality issues")
     p.add_argument(

@@ -22,12 +22,12 @@ scheme that could not honestly back a non-repudiation claim (fail closed).
 from __future__ import annotations
 
 import hashlib
-import hmac
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
+from acgs_lite._compat import constant_time_compare
 from acgs_lite.legitimacy.receipt import (
     RECEIPT_SCHEMA_V2,
     V2_EXTENSION_KEYS,
@@ -121,7 +121,7 @@ class Ed25519ReceiptSigner:
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
         )
-        self._public_key_hex = public_bytes.hex()
+        self._public_key_hex: str = str(public_bytes.hex())
         # Default key id is a stable fingerprint of the public key.
         self.key_id = key_id or hashlib.sha256(public_bytes).hexdigest()[:16]
         self.ephemeral = False
@@ -150,7 +150,7 @@ class Ed25519ReceiptSigner:
         return self._public_key_hex
 
     def sign(self, message: bytes) -> str:
-        return self._private_key.sign(message).hex()
+        return str(self._private_key.sign(message).hex())
 
     def sign_receipt(self, receipt: DecisionReceipt) -> SignedReceipt:
         return sign_receipt(receipt, self)
@@ -205,7 +205,7 @@ class SignedReceipt:
         AND the hash and signature both check out. For the unpinned self-consistency
         check use :meth:`verify_integrity` -- but never treat it as authenticity.
         """
-        if not hmac.compare_digest(expected_public_key, self.public_key):
+        if not constant_time_compare(expected_public_key, self.public_key):
             return False
         return self.verify_integrity()
 

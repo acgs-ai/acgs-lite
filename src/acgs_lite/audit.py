@@ -20,6 +20,7 @@ import logging
 import os
 import stat
 import threading
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -259,7 +260,7 @@ class JSONLAuditBackend:
             logger.debug("failed to close JSONL audit backend file handle: %s", exc, exc_info=True)
 
 
-@dataclass
+@dataclass(slots=True)
 class AuditEntry:
     """A single audit log entry."""
 
@@ -300,8 +301,18 @@ class AuditEntry:
     @property
     def entry_hash(self) -> str:
         """Hash of this entry for chain integrity."""
-        entry_dict = self.to_dict()
-        entry_dict.pop("pqc_signature", None)
+        entry_dict = {
+            "action": self.action,
+            "agent_id": self.agent_id,
+            "constitutional_hash": self.constitutional_hash,
+            "id": self.id,
+            "latency_ms": self.latency_ms,
+            "metadata": self.metadata,
+            "timestamp": self.timestamp,
+            "type": self.type,
+            "valid": self.valid,
+            "violations": self.violations,
+        }
         canonical = json.dumps(entry_dict, sort_keys=True)
         return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -334,11 +345,12 @@ class AuditLog:
     ) -> None:
         if max_entries <= 0:
             raise ValueError("max_entries must be positive")
-        self._entries: list[AuditEntry] = []
-        self._chain_hashes: list[str] = []
+        self._entries: deque[AuditEntry] = deque()
+        self._chain_hashes: deque[str] = deque()
         self._retained_predecessor_hash = "genesis"
         self._hash_format: Literal["sha256-v1", "legacy-sha256-16"] = "sha256-v1"
         self._strict_poisoned = False
+        self._tx_undo_stack: list[tuple[int, list[AuditEntry], list[str]]] = []
         self.max_entries = max_entries
         self._backend = backend
         self._pqc_signer = pqc_signer
@@ -435,7 +447,7 @@ class AuditLog:
             entry.pqc_signature = self._pqc_signer.sign(entry.signature_digest.encode())
 
     def _append_locked(self, entry: AuditEntry) -> str:
-        """Compute chain hash, append entry + hash, trim if needed. Caller holds ``_lock``."""
+        """Compute chain hash, append entry + hash, trim in O(1). Caller holds ``_lock``."""
         prev_hash = (
             self._chain_hashes[-1] if self._chain_hashes else self._retained_predecessor_hash
         )
@@ -448,13 +460,52 @@ class AuditLog:
         self._entries.append(entry)
         self._chain_hashes.append(chain_hash)
 
-        if len(self._entries) > self.max_entries:
-            discarded_count = len(self._entries) - self.max_entries
-            self._retained_predecessor_hash = self._chain_hashes[discarded_count - 1]
-            self._entries = self._entries[-self.max_entries :]
-            self._chain_hashes = self._chain_hashes[-self.max_entries :]
+        while len(self._entries) > self.max_entries:
+            popped_entry = self._entries.popleft()
+            popped_hash = self._chain_hashes.popleft()
+            self._retained_predecessor_hash = popped_hash
+            if self._tx_undo_stack:
+                for undo_limit, disc_entries, disc_hashes in self._tx_undo_stack:
+                    if len(disc_entries) < undo_limit:
+                        disc_entries.append(popped_entry)
+                        disc_hashes.append(popped_hash)
 
         return chain_hash
+
+    def _begin_tx_locked(
+        self,
+    ) -> tuple[int, str, list[AuditEntry], list[str], list[int]]:
+        """Register an O(k) rollback frame for an active transaction under ``_lock``."""
+        pre_len = len(self._entries)
+        pre_anchor = self._retained_predecessor_hash
+        discarded_entries: list[AuditEntry] = []
+        discarded_hashes: list[str] = []
+        parent_marks = [len(frame[1]) for frame in self._tx_undo_stack]
+        self._tx_undo_stack.append((pre_len, discarded_entries, discarded_hashes))
+        return pre_len, pre_anchor, discarded_entries, discarded_hashes, parent_marks
+
+    def _rollback_locked(
+        self,
+        *,
+        pre_len: int,
+        pre_anchor: str,
+        discarded_entries: list[AuditEntry],
+        discarded_hashes: list[str],
+        parent_marks: list[int],
+    ) -> None:
+        """Restore the pre-transaction retained window in O(k) under ``_lock``."""
+        orig_remaining = pre_len - len(discarded_entries)
+        new_remaining = len(self._entries) - orig_remaining
+        for _ in range(new_remaining):
+            self._entries.pop()
+            self._chain_hashes.pop()
+        if discarded_entries:
+            self._entries.extendleft(reversed(discarded_entries))
+            self._chain_hashes.extendleft(reversed(discarded_hashes))
+        self._retained_predecessor_hash = pre_anchor
+        for frame, mark in zip(self._tx_undo_stack, parent_marks, strict=False):
+            del frame[1][mark:]
+            del frame[2][mark:]
 
     def _entry_digest(self, entry: AuditEntry) -> str:
         digest = entry.entry_hash
@@ -509,28 +560,39 @@ class AuditLog:
             if self._strict_poisoned:
                 raise RuntimeError("audit strict persistence is poisoned after uncertain rollback")
             self.validate_durable_state()
-            pre_entries = list(self._entries)
-            pre_hashes = list(self._chain_hashes)
-            pre_anchor = self._retained_predecessor_hash
-            checkpoint = self._backend.begin_checkpoint()
-            chain_hash = self._append_locked(entry)
+            (
+                pre_len,
+                pre_anchor,
+                discarded_entries,
+                discarded_hashes,
+                parent_marks,
+            ) = self._begin_tx_locked()
             try:
-                self._backend.write(entry.to_dict(), chain_hash)
-                self._backend.flush_durable()
-            except Exception as persist_exc:
-                self._entries = pre_entries
-                self._chain_hashes = pre_hashes
-                self._retained_predecessor_hash = pre_anchor
+                checkpoint = self._backend.begin_checkpoint()
+                chain_hash = self._append_locked(entry)
                 try:
-                    self._backend.check_identity()
-                    self._backend.rollback_to(checkpoint)
-                except Exception as rollback_exc:
-                    self._strict_poisoned = True
-                    raise RuntimeError(
-                        "audit durable rollback failed; strict log poisoned"
-                    ) from rollback_exc
-                raise persist_exc
-            return chain_hash
+                    self._backend.write(entry.to_dict(), chain_hash)
+                    self._backend.flush_durable()
+                except Exception as persist_exc:
+                    self._rollback_locked(
+                        pre_len=pre_len,
+                        pre_anchor=pre_anchor,
+                        discarded_entries=discarded_entries,
+                        discarded_hashes=discarded_hashes,
+                        parent_marks=parent_marks,
+                    )
+                    try:
+                        self._backend.check_identity()
+                        self._backend.rollback_to(checkpoint)
+                    except Exception as rollback_exc:
+                        self._strict_poisoned = True
+                        raise RuntimeError(
+                            "audit durable rollback failed; strict log poisoned"
+                        ) from rollback_exc
+                    raise persist_exc
+                return chain_hash
+            finally:
+                self._tx_undo_stack.pop()
 
     def record_atomic(
         self,
@@ -576,43 +638,53 @@ class AuditLog:
         self._prepare_entry(entry, proof_certificate, provenance)
 
         with self._lock:
-            pre_entries = list(self._entries)
-            pre_chain_hashes = list(self._chain_hashes)
-            pre_anchor = self._retained_predecessor_hash
-
-            checkpoint: Any = None
-            can_checkpoint = self._backend is not None and hasattr(
-                self._backend, "begin_checkpoint"
-            )
-            if can_checkpoint:
-                checkpoint = self._backend.begin_checkpoint()  # type: ignore[union-attr]
-            elif self._backend is not None:
-                logger.warning(
-                    "audit backend %s does not implement begin_checkpoint; "
-                    "record_atomic rollback cannot cover durable state",
-                    type(self._backend).__name__,
-                )
-
-            chain_hash = self._append_locked(entry)
-
+            (
+                pre_len,
+                pre_anchor,
+                discarded_entries,
+                discarded_hashes,
+                parent_marks,
+            ) = self._begin_tx_locked()
             try:
-                if self._backend is not None:
-                    self._backend.write(entry.to_dict(), chain_hash)
-                if persist is not None:
-                    persist(self)
-            except Exception:
-                self._entries = pre_entries
-                self._chain_hashes = pre_chain_hashes
-                self._retained_predecessor_hash = pre_anchor
+                checkpoint: Any = None
+                can_checkpoint = self._backend is not None and hasattr(
+                    self._backend, "begin_checkpoint"
+                )
                 if can_checkpoint:
-                    try:
-                        self._backend.rollback_to(checkpoint)  # type: ignore[union-attr]
-                    except Exception as rb_exc:
-                        self._strict_poisoned = True
-                        logger.error("audit backend rollback failed: %s", rb_exc, exc_info=True)
-                raise
+                    checkpoint = self._backend.begin_checkpoint()  # type: ignore[union-attr]
+                elif self._backend is not None:
+                    logger.warning(
+                        "audit backend %s does not implement begin_checkpoint; "
+                        "record_atomic rollback cannot cover durable state",
+                        type(self._backend).__name__,
+                    )
 
-            return chain_hash
+                chain_hash = self._append_locked(entry)
+
+                try:
+                    if self._backend is not None:
+                        self._backend.write(entry.to_dict(), chain_hash)
+                    if persist is not None:
+                        persist(self)
+                except Exception:
+                    self._rollback_locked(
+                        pre_len=pre_len,
+                        pre_anchor=pre_anchor,
+                        discarded_entries=discarded_entries,
+                        discarded_hashes=discarded_hashes,
+                        parent_marks=parent_marks,
+                    )
+                    if can_checkpoint:
+                        try:
+                            self._backend.rollback_to(checkpoint)  # type: ignore[union-attr]
+                        except Exception as rb_exc:
+                            self._strict_poisoned = True
+                            logger.error("audit backend rollback failed: %s", rb_exc, exc_info=True)
+                    raise
+
+                return chain_hash
+            finally:
+                self._tx_undo_stack.pop()
 
     def record_atomic_many(
         self,
@@ -643,45 +715,55 @@ class AuditLog:
             self._prepare_entry(entry, proof_certificate, provenance)
 
         with self._lock:
-            pre_entries = list(self._entries)
-            pre_chain_hashes = list(self._chain_hashes)
-            pre_anchor = self._retained_predecessor_hash
-
-            checkpoint: Any = None
-            can_checkpoint = self._backend is not None and hasattr(
-                self._backend, "begin_checkpoint"
-            )
-            if can_checkpoint:
-                checkpoint = self._backend.begin_checkpoint()  # type: ignore[union-attr]
-            elif self._backend is not None:
-                logger.warning(
-                    "audit backend %s does not implement begin_checkpoint; "
-                    "record_atomic_many rollback cannot cover durable state",
-                    type(self._backend).__name__,
-                )
-
-            chain_hashes: list[str] = []
+            (
+                pre_len,
+                pre_anchor,
+                discarded_entries,
+                discarded_hashes,
+                parent_marks,
+            ) = self._begin_tx_locked()
             try:
-                for entry in entries:
-                    chain_hash = self._append_locked(entry)
-                    chain_hashes.append(chain_hash)
-                    if self._backend is not None:
-                        self._backend.write(entry.to_dict(), chain_hash)
-                if persist is not None:
-                    persist(self)
-            except Exception:
-                self._entries = pre_entries
-                self._chain_hashes = pre_chain_hashes
-                self._retained_predecessor_hash = pre_anchor
+                checkpoint: Any = None
+                can_checkpoint = self._backend is not None and hasattr(
+                    self._backend, "begin_checkpoint"
+                )
                 if can_checkpoint:
-                    try:
-                        self._backend.rollback_to(checkpoint)  # type: ignore[union-attr]
-                    except Exception as rb_exc:
-                        self._strict_poisoned = True
-                        logger.error("audit backend rollback failed: %s", rb_exc, exc_info=True)
-                raise
+                    checkpoint = self._backend.begin_checkpoint()  # type: ignore[union-attr]
+                elif self._backend is not None:
+                    logger.warning(
+                        "audit backend %s does not implement begin_checkpoint; "
+                        "record_atomic_many rollback cannot cover durable state",
+                        type(self._backend).__name__,
+                    )
 
-            return chain_hashes
+                chain_hashes: list[str] = []
+                try:
+                    for entry in entries:
+                        chain_hash = self._append_locked(entry)
+                        chain_hashes.append(chain_hash)
+                        if self._backend is not None:
+                            self._backend.write(entry.to_dict(), chain_hash)
+                    if persist is not None:
+                        persist(self)
+                except Exception:
+                    self._rollback_locked(
+                        pre_len=pre_len,
+                        pre_anchor=pre_anchor,
+                        discarded_entries=discarded_entries,
+                        discarded_hashes=discarded_hashes,
+                        parent_marks=parent_marks,
+                    )
+                    if can_checkpoint:
+                        try:
+                            self._backend.rollback_to(checkpoint)  # type: ignore[union-attr]
+                        except Exception as rb_exc:
+                            self._strict_poisoned = True
+                            logger.error("audit backend rollback failed: %s", rb_exc, exc_info=True)
+                    raise
+
+                return chain_hashes
+            finally:
+                self._tx_undo_stack.pop()
 
     def flush(self) -> None:
         """Flush pending writes to the backend. No-op if no backend."""
@@ -735,11 +817,9 @@ class AuditLog:
         if not log.verify_chain():
             raise ValueError("audit backend chain verification failed")
         # Trim to max if needed
-        if len(log._entries) > max_entries:
-            discarded_count = len(log._entries) - max_entries
-            log._retained_predecessor_hash = log._chain_hashes[discarded_count - 1]
-            log._entries = log._entries[-max_entries:]
-            log._chain_hashes = log._chain_hashes[-max_entries:]
+        while len(log._entries) > max_entries:
+            log._entries.popleft()
+            log._retained_predecessor_hash = log._chain_hashes.popleft()
         return log
 
     @classmethod
@@ -764,22 +844,19 @@ class AuditLog:
             entry = AuditEntry(**entry_dict)
             entry._signature_hash_format = version
             log._entries.append(entry)
-        log._chain_hashes = list(hashes)
+        log._chain_hashes = deque(hashes)
         if not log.verify_chain():
             raise ValueError("audit export chain verification failed")
         return log
 
-    def verify_chain(self) -> bool:
-        """Verify the integrity of the entire audit chain.
-
-        Returns True if no entries have been tampered with.
-        """
-        with self._lock:
-            entries = list(self._entries)
-            chain_hashes = list(self._chain_hashes)
-            retained_predecessor_hash = self._retained_predecessor_hash
-            hash_format = self._hash_format
-
+    @staticmethod
+    def _verify_chain_snapshot(
+        entries: list[AuditEntry],
+        chain_hashes: list[str],
+        retained_predecessor_hash: str,
+        hash_format: str,
+    ) -> bool:
+        """Verify integrity of a captured audit chain snapshot without holding ``_lock``."""
         if not entries:
             return True
 
@@ -800,6 +877,21 @@ class AuditLog:
 
         return True
 
+    def verify_chain(self) -> bool:
+        """Verify the integrity of the entire audit chain.
+
+        Returns True if no entries have been tampered with.
+        """
+        with self._lock:
+            entries = list(self._entries)
+            chain_hashes = list(self._chain_hashes)
+            retained_predecessor_hash = self._retained_predecessor_hash
+            hash_format = self._hash_format
+
+        return self._verify_chain_snapshot(
+            entries, chain_hashes, retained_predecessor_hash, hash_format
+        )
+
     def query(
         self,
         *,
@@ -809,7 +901,8 @@ class AuditLog:
         limit: int = 100,
     ) -> list[AuditEntry]:
         """Query audit entries with filters."""
-        results = self._entries
+        with self._lock:
+            results = list(self._entries)
 
         if agent_id is not None:
             results = [e for e in results if e.agent_id == agent_id]
@@ -823,14 +916,20 @@ class AuditLog:
     def export_json(self, path: str | Path) -> None:
         """Export audit log to JSON file."""
         with self._lock:
-            data = {
-                "format_version": self._hash_format,
-                "retained_predecessor_hash": self._retained_predecessor_hash,
-                "entries": [e.to_dict() for e in self._entries],
-                "chain_hashes": list(self._chain_hashes),
-                "chain_valid": self.verify_chain(),
-                "entry_count": len(self._entries),
-            }
+            entries = list(self._entries)
+            chain_hashes = list(self._chain_hashes)
+            retained_predecessor_hash = self._retained_predecessor_hash
+            hash_format = self._hash_format
+        data = {
+            "format_version": hash_format,
+            "retained_predecessor_hash": retained_predecessor_hash,
+            "entries": [e.to_dict() for e in entries],
+            "chain_hashes": chain_hashes,
+            "chain_valid": self._verify_chain_snapshot(
+                entries, chain_hashes, retained_predecessor_hash, hash_format
+            ),
+            "entry_count": len(entries),
+        }
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
@@ -838,22 +937,33 @@ class AuditLog:
 
     def export_dicts(self) -> list[dict[str, Any]]:
         """Export audit log as list of dicts."""
-        return [e.to_dict() for e in self._entries]
+        with self._lock:
+            entries = list(self._entries)
+        return [e.to_dict() for e in entries]
 
     @property
     def compliance_rate(self) -> float:
         """Percentage of valid entries."""
-        if not self._entries:
+        with self._lock:
+            entries = tuple(self._entries)
+        if not entries:
             return 1.0
-        valid_count = sum(1 for e in self._entries if e.valid)
-        return valid_count / len(self._entries)
+        valid_count = sum(1 for e in entries if e.valid)
+        return valid_count / len(entries)
 
     def __len__(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
     def __repr__(self) -> str:
-        return (
-            f"AuditLog(entries={len(self._entries)}, "
-            f"compliance={self.compliance_rate:.1%}, "
-            f"chain_valid={self.verify_chain()})"
+        with self._lock:
+            entries = list(self._entries)
+            chain_hashes = list(self._chain_hashes)
+            retained_predecessor_hash = self._retained_predecessor_hash
+            hash_format = self._hash_format
+        total = len(entries)
+        compliance = (sum(1 for e in entries if e.valid) / total) if total else 1.0
+        chain_valid = self._verify_chain_snapshot(
+            entries, chain_hashes, retained_predecessor_hash, hash_format
         )
+        return f"AuditLog(entries={total}, compliance={compliance:.1%}, chain_valid={chain_valid})"

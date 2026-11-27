@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
+from acgs_lite._compat import constant_time_compare
 from acgs_lite.legitimacy.decide import DecisionState
 from acgs_lite.legitimacy.invariants import LegitimacyInvariantError
 from acgs_lite.legitimacy.invocation import InvocationBinding, PolicyBinding
@@ -317,7 +318,7 @@ class ExecutionAuthority:
             single_use=grant.single_use,
             callable_target=grant.callable_target,
         )
-        if not hmac.compare_digest(expected, grant.binding_mac):
+        if not constant_time_compare(expected, grant.binding_mac):
             raise LegitimacyInvariantError("grant authenticity check failed")
         if not grant.receipt.verify_hash():
             raise LegitimacyInvariantError("grant receipt integrity check failed")

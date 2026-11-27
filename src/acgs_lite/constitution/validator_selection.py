@@ -52,6 +52,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from acgs_lite._compat import constant_time_compare
+
 # ── Risk tier → quorum size mapping ──────────────────────────────────────────
 
 _DEFAULT_K_BY_RISK: dict[str, int] = {
@@ -218,7 +220,7 @@ class SelectionResult:
                 self.proof.canonical_bytes(),
                 hashlib.sha256,
             ).hexdigest()
-            if not hmac.compare_digest(expected, self.proof.signature):
+            if not constant_time_compare(expected, self.proof.signature):
                 return False
 
         return True
@@ -748,7 +750,7 @@ class ValidatorSelector:
                 proof.canonical_bytes(),
                 hashlib.sha256,
             ).hexdigest()
-            if not hmac.compare_digest(expected, proof.signature):
+            if not constant_time_compare(expected, proof.signature):
                 return False
 
         return True

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,29 +12,8 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from pydantic import BaseModel, Field
 
-from . import (
-    comparison,
-    conflict_resolution,
-    coverage_analysis,
-    dependency_analysis,
-    diffing,
-    filtering,
-    lifecycle,
-    merging,
-    permission_ceiling,
-    provenance,
-    regulatory,
-    rendering,
-    reporting,
-    schema_validation,
-    serialization,
-    similarity,
-    workflow_analytics,
-)
+from . import schema_validation
 from .rule import AcknowledgedTension, Rule, Severity, ViolationAction
-
-if TYPE_CHECKING:
-    from .templates import ConstitutionBuilder
 
 
 class Constitution(BaseModel):
@@ -176,9 +156,7 @@ class Constitution(BaseModel):
                 return Severity(value.strip().lower())
             return Severity(value)
 
-        def _resolve_workflow_action(
-            rule_data: dict[str, Any], severity: Severity
-        ) -> ViolationAction:
+        def _resolve_workflow_action(rule_data: dict[str, Any], severity: Severity) -> Any:
             if "workflow_action" in rule_data:
                 return rule_data["workflow_action"]
             return ViolationAction.BLOCK if severity.blocks() else ViolationAction.WARN
@@ -1482,7 +1460,7 @@ class Constitution(BaseModel):
     def explain_rendered(self, action: str, context: dict[str, Any]) -> dict[str, Any]:
         return rendering.explain_rendered(self, action, context)
 
-    def builder(self) -> ConstitutionBuilder:
+    def builder(self) -> templates.ConstitutionBuilder:
         """Return a ConstitutionBuilder pre-populated with this constitution's rules.
 
         Useful for creating modified versions of an existing constitution using
@@ -1509,3 +1487,69 @@ class Constitution(BaseModel):
 
     def __repr__(self) -> str:
         return f"Constitution(name={self.name!r}, rules={len(self.rules)}, hash={self.hash!r})"
+
+
+if TYPE_CHECKING:
+    from . import (  # noqa: E402
+        comparison,
+        conflict_resolution,
+        coverage_analysis,
+        dependency_analysis,
+        diffing,
+        filtering,
+        lifecycle,
+        merging,
+        permission_ceiling,
+        provenance,
+        regulatory,
+        rendering,
+        reporting,
+        serialization,
+        similarity,
+        templates,
+        workflow_analytics,
+    )
+else:
+
+    class _LazySubmodule:
+        """Import a sibling constitution helper module on first access and bind it."""
+
+        __slots__ = ("_name",)
+
+        def __init__(self, name: str) -> None:
+            object.__setattr__(self, "_name", name)
+
+        def _load(self) -> Any:
+            name: str = object.__getattribute__(self, "_name")
+            mod = importlib.import_module(f".{name}", __package__)
+            globals()[name] = mod
+            return mod
+
+        def __getattr__(self, attr: str) -> Any:
+            return getattr(self._load(), attr)
+
+        def __setattr__(self, attr: str, value: Any) -> None:
+            setattr(self._load(), attr, value)
+
+        def __delattr__(self, attr: str) -> None:
+            delattr(self._load(), attr)
+
+        def __dir__(self) -> list[str]:
+            return dir(self._load())
+
+    comparison = _LazySubmodule("comparison")
+    conflict_resolution = _LazySubmodule("conflict_resolution")
+    coverage_analysis = _LazySubmodule("coverage_analysis")
+    dependency_analysis = _LazySubmodule("dependency_analysis")
+    diffing = _LazySubmodule("diffing")
+    filtering = _LazySubmodule("filtering")
+    lifecycle = _LazySubmodule("lifecycle")
+    merging = _LazySubmodule("merging")
+    permission_ceiling = _LazySubmodule("permission_ceiling")
+    provenance = _LazySubmodule("provenance")
+    regulatory = _LazySubmodule("regulatory")
+    rendering = _LazySubmodule("rendering")
+    reporting = _LazySubmodule("reporting")
+    serialization = _LazySubmodule("serialization")
+    similarity = _LazySubmodule("similarity")
+    workflow_analytics = _LazySubmodule("workflow_analytics")

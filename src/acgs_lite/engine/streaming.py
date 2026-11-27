@@ -32,6 +32,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from collections.abc import AsyncIterator, Iterator
@@ -75,6 +76,28 @@ class StreamStats:
     latency_ms: float = 0.0
 
 
+def _accepts_strict_kwarg(validate_fn: Any) -> bool:
+    """Return True if *validate_fn* accepts a ``strict`` keyword argument."""
+    side_effect = getattr(validate_fn, "side_effect", None)
+    target = (
+        side_effect
+        if callable(side_effect)
+        and not (isinstance(side_effect, type) and issubclass(side_effect, BaseException))
+        else validate_fn
+    )
+    try:
+        params = inspect.signature(target).parameters
+    except (TypeError, ValueError):
+        return False
+    strict_param = params.get("strict")
+    if strict_param is not None and strict_param.kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    ):
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 # -------------------------------------------------------------------
 # Streaming validator
 # -------------------------------------------------------------------
@@ -101,6 +124,7 @@ class StreamingValidator:
 
     __slots__ = (
         "_engine",
+        "_supports_strict_kwarg",
         "_window_size",
         "_flush_interval",
         "_blocking_sevs",
@@ -123,6 +147,7 @@ class StreamingValidator:
         fail_open_on_error: bool = False,
     ) -> None:
         self._engine = engine
+        self._supports_strict_kwarg = _accepts_strict_kwarg(getattr(engine, "validate", None))
         self._window_size = max(1, window_size)
         self._flush_interval = max(1, flush_interval_chars)
         if blocking_severities is None:
@@ -296,9 +321,17 @@ class StreamingValidator:
         self,
         text: str,
     ) -> ValidationResult:
-        """Run validation in non-strict mode."""
+        """Run validation in non-strict mode without mutating shared engine state."""
+        if self._supports_strict_kwarg:
+            try:
+                result: ValidationResult = self._engine.validate(text, strict=False)
+                return result
+            except TypeError as exc:
+                if "unexpected keyword argument 'strict'" not in str(exc):
+                    raise
         with self._engine.non_strict():
-            return self._engine.validate(text)
+            fallback: ValidationResult = self._engine.validate(text)
+            return fallback
 
     def _record_audit(
         self,

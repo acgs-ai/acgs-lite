@@ -10,12 +10,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import secrets
 from collections.abc import AsyncGenerator
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from acgs_lite._compat import constant_time_compare
 from acgs_lite._meta import VERSION
 from acgs_lite.audit import AuditEntry, AuditLog
 from acgs_lite.cdp.store import InMemoryCDPBackend
@@ -23,14 +23,12 @@ from acgs_lite.constitution import Constitution
 from acgs_lite.engine import GovernanceEngine
 from acgs_lite.errors import ConstitutionalViolationError
 from acgs_lite.events import GovernanceEvent, get_event_bus
-from acgs_lite.federation import federation_router
 from acgs_lite.integrations.openshell_governance import (
     GovernanceStateBackend,
     GovernanceStateObservabilityHook,
     JsonFileGovernanceStateBackend,
     create_openshell_governance_router,
 )
-from acgs_lite.integrations.telegram_webhook import create_telegram_webhook_router
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +38,34 @@ _CLAUDE_CODE_READ_ONLY_TOOLS = frozenset({"Read", "Glob", "Grep", "LS"})
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+
+
+_LAZY_ROUTERS: dict[str, tuple[str, str]] = {
+    "federation_router": ("acgs_lite.federation", "federation_router"),
+    "create_telegram_webhook_router": (
+        "acgs_lite.integrations.telegram_webhook",
+        "create_telegram_webhook_router",
+    ),
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_ROUTERS:
+        mod_name, attr_name = _LAZY_ROUTERS[name]
+        value = getattr(import_module(mod_name), attr_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY_ROUTERS))
+
+
+def _resolve_lazy_router(name: str) -> Any:
+    if name in globals():
+        return globals()[name]
+    return __getattr__(name)
 
 
 class _AuditStoreLike(Protocol):
@@ -371,7 +397,7 @@ def create_governance_app(
     def _require_api_key(x_api_key: str | None = Header(default=None)) -> None:
         if not resolved_api_key:
             return
-        if x_api_key is None or not secrets.compare_digest(x_api_key, resolved_api_key):
+        if x_api_key is None or not constant_time_compare(x_api_key, resolved_api_key):
             raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
 
     auth_deps = [Depends(_require_api_key)] if resolved_api_key else []
@@ -419,8 +445,8 @@ def create_governance_app(
 
     @app.post("/validate", dependencies=auth_deps)
     def validate_action(payload: dict[str, Any]) -> dict[str, Any]:
-        action = cast(str, payload.get("action", ""))
-        if not action.strip():
+        action = payload.get("action")
+        if not isinstance(action, str) or not action.strip():
             raise HTTPException(status_code=422, detail="'action' must be a non-empty string")
 
         agent_id = payload.get("agent_id", "anonymous")
@@ -813,8 +839,10 @@ def create_governance_app(
     if include_telegram:
         if telegram_webhook_path_secret is None:
             raise ValueError("telegram_webhook_path_secret is required when include_telegram=True")
+        telegram_router_factory = _resolve_lazy_router("create_telegram_webhook_router")
+
         app.include_router(
-            create_telegram_webhook_router(
+            telegram_router_factory(
                 engine_getter=lambda: engine,
                 webhook_path_secret=telegram_webhook_path_secret,
                 secret_token=telegram_secret_token,
@@ -830,7 +858,7 @@ def create_governance_app(
         app.include_router(create_lifecycle_router(api_key=lifecycle_api_key))
 
     if os.getenv("ACGS_FEDERATION_ENABLED"):
-        app.include_router(federation_router, prefix="/v1/federation")
+        app.include_router(_resolve_lazy_router("federation_router"), prefix="/v1/federation")
 
     if os.getenv("ACGS_EVENTS_ENABLED"):
         from fastapi.responses import StreamingResponse

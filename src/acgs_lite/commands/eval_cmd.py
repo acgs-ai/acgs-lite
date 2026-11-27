@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from acgs_lite.constitution import Constitution
 from acgs_lite.constitution.drift import GovernanceDriftDetector
@@ -14,8 +15,8 @@ from acgs_lite.evals import compare_eval_reports, run_eval
 from acgs_lite.formal.smt_gate import ConstitutionVerificationReport, Z3VerificationGate
 
 
-def _load_jsonl(path: str) -> list[dict]:
-    decisions: list[dict] = []
+def _load_jsonl(path: str) -> list[dict[str, Any]]:
+    decisions: list[dict[str, Any]] = []
     with Path(path).open() as handle:
         for line in handle:
             stripped = line.strip()
@@ -25,7 +26,7 @@ def _load_jsonl(path: str) -> list[dict]:
     return decisions
 
 
-def _emit_jsonl(path: str, decisions: list[dict]) -> None:
+def _emit_jsonl(path: str, decisions: list[dict[str, Any]]) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w") as handle:
@@ -66,7 +67,7 @@ def _env_requires_provenance() -> bool:
     return os.getenv("ACGS_REQUIRE_PROVENANCE", "").strip().lower() == "true"
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the eval subcommand."""
     parser = sub.add_parser("eval", help="Run offline constitution evaluation gates")
     eval_sub = parser.add_subparsers(dest="eval_action", required=True)

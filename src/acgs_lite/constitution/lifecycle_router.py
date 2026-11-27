@@ -20,7 +20,6 @@ Constitutional Hash: 608508a9bd224290
 
 from __future__ import annotations
 
-import hmac
 import os
 from typing import Any, NoReturn
 
@@ -28,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
+from acgs_lite._compat import constant_time_compare
 from acgs_lite.constitution.activation import ActivationRecord
 from acgs_lite.constitution.bundle import ConstitutionBundle
 from acgs_lite.constitution.bundle_store import InMemoryBundleStore
@@ -158,7 +158,7 @@ def create_lifecycle_router(
     async def _require_auth(x_api_key: str | None = Depends(_API_KEY_HEADER)) -> None:
         if _key is None:
             return  # Auth disabled (no key configured)
-        if x_api_key is None or not hmac.compare_digest(x_api_key, _key):
+        if x_api_key is None or not constant_time_compare(x_api_key, _key):
             _error("Invalid or missing API key", code="AUTH_REQUIRED", status_code=401)
 
     async def _get_actor(request: Request) -> str:

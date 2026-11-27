@@ -14,7 +14,7 @@ from pathlib import Path
 from acgs_lite.commands._helpers import load_system_description
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the report subcommand."""
     p = sub.add_parser("report", help="Generate auditor-ready compliance report")
     p.add_argument("--pdf", action="store_true", default=True, help="PDF output (default)")

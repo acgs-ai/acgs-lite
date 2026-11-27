@@ -21,6 +21,8 @@ Usage::
 
 from __future__ import annotations
 
+from typing import Any
+
 from acgs_lite.compliance.obligation_mappings import get_obligations_for_refs
 from acgs_lite.compliance.runtime_obligations import (
     ObligationType,
@@ -57,7 +59,7 @@ class RuntimeComplianceChecker:
     context — the same shape used inside CDP records and GovernedAgent.
     """
 
-    def check(self, decision_context: dict) -> list[RuntimeObligation]:
+    def check(self, decision_context: dict[str, Any]) -> list[RuntimeObligation]:
         """Derive runtime obligations from a decision context dictionary.
 
         The dict may contain any subset of these keys:

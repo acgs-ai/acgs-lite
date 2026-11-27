@@ -167,7 +167,7 @@ def analyze(obs: list[ToolObservation]) -> dict[str, Any]:
     }
 
 
-def print_report(result: dict, verbose: bool = False) -> None:
+def print_report(result: dict[str, Any], verbose: bool = False) -> None:
     if "error" in result:
         print(result["error"])
         return

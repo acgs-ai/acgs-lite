@@ -123,14 +123,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Autoresearch-optimized hot path: semicolons, import order, and line length are deliberate
-"src/acgs_lite/engine.py" = ["E702", "E402", "E501", "SIM102"]
-"src/acgs_lite/constitution.py" = ["SIM102"]
 "src/acgs_lite/__init__.py" = ["F401"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 addopts = "-m 'not e2e'"
 markers = [
     "unit: Fast tests with no I/O and no external services",
@@ -150,8 +148,8 @@ filterwarnings = [
 python_version = "3.11"
 strict = true
 files = ["src/acgs_lite"]
-exclude = "(?x)(^tests/|^examples/|^src/split_engine\\.py$)"
+exclude = "(?x)(^tests/|^examples/)"
 ignore_missing_imports = true
 warn_unused_ignores = false
 allow_untyped_decorators = true
-disable_error_code = ["import-untyped", "import-not-found", "no-untyped-call", "misc", "type-arg", "no-any-return"]
+disable_error_code = ["import-untyped", "import-not-found"]

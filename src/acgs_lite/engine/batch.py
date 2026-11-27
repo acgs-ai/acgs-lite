@@ -12,9 +12,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from acgs_lite.constitution import Severity
+from acgs_lite.constitution.rule import ViolationAction
 
 if TYPE_CHECKING:
     from .models import ValidationResult
+
+_SEVERITY_VALUES: frozenset[str] = frozenset(s.value for s in Severity)
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,7 @@ class BatchValidationMixin:
     # Type stubs for attributes provided by GovernanceEngine (the concrete host class).
     strict: bool
     _const_hash: str
+    _rule_id_to_wa: dict[str, ViolationAction]
 
     def validate(
         self,
@@ -83,6 +87,7 @@ class BatchValidationMixin:
         *,
         agent_id: str = "anonymous",
         context: dict[str, Any] | None = None,
+        strict: bool | None = None,
     ) -> ValidationResult:
         raise NotImplementedError  # pragma: no cover
 
@@ -92,13 +97,13 @@ class BatchValidationMixin:
         *,
         agent_id: str = "anonymous",
     ) -> list[ValidationResult]:
-        """Validate multiple actions without raising in strict mode."""
-        old_strict = self.strict
-        self.strict = False
-        try:
-            return [self.validate(a, agent_id=agent_id) for a in actions]
-        finally:
-            self.strict = old_strict
+        """Validate multiple actions without raising in strict mode.
+
+        Uses the per-call ``strict=False`` override instead of mutating
+        ``self.strict``, so concurrent calls on a shared engine remain
+        thread-safe and never observe a fail-open strictness window.
+        """
+        return [self.validate(a, agent_id=agent_id, strict=False) for a in actions]
 
     def validate_batch_report(
         self,
@@ -141,15 +146,17 @@ class BatchValidationMixin:
             if isinstance(item, tuple):
                 action, ctx = item[0], item[1]
             else:
-                action, ctx = item, {}
+                action, ctx = item, None
             try:
-                individual.append(self.validate(action, agent_id=agent_id, context=ctx))
+                individual.append(
+                    self.validate(action, agent_id=agent_id, context=ctx, strict=False)
+                )
             except ConstitutionalViolationError as exc:
-                # Rust hot-path raises for CRITICAL regardless of strict mode;
+                # HALT workflow actions raise regardless of strict mode;
                 # construct a synthetic ValidationResult so the batch never raises.
                 _sev = (
                     Severity(exc.severity)
-                    if exc.severity in {s.value for s in Severity}
+                    if exc.severity in _SEVERITY_VALUES
                     else Severity.CRITICAL
                 )
                 _viol = Violation(
@@ -175,18 +182,24 @@ class BatchValidationMixin:
         escalated = 0
         critical_ids: set[str] = set()
 
+        wa_lookup = getattr(self, "_rule_id_to_wa", {})
         for r in individual:
-            if not r.violations:
+            if r.valid and not r.violations and not r.warnings:
                 allowed += 1
+            elif not r.valid or any(v.severity.blocks() for v in r.violations):
+                denied += 1
+                blocking_ids = [
+                    v.rule_id
+                    for v in r.violations
+                    if v.severity.blocks()
+                    or wa_lookup.get(v.rule_id, ViolationAction.WARN) is not ViolationAction.WARN
+                ]
+                if blocking_ids:
+                    critical_ids.update(blocking_ids)
+                elif not r.valid:
+                    critical_ids.update(v.rule_id for v in r.violations)
             else:
-                has_blocking = any(v.severity.blocks() for v in r.violations)
-                if has_blocking:
-                    denied += 1
-                    for v in r.violations:
-                        if v.severity.blocks():
-                            critical_ids.add(v.rule_id)
-                else:
-                    escalated += 1
+                escalated += 1
 
         compliance_rate = allowed / total if total > 0 else 1.0
 

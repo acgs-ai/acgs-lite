@@ -14,7 +14,7 @@ from pathlib import Path
 from acgs_lite.commands._helpers import cli_bar, load_system_description
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the assess subcommand."""
     p = sub.add_parser("assess", help="Run multi-framework compliance assessment")
     p.add_argument(

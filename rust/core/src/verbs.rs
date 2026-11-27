@@ -11,11 +11,12 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-/// The 30 positive verbs from constitution.py `_POSITIVE_VERBS_SET`.
+/// The 31 positive verbs from constitution/analytics.py `_POSITIVE_VERBS_SET`.
 /// Actions starting with these words get the positive-verb exemption
 /// (keywords are skipped unless they contain a negative indicator).
 pub static POSITIVE_VERBS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     [
+        "perform",
         "run",
         "test",
         "generate",
@@ -51,8 +52,8 @@ pub static POSITIVE_VERBS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     .collect()
 });
 
-/// Compiled regex matching the 19 negative verb phrases from
-/// constitution.py `_NEGATIVE_VERBS_LIST`.
+/// Compiled regex matching the 22 negative verb phrases from
+/// constitution/analytics.py `_NEGATIVE_VERBS_LIST`.
 pub static NEGATIVE_VERBS_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         "(?i)",
@@ -72,7 +73,8 @@ pub static KW_NEGATIVE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         "(?i)",
         "without|disable|bypass|remove|skip|delete|override|hide|",
-        "auto-reject|self-approve|proxy for"
+        "auto-reject|self-approve|proxy for|",
+        "secret|credential|token|password|ssn|terraform-destroy"
     ))
     .unwrap()
 });
@@ -105,7 +107,8 @@ mod tests {
 
     #[test]
     fn test_positive_verbs_count() {
-        assert_eq!(POSITIVE_VERBS.len(), 30);
+        assert_eq!(POSITIVE_VERBS.len(), 31);
+        assert!(is_positive_verb("perform safety check"));
     }
 
     #[test]
@@ -131,5 +134,24 @@ mod tests {
         assert!(keyword_has_negative("bypass validation"));
         assert!(!keyword_has_negative("audit trail"));
         assert!(!keyword_has_negative("safety check"));
+    }
+
+    #[test]
+    fn test_keyword_negative_security_parity() {
+        for kw in [
+            "secret",
+            "credential",
+            "token",
+            "password",
+            "ssn",
+            "terraform-destroy",
+            "expose secret key",
+        ] {
+            assert!(
+                keyword_has_negative(kw),
+                "security keyword '{}' must override positive-verb exemption",
+                kw
+            );
+        }
     }
 }

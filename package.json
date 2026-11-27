@@ -1,7 +1,9 @@
 {
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "python -m pip install '.[docs]' && if [ -d .git ]; then python -m mkdocs build --strict; else MKDOCS_GIT_REVISION_DATE_ENABLED=false python -m mkdocs build --strict; fi",
+    "test": "node --test tests/test_worker.mjs",
     "deploy": "wrangler versions upload",
     "preview": "wrangler dev"
   },

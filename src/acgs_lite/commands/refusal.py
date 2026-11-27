@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the refusal subcommand."""
     p = sub.add_parser("refusal", help="Explain governance denials and suggest alternatives")
     p.add_argument("action_text", help='The action text to analyze (e.g. "invest in tech stocks")')

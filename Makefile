@@ -19,7 +19,7 @@ REPO_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 
 .PHONY: help setup dev-setup install install-dev validate verify smoke dev \
         test test-quick test-optional test-cov test-examples \
-        test-governance \
+        test-governance test-rust test-docs test-worker \
         lint format typecheck check build publish-dry-run publish \
         examples clean
 
@@ -46,6 +46,9 @@ help:
 	@echo "    make test-optional Require and test solver, adapters, Rust, and Lean (see CONTRIBUTING.md)"
 	@echo "    make test-cov      Test + coverage report (HTML in htmlcov/)"
 	@echo "    make test-governance  Governance-regression safety gate"
+	@echo "    make test-rust     Rust core unit tests, clippy, and rustfmt check"
+	@echo "    make test-docs     Strict MkDocs build + offline link validation"
+	@echo "    make test-worker   Cloudflare Worker unit tests (Node.js)"
 	@echo "    make test-examples Run all examples/ as smoke tests"
 	@echo ""
 	@echo "  Quality:"
@@ -144,7 +147,7 @@ test-quick:
 	$(TEST_ENV) $(PYTEST) $(TEST_DIR)/ \
 	    $(PYTEST_ROOTDIR) $(PYTEST_IGNORE_STANDALONE) \
 	    --import-mode=importlib \
-	    -m "not slow and not benchmark" \
+	    -m "not slow and not benchmark and not e2e" \
 	    -x -v
 
 # Keep this separate from the deliberately dependency-free Python fallback gate.
@@ -192,6 +195,17 @@ test-governance:
 	    -q
 	$(TEST_ENV) $(PYTHON) scripts/run_governance_regression.py --check
 
+test-rust:
+	cd rust && cargo test --locked -p acgs-validator-core \
+	    && cargo clippy --locked -p acgs-validator-core -p acgs_lite_rust -p acgs-validator-wasm --all-targets -- -D warnings \
+	    && cargo fmt --check
+
+test-docs: validate
+	$(PYTHON) -m mkdocs build --strict
+
+test-worker:
+	node --test tests/test_worker.mjs
+
 test-examples:
 	@echo "Running 29 offline examples as smoke tests..."
 	$(TEST_ENV) $(PYTHON) examples/adaptive_policy_generation.py
@@ -228,7 +242,7 @@ test-examples:
 # ── Quality ───────────────────────────────────────────────────────────────────
 lint:
 	$(RUFF) check $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/
-	$(RUFF) format --check $(SRC_DIR)/ $(TEST_DIR)/
+	$(RUFF) format --check $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/
 
 format:
 	$(RUFF) check --fix $(SRC_DIR)/ $(TEST_DIR)/ $(SCRIPT_DIR)/

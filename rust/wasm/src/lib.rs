@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use acgs_validator_core::{
     context::ContextRule, severity::Severity, GovernanceValidator, ValidatorConfig,
 };
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -102,7 +102,7 @@ impl WasmValidator {
                 let compiled_patterns: Vec<Regex> = cr
                     .patterns
                     .iter()
-                    .map(|p| Regex::new(&format!("(?i){}", p)))
+                    .map(|p| RegexBuilder::new(p).case_insensitive(true).build())
                     .collect::<Result<_, _>>()
                     .map_err(|e| JsError::new(&format!("Bad context regex: {}", e)))?;
                 Ok(ContextRule {
@@ -177,11 +177,20 @@ impl WasmValidator {
         self.inner.const_hash().to_string()
     }
 
-    /// Quick hot-path validation (returns decision code only).
+    /// Quick hot-path validation (returns decision code and bitmask).
     ///
-    /// Returns: [decision_code, data] as JSON array.
+    /// Returns: `[decision_code, data]` as a JSON array.
+    /// Note: JavaScript `JSON.parse()` loses integer precision above `2^53 - 1`
+    /// (rule index >= 53); use `validate_hot_hex` when >53 rules are compiled.
     pub fn validate_hot(&self, text_lower: &str) -> String {
-        let (decision, data) = self.inner.validate_hot(text_lower);
+        let (decision, data) = self.inner.validate_hot_u128(text_lower);
         format!("[{},{}]", decision, data)
+    }
+
+    /// Lossless hot-path validation for >53 rules: returns `[decision_code,"<hex>"]`
+    /// so JavaScript callers can decode the full 128-bit mask with `BigInt("0x" + hex)`.
+    pub fn validate_hot_hex(&self, text_lower: &str) -> String {
+        let (decision, data) = self.inner.validate_hot_u128(text_lower);
+        format!("[{},\"{:x}\"]", decision, data)
     }
 }

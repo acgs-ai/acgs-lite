@@ -57,7 +57,7 @@ make test-quick
 We follow a strict **Test-Driven Development** workflow. Every feature or fix must be accompanied by tests.
 *   **Location**: All tests go in the `tests/` directory.
 *   **Stubs**: Use the `InMemoryAuditBackend` and `InMemoryGovernanceEngine` patterns to keep tests fast and deterministic.
-*   **Coverage**: We target **80%+ coverage** for the core engine and **70%+** for integration adapters.
+*   **Coverage**: CI enforces **≥80% overall** coverage and **≥90% aggregate** coverage on execution-critical and governed/legitimacy paths (see `scripts/check_critical_coverage.py`).
 
 ## Optional integration qualification
 

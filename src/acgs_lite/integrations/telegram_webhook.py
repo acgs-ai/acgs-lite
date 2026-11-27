@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import hmac
 from collections.abc import Callable
 from typing import Annotated, Any
 
+from acgs_lite._compat import constant_time_compare
 from acgs_lite.engine import GovernanceEngine
 
 try:
@@ -70,7 +70,7 @@ def create_telegram_webhook_router(
     ) -> dict[str, Any]:
         if resolved_secret_token is not None:
             provided = request.headers.get(_TELEGRAM_SECRET_HEADER, "")
-            if not hmac.compare_digest(provided, resolved_secret_token):
+            if not constant_time_compare(provided, resolved_secret_token):
                 raise HTTPException(status_code=401, detail="Invalid Telegram secret token")
 
         message = payload.get("message")
@@ -79,14 +79,15 @@ def create_telegram_webhook_router(
 
         chat = message.get("chat")
         text = message.get("text")
+        raw_chat_id = chat.get("id") if isinstance(chat, dict) else None
         if (
-            not isinstance(chat, dict)
-            or not isinstance(chat.get("id"), int)
+            isinstance(raw_chat_id, bool)
+            or not isinstance(raw_chat_id, int)
             or not isinstance(text, str)
         ):
             return {"ok": True}
 
-        chat_id = chat["id"]
+        chat_id = raw_chat_id
         result = engine_getter().validate(
             text,
             agent_id=f"telegram:{chat_id}",

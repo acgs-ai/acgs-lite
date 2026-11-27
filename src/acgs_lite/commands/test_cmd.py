@@ -44,7 +44,7 @@ tests:
 """
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the test subcommand."""
     p = sub.add_parser("test", help="Run governance test fixtures against the engine")
     p.add_argument(

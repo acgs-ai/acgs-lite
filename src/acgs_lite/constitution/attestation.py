@@ -40,6 +40,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from acgs_lite._compat import constant_time_compare
+
 
 class GovernanceAttestation:
     """A signed attestation receipt for a governance decision.
@@ -280,7 +282,7 @@ class AttestationRegistry:
         if not self._key or not attestation.signature:
             return False
         expected = self._sign(attestation.canonical_content())
-        return hmac.compare_digest(attestation.signature, expected)
+        return constant_time_compare(attestation.signature, expected)
 
     def verify_chain_integrity(self) -> dict[str, Any]:
         """Verify the entire attestation chain for gaps and tampering.

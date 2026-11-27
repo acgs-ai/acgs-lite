@@ -176,7 +176,7 @@ class ValidationResult:
         return to_receipt_dict(self)
 
 
-def _dedup_violations(violations: list) -> list:
+def _dedup_violations(violations: list[Violation]) -> list[Violation]:
     """Deduplicate violations by (rule_id, matched_content) (called when len > 1).
 
     Keying on rule_id alone collapsed *distinct* findings that share a rule_id —

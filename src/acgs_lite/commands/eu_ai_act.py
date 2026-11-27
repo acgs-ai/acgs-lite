@@ -14,7 +14,7 @@ from typing import Any
 from acgs_lite.commands._helpers import cli_bar
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the eu-ai-act subcommand."""
     p = sub.add_parser("eu-ai-act", help="One-shot EU AI Act compliance assessment + report")
     p.add_argument("--system-id", default=None, help="System identifier")
