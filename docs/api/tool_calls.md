@@ -62,17 +62,21 @@ both. Pass `tool_call_formatter=` to `ToolCallGovernor` to replace it.
 
 Whitespace in a value is collapsed to single spaces. A value that contains
 hidden control characters (vertical tab, form feed, the `\x1c`-`\x1f`
-separators, NEL and similar) is rendered twice: once with them treated as
-spaces, and once with them dropped, which is how the engine reads them. A rule
-that matches either reading applies, so such a character can neither split a
-keyword nor join two words to avoid one.
+separators, NEL and similar) is also rendered with them dropped and as spaces;
+values containing more than one whitespace control character are denied
+fail-closed, and rules match any emitted reading so such characters cannot split
+or join keywords. Identifier matching and humanization run after
+hidden-character and NFKC normalization, preventing zero-width characters, NUL
+bytes, or compatibility lookalikes in tool names, argument keys, or argument
+values from bypassing phrase rules such as `skip audit`.
 
-## Limits
+## Conditional rules and trusted context
 
-- **Conditional rules are not applied.** `evaluate` passes no context to the
-  engine, so a rule with a `condition` (for example `{"env": "production"}`)
-  is skipped, whatever the arguments contain. Do not rely on conditional rules
-  for tool calls evaluated through this module.
+Pass trusted governance attributes via `ToolCallGovernor(..., context={...})`
+or per call via `governor.evaluate(..., context={...})` (per-call keys override
+constructor defaults). Untrusted model-supplied `arguments` are never forwarded
+into the engine context, so callers must source environment or authorization
+flags from trusted runtime state.
 
 ## Reference
 

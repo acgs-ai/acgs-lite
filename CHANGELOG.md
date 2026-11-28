@@ -32,19 +32,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Five-stage offline end-to-end commercial pipeline example
   (`examples/commercial_evidence_pipeline.py`).
 - `acgs_lite.tool_calls`: a public module that evaluates one tool call against a
-  constitution. `ToolCallGovernor.evaluate(tool_name, arguments)` returns a
-  `GovernanceDecision` with the verdict `ALLOW`, `DENY` or `REVIEW`, and is
-  fail-closed: an `Exception` while formatting or validating gives `DENY`.
+  constitution. `ToolCallGovernor.evaluate(tool_name, arguments, *, context=None)`
+  returns a `GovernanceDecision` with the verdict `ALLOW`, `DENY` or `REVIEW`, and
+  is fail-closed: an `Exception` while formatting or validating gives `DENY`.
   `format_tool_call` renders a tool call as the text the rules are matched
   against. The code is the `_governance.py` module that the framework adapter
   packages each carried as a private copy, moved here together with its tests,
-  so adapters can import it instead. Two changes from the copies: the pattern
-  that recognises identifier-like argument values is rewritten to match the
-  same strings without exponential backtracking, and a value with hidden
-  control characters is also rendered with them dropped, so `del<VT>ete` can no
-  longer hide `delete` from a keyword rule. Conditional rules are not applied,
-  because no context is passed to the engine. The module is not re-exported
-  from the top-level `acgs_lite` package. See
+  so adapters can import it instead. Hardened relative to those copies: the
+  pattern that recognises identifier-like argument values is rewritten to match
+  the same strings without exponential backtracking; values with hidden control
+  characters are also rendered with them dropped and spaced (and values with more
+  than one whitespace control character are denied fail-closed); identifier
+  matching runs after hidden-character and NFKC normalization so obfuscated
+  identifiers such as `skip_\u200baudit` cannot evade phrase rules; and
+  `ToolCallGovernor` forwards optional trusted `context` (never model
+  `arguments`) to `GovernanceEngine.validate` so conditional rules apply. The
+  module is not re-exported from the top-level `acgs_lite` package. See
   [Tool-Call Governance](https://github.com/acgs-ai/acgs-lite/blob/main/docs/api/tool_calls.md).
 
 ## [4.1.0] - 2026-11-27

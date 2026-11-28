@@ -470,3 +470,105 @@ def test_mixed_hidden_characters_do_not_hide_a_keyword(value: str) -> None:
     # rendered tool call must be blocked too.
     governor = ToolCallGovernor(_constitution(BLOCK), agent_id="agent")
     assert governor.evaluate("execute", {"value": value}).verdict is Verdict.DENY
+
+
+def test_multiple_whitespace_controls_are_denied_fail_closed() -> None:
+    with pytest.raises(ValueError, match="more than one whitespace control"):
+        format_tool_call("execute", {"value": "del\x0bete\x0ceverything"})
+    governor = ToolCallGovernor(_constitution(BLOCK), agent_id="agent")
+    decision = governor.evaluate("execute", {"value": "del\x0bete\x0ceverything"})
+    assert decision.verdict is Verdict.DENY
+    assert decision.error is not None
+    assert "ValueError:" in decision.error
+
+
+def test_non_space_control_used_as_word_separator_is_denied() -> None:
+    governor = ToolCallGovernor(_constitution(BLOCK), agent_id="agent")
+    decision = governor.evaluate("execute", {"value": "delete\x00everything"})
+    assert decision.verdict is Verdict.DENY
+    assert decision.rule_ids == ("T-BLOCK",)
+
+
+@pytest.mark.parametrize(
+    ("phrase", "tool_name", "arguments"),
+    [
+        ("skip audit", "execute", {"mode": "skip_\u200baudit"}),
+        ("skip audit", "execute", {"mode": "skip\x00_audit"}),
+        ("skip audit", "execute", {"mode": "\ufeffskip_audit"}),
+        ("skip audit", "execute", {"mode": "skip_\u00adaudit"}),
+        ("skip audit", "execute", {"mode": "skip_\x0baudit"}),
+        ("skip audit", "execute", {"mode": "ｓｋｉｐ＿ａｕｄｉｔ"}),
+        ("skip audit", "execute", {"mode": "\u200b" * 80 + "skip_audit"}),
+        ("disable logging", "execute", {"mode": "disable\u200bLogging"}),
+        ("disable logging", "disable\u200bLogging", {"mode": "normal"}),
+        ("skip audit", "execute", {"skip_\u200baudit": "true"}),
+    ],
+)
+def test_obfuscated_identifiers_still_match_phrase_rules(
+    phrase: str, tool_name: str, arguments: dict[str, Any]
+) -> None:
+    rule = Rule(id="T-PHRASE", text="phrase block", severity=Severity.CRITICAL, keywords=[phrase])
+    governor = ToolCallGovernor(_constitution(rule), agent_id="agent")
+    decision = governor.evaluate(tool_name, arguments)
+    assert decision.verdict is Verdict.DENY
+    assert decision.rule_ids == ("T-PHRASE",)
+
+
+class TestTrustedContext:
+    _PROD_RULE = Rule(
+        id="T-PROD",
+        text="no deletes in prod",
+        severity=Severity.CRITICAL,
+        keywords=["delete everything"],
+        condition={"env": "production"},
+    )
+
+    def test_untrusted_arguments_never_activate_or_bypass_conditional_rules(self) -> None:
+        governor = ToolCallGovernor(_constitution(self._PROD_RULE), agent_id="agent")
+        no_ctx = governor.evaluate("exec", {"env": "production", "cmd": "delete everything"})
+        assert no_ctx.verdict is Verdict.ALLOW
+
+        prod_governor = ToolCallGovernor(
+            _constitution(self._PROD_RULE),
+            agent_id="agent",
+            context={"env": "production"},
+        )
+        spoofed = prod_governor.evaluate("exec", {"env": "staging", "cmd": "delete everything"})
+        assert spoofed.verdict is Verdict.DENY
+        assert spoofed.rule_ids == ("T-PROD",)
+
+    def test_per_call_context_merges_over_default_without_mutating_instance(self) -> None:
+        governor = ToolCallGovernor(
+            _constitution(self._PROD_RULE),
+            agent_id="agent",
+            context={"env": "production", "region": "us"},
+        )
+        overridden = governor.evaluate(
+            "exec",
+            {"cmd": "delete everything"},
+            context={"env": "staging"},
+        )
+        assert overridden.verdict is Verdict.ALLOW
+
+        still_prod = governor.evaluate("exec", {"cmd": "delete everything"})
+        assert still_prod.verdict is Verdict.DENY
+        assert still_prod.rule_ids == ("T-PROD",)
+
+        per_call_gov = ToolCallGovernor(_constitution(self._PROD_RULE), agent_id="agent")
+        activated = per_call_gov.evaluate(
+            "exec",
+            {"cmd": "delete everything"},
+            context={"env": "production"},
+        )
+        assert activated.verdict is Verdict.DENY
+        assert activated.rule_ids == ("T-PROD",)
+
+    def test_non_mapping_context_raises_at_init_and_fails_closed_at_evaluate(self) -> None:
+        with pytest.raises(TypeError, match="mapping"):
+            ToolCallGovernor(_constitution(self._PROD_RULE), agent_id="agent", context="bad")  # type: ignore[arg-type]
+
+        governor = ToolCallGovernor(_constitution(self._PROD_RULE), agent_id="agent")
+        decision = governor.evaluate("exec", {"cmd": "fine"}, context=["bad"])  # type: ignore[arg-type]
+        assert decision.verdict is Verdict.DENY
+        assert decision.error is not None
+        assert "TypeError:" in decision.error

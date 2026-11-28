@@ -64,6 +64,12 @@ _SEPARATORS = re.compile(r"[\s_\-./:\[\]]+")
 # alternation backtracked exponentially. Here the two branches cannot overlap.
 _IDENTIFIER_VALUE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:(?:[_-][A-Za-z0-9]+)+|[A-Z][a-z0-9]+)$")
 _MAX_IDENTIFIER_VALUE_LENGTH = 64
+# Control characters (Unicode category Cc) other than tab, newline and carriage return.
+_HIDDEN_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+# Hidden controls that ``str.split()`` does not treat as whitespace.
+_NON_SPACE_CONTROLS = re.compile(r"[\x00-\x08\x0e-\x1b\x7f-\x84\x86-\x9f]")
+# Hidden controls that ``str.split()`` treats as whitespace.
+_SPACE_CONTROLS = re.compile(r"[\x0b\x0c\x1c-\x1f\x85]")
 
 
 class Verdict(str, Enum):  # noqa: UP042  # StrEnum needs Python 3.11, and changes str() output
@@ -116,25 +122,43 @@ def _render_scalar(value: Any) -> str:
     return " ".join(str(value).split())
 
 
-def _render_hidden_dropped(value: Any, rendered: str) -> str | None:
+def _extra_hidden_readings(value: Any, rendered: str) -> list[str]:
     """
-    Return a second rendering of ``value`` when hidden characters change how it reads.
+    Return alternate single-line readings of ``value`` when hidden controls alter it.
 
     ``_render_scalar`` collapses whitespace with ``str.split``, which also treats control
     characters such as vertical tab, form feed and the ``\\x1c``-``\\x1f`` separators as
-    whitespace. The engine does not: it drops them before matching. Collapsing first
-    therefore turns ``del<VT>ete`` into ``del ete`` and hides the word from the rules.
-    This renders the value with those characters dropped first, as the engine reads it,
-    and returns it only when it differs from what the engine sees in ``rendered``.
+    whitespace. The engine does not: it drops them before matching. Collapsing first therefore
+    turns ``del<VT>ete`` into ``del ete`` and hides keywords. Values containing more than one
+    whitespace control character are rejected fail-closed because each control could be either a
+    word boundary or intra-word padding; otherwise alternate readings with controls dropped or
+    turned into spaces are returned when they differ from what the engine sees in ``rendered``.
     """
     if value is None or isinstance(value, bool | int | float):
-        return None
-    dropped = " ".join(
-        normalize_for_matching(value if isinstance(value, str) else str(value)).split()
-    )
-    if dropped == normalize_for_matching(rendered):
-        return None
-    return dropped
+        return []
+    text = value if isinstance(value, str) else str(value)
+    if len(_SPACE_CONTROLS.findall(text)) > 1:
+        msg = "A tool call argument contains more than one whitespace control character."
+        raise ValueError(msg)
+    engine_rendered = normalize_for_matching(rendered)
+    candidates: list[str] = [normalize_for_matching(text)]
+    if _HIDDEN_CONTROLS.search(text):
+        candidates.extend(
+            (
+                normalize_for_matching(_NON_SPACE_CONTROLS.sub(" ", _SPACE_CONTROLS.sub("", text))),
+                _HIDDEN_CONTROLS.sub(" ", text),
+            )
+        )
+    readings: list[str] = []
+    for candidate in candidates:
+        reading = " ".join(candidate.split())
+        if (
+            reading != rendered
+            and normalize_for_matching(reading) != engine_rendered
+            and reading not in readings
+        ):
+            readings.append(reading)
+    return readings
 
 
 def _flatten(value: Any, path: str, depth: int) -> Iterator[tuple[str, Any]]:
@@ -165,11 +189,12 @@ def format_tool_call(tool_name: str, arguments: Any) -> str:
 
     The output has one ``path: value`` line per argument leaf, so argument names and values are
     both visible to rules, and multi-line values are collapsed onto one line. A value that
-    contains hidden control characters is rendered a second time with them dropped, so that
-    they can neither split a word nor join two. Identifiers
-    (the tool name, argument names and single-token string values) that contain separators or
-    camelCase are repeated in a trailing ``normalized:`` line as plain words, so that a rule
-    keyword such as ``skip audit`` also matches a tool named ``skip_audit``.
+    contains hidden control characters is also rendered with them dropped and as spaces, so that
+    they can neither split a word nor join two; values with more than one whitespace control
+    character raise ``ValueError``. Identifiers (the tool name, argument names and single-token
+    string values, checked after hidden-character and NFKC normalization) that contain separators
+    or camelCase are repeated in a trailing ``normalized:`` line as plain words, so that a rule
+    keyword such as ``skip audit`` also matches ``skip_audit`` or obfuscated variants.
 
     Example::
 
@@ -183,7 +208,8 @@ def format_tool_call(tool_name: str, arguments: Any) -> str:
     :param tool_name: Name of the tool the model wants to call.
     :param arguments: The tool arguments, usually a mapping. Other values are rendered as ``input``.
     :returns: The text passed to ``GovernanceEngine.validate``.
-    :raises ValueError: If the arguments are nested deeper than ``MAX_ARGUMENT_DEPTH``.
+    :raises ValueError: If the arguments are nested deeper than ``MAX_ARGUMENT_DEPTH`` or contain
+        more than one whitespace control character in a single leaf value.
     """
     lines = [f"tool: {tool_name}", "arguments:"]
     identifiers = [tool_name]
@@ -194,21 +220,28 @@ def format_tool_call(tool_name: str, arguments: Any) -> str:
         lines.append("(none)")
     for path, leaf in leaves:
         rendered = _render_scalar(leaf)
+        extra_readings = _extra_hidden_readings(leaf, rendered)
         lines.append(f"{path}: {rendered}")
-        hidden_dropped = _render_hidden_dropped(leaf, rendered)
-        if hidden_dropped is not None:
-            lines.append(f"{path}: {hidden_dropped}")
+        lines.extend(f"{path}: {reading}" for reading in extra_readings)
         identifiers.append(path)
-        if (
-            isinstance(leaf, str)
-            and len(rendered) <= _MAX_IDENTIFIER_VALUE_LENGTH
-            and _IDENTIFIER_VALUE.match(rendered)
-        ):
-            identifiers.append(rendered)
+        if isinstance(leaf, str):
+            id_candidates = (
+                rendered,
+                *extra_readings,
+                " ".join(normalize_for_matching(leaf).split()),
+                " ".join(normalize_for_matching(rendered).split()),
+            )
+            for candidate in dict.fromkeys(id_candidates):
+                if (
+                    len(candidate) <= _MAX_IDENTIFIER_VALUE_LENGTH
+                    and _IDENTIFIER_VALUE.match(candidate)
+                ):
+                    identifiers.append(candidate)
     normalized: list[str] = []
     for identifier in identifiers:
-        words = _humanize(identifier)
-        if words and words != identifier.lower() and words not in normalized:
+        clean_identifier = normalize_for_matching(identifier)
+        words = _humanize(clean_identifier)
+        if words and words != clean_identifier.lower() and words not in normalized:
             normalized.append(words)
     if normalized:
         lines.append("normalized: " + " | ".join(normalized))
@@ -239,6 +272,7 @@ class ToolCallGovernor:
         *,
         agent_id: str,
         tool_call_formatter: ToolCallFormatter | None = None,
+        context: Mapping[str, Any] | None = None,
     ) -> None:
         """
         Create a governor.
@@ -246,28 +280,56 @@ class ToolCallGovernor:
         :param constitution: The constitution to enforce. Defaults to ``Constitution.default()``.
         :param agent_id: Agent identifier passed to ``GovernanceEngine.validate``.
         :param tool_call_formatter: Optional replacement for ``format_tool_call``.
+        :param context: Optional trusted governance context forwarded to conditional rules.
+            Never populate this from model-supplied tool arguments.
+        :raises TypeError: If ``context`` is provided and is not a mapping.
         """
+        if context is not None and not isinstance(context, Mapping):
+            msg = "Governance context must be a mapping."
+            raise TypeError(msg)
         self.constitution = constitution if constitution is not None else Constitution.default()
         self.agent_id = agent_id
         self.tool_call_formatter = tool_call_formatter
+        self.context: dict[str, Any] = dict(context) if context is not None else {}
         self._engine = GovernanceEngine(self.constitution, strict=False)
         self._rules: dict[str, Rule] = {rule.id: rule for rule in self.constitution.rules}
 
-    def evaluate(self, tool_name: str, arguments: Any) -> GovernanceDecision:
+    def evaluate(
+        self,
+        tool_name: str,
+        arguments: Any,
+        *,
+        context: Mapping[str, Any] | None = None,
+    ) -> GovernanceDecision:
         """
         Evaluate one tool call. Never raises.
 
         :param tool_name: Name of the tool the model wants to call.
         :param arguments: The tool arguments.
+        :param context: Optional per-call trusted governance context merged over the
+            governor's default ``context``.
         :returns: The governance decision.
         """
         try:
+            eval_context: dict[str, Any] | None
+            if context is None:
+                eval_context = dict(self.context) if self.context else None
+            else:
+                if not isinstance(context, Mapping):
+                    msg = "Governance context must be a mapping."
+                    raise TypeError(msg)
+                eval_context = {**self.context, **context}
             formatter = self.tool_call_formatter or format_tool_call
             action = formatter(tool_name, arguments)
             if not isinstance(action, str) or not action.strip():
                 msg = "The tool call formatter must return a non-empty string."
                 raise TypeError(msg)
-            result = self._engine.validate(action, agent_id=self.agent_id, strict=False)
+            result = self._engine.validate(
+                action,
+                agent_id=self.agent_id,
+                context=eval_context,
+                strict=False,
+            )
             decision = self._decide(tool_name, result)
         except ConstitutionalViolationError as error:
             rule_id = error.rule_id or "unknown"
