@@ -11,11 +11,6 @@ import logging
 from typing import Any
 
 import pytest
-from starlette.applications import Starlette
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.routing import Route
-from starlette.testclient import TestClient
 
 from acgs_lite import Constitution, Rule, Severity
 from acgs_lite.middleware import GovernanceASGIMiddleware, GovernanceWSGIMiddleware
@@ -105,13 +100,21 @@ class TestWSGIGovernanceValidHeader:
 # ── ASGI ─────────────────────────────────────────────────────────────────────
 
 
-def _asgi_client() -> tuple[TestClient, GovernanceASGIMiddleware]:
-    async def api(request: Request) -> JSONResponse:
-        return JSONResponse({"status": "ok"})
+def _asgi_client() -> tuple[Any, GovernanceASGIMiddleware]:
+    pytest.importorskip("httpx")
+    starlette_apps = pytest.importorskip("starlette.applications")
+    starlette_responses = pytest.importorskip("starlette.responses")
+    starlette_routing = pytest.importorskip("starlette.routing")
+    starlette_testclient = pytest.importorskip("starlette.testclient")
 
-    inner = Starlette(routes=[Route("/api", api, methods=["GET", "POST"])])
+    async def api(request: Any) -> Any:
+        return starlette_responses.JSONResponse({"status": "ok"})
+
+    inner = starlette_apps.Starlette(
+        routes=[starlette_routing.Route("/api", api, methods=["GET", "POST"])]
+    )
     middleware = GovernanceASGIMiddleware(inner, constitution=_constitution(), strict=False)
-    return TestClient(middleware), middleware
+    return starlette_testclient.TestClient(middleware), middleware
 
 
 @pytest.mark.integration
