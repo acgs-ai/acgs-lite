@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `GovernanceWSGIMiddleware` and `GovernanceASGIMiddleware` no longer send
+  `X-Governance-Valid: true` on every response. The header now reports what
+  request validation found:
+  - `true`: the validated part of the request body matched no blocking rule.
+  - `false`: the request body was validated and a blocking rule matched. In
+    non-strict mode the request is still passed to the application, as before.
+  - `unchecked`: nothing was validated. This covers requests without a body
+    (including every `GET`), empty bodies, and validation that raised an error.
+
+  Before, both middlewares discarded the validation result, so a request that
+  violated the constitution, or one that was never validated, was labelled
+  `true`. Code that reads the header must treat any value other than `true` as
+  not validated. The header is not sent on skipped paths, or by the ASGI
+  middleware when `validate_responses=False`.
+
+  `true` covers only the text that was validated, which is unchanged by this
+  fix and is not always the whole body. The WSGI middleware validates the first
+  2000 characters. The ASGI middleware, for a JSON object that has any of the
+  keys `content`, `text`, `message`, `query`, `input` or `prompt`, validates
+  those values only. The header describes the request, not the response body.
+- Errors raised while validating a request body are now logged at `WARNING`
+  instead of `DEBUG` in both middlewares.
+
 ## [4.2.0] - 2026-11-28
 
 ### Added
