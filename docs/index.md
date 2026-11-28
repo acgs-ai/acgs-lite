@@ -11,7 +11,7 @@ Then add the integration and audit storage your application needs.
 [Try the 5-minute membrane](guides/five-minute-membrane.md){ .md-button }
 
 !!! note "Version note"
-    This documentation describes **4.0.0**. The execution-grant, trusted-context,
+    This documentation describes **4.2.0**. The execution-grant, trusted-context,
     durable-audit, and recovery hardening it documents is **not in the 3.0.1 wheel**;
     it needs `acgs-lite>=4.0.0`. Check the [PyPI page](https://pypi.org/project/acgs-lite/)
     for the newest published version, and match examples to the artifact you installed
