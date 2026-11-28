@@ -59,11 +59,10 @@ _REVIEW_ACTIONS = frozenset({ViolationAction.REQUIRE_HUMAN_REVIEW, ViolationActi
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _SEPARATORS = re.compile(r"[\s_\-./:\[\]]+")
-# Matches the same strings as the adapters' original pattern
-# ``^[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+|[A-Z][a-z0-9]+)+$``, whose repeated
-# alternation backtracked exponentially. Here the two branches cannot overlap.
-_IDENTIFIER_VALUE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:(?:[_-][A-Za-z0-9]+)+|[A-Z][a-z0-9]+)$")
-_MAX_IDENTIFIER_VALUE_LENGTH = 64
+# Matches identifier-style string tokens of any length in linear time. Leading separators and
+# the mandatory alphanumeric core are disjoint, so the pattern never backtracks; emails
+# containing ``@`` are naturally excluded.
+_IDENTIFIER_VALUE = re.compile(r"^[_\-./:\[\]]*[A-Za-z0-9][A-Za-z0-9_\-./:\[\]]*$")
 # Control characters (Unicode category Cc) other than tab, newline and carriage return.
 _HIDDEN_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 # Hidden controls that ``str.split()`` does not treat as whitespace.
@@ -192,10 +191,11 @@ def format_tool_call(tool_name: str, arguments: Any) -> str:
     key or argument value that contains hidden control characters is also rendered with them
     dropped and as spaces, so that they can neither split a word nor join two; values, names or
     keys with more than one whitespace control character raise ``ValueError``. Identifiers (the
-    tool name, argument names and single-token string values, checked after hidden-character and
-    NFKC normalization) that contain separators or camelCase are repeated in a trailing
-    ``normalized:`` line as plain words, so that a rule keyword such as ``skip audit`` also matches
-    ``skip_audit`` or obfuscated variants.
+    tool name, argument names, and identifier-style string tokens of any length, checked after
+    hidden-character and NFKC normalization) that contain separators or camelCase are repeated in
+    a trailing ``normalized:`` line as plain words, so that a rule keyword such as ``skip audit``
+    also matches ``skip_audit``, ``skip__audit``, ``_skip_audit``, ``skip.audit``, or padded
+    and obfuscated variants.
 
     Example::
 
@@ -217,6 +217,7 @@ def format_tool_call(tool_name: str, arguments: Any) -> str:
     tool_readings = (rendered_tool, *extra_tools)
     lines = [*(f"tool: {reading}" for reading in tool_readings), "arguments:"]
     identifiers = list(tool_readings)
+    value_tokens: list[str] = []
     leaves = list(_flatten(arguments, "" if isinstance(arguments, Mapping) else "input", 0))
     if isinstance(arguments, Mapping) and not arguments:
         leaves = []
@@ -242,15 +243,27 @@ def format_tool_call(tool_name: str, arguments: Any) -> str:
                 " ".join(normalize_for_matching(rendered_leaf).split()),
             )
             for candidate in dict.fromkeys(id_candidates):
-                if len(candidate) <= _MAX_IDENTIFIER_VALUE_LENGTH and _IDENTIFIER_VALUE.match(
-                    candidate
-                ):
-                    identifiers.append(candidate)
+                for raw_token in candidate.split():
+                    clean_token = normalize_for_matching(raw_token)
+                    if clean_token and _IDENTIFIER_VALUE.match(clean_token):
+                        value_tokens.append(clean_token)
     normalized: list[str] = []
+    seen_normalized: set[str] = set()
     for identifier in identifiers:
         clean_identifier = normalize_for_matching(identifier)
         words = _humanize(clean_identifier)
-        if words and words != clean_identifier.lower() and words not in normalized:
+        if words and words != clean_identifier.lower() and words not in seen_normalized:
+            seen_normalized.add(words)
+            normalized.append(words)
+    for token in value_tokens:
+        words = _humanize(token)
+        if (
+            words
+            and words != token.lower()
+            and (" " in words or "_" in token)
+            and words not in seen_normalized
+        ):
+            seen_normalized.add(words)
             normalized.append(words)
     if normalized:
         lines.append("normalized: " + " | ".join(normalized))

@@ -21,11 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same strings without exponential backtracking; tool names, argument keys,
   and argument values with hidden control characters are also rendered with them
   dropped and spaced (and any name, key, or value with more than one whitespace
-  control character is denied fail-closed); identifier matching runs after
-  hidden-character and NFKC normalization so obfuscated identifiers such as
-  `skip_\u200baudit` cannot evade phrase rules; and `ToolCallGovernor` forwards
-  optional trusted `context` (never model `arguments`) to
-  `GovernanceEngine.validate` so conditional rules apply. The module is not
+  control character is denied fail-closed); identifier matching runs with an
+  unbounded linear-time pattern after hidden-character and NFKC normalization so
+  repeated/leading underscores (`skip__audit`, `_skip_audit`), dot/slash/colon
+  separators (`skip.audit`, `skip/audit`), padded values over 64 characters, and
+  obfuscated identifiers such as `skip_\u200baudit` cannot evade phrase rules;
+  and `ToolCallGovernor` forwards optional trusted `context` (never model
+  `arguments`) to `GovernanceEngine.validate` so conditional rules apply. The module is not
   re-exported from the top-level `acgs_lite` package. See
   [Tool-Call Governance](https://github.com/acgs-ai/acgs-lite/blob/main/docs/api/tool_calls.md).
 

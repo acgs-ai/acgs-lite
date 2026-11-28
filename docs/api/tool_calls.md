@@ -67,9 +67,11 @@ similar) is also rendered with them dropped and as spaces; any name, key, or
 value containing more than one whitespace control character is denied
 fail-closed, and rules match any emitted reading so such characters cannot split
 or join keywords. Identifier matching and humanization run after
-hidden-character and NFKC normalization, preventing zero-width characters, NUL
-bytes, or compatibility lookalikes in tool names, argument keys, or argument
-values from bypassing phrase rules such as `skip audit`.
+hidden-character and NFKC normalization in linear time without a length cap,
+preventing zero-width characters, NUL bytes, compatibility lookalikes,
+repeated/leading underscores (`skip__audit`, `_skip_audit`), dot/slash/colon
+separators (`skip.audit`, `skip/audit`), or long padded values in tool names,
+argument keys, or string values from bypassing phrase rules such as `skip audit`.
 
 ## Conditional rules and trusted context
 

@@ -6,8 +6,6 @@ Ported unchanged from the adapter packages' tests for their private
 
 from __future__ import annotations
 
-import functools
-import itertools
 import logging
 import time
 from typing import Any
@@ -329,70 +327,37 @@ class TestFailClosed:
 
 # ── Identifier pattern (not in the adapter tests) ────────────────────────────
 
-_LETTERS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-_UPPER = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-_LOWER_OR_DIGIT = frozenset("abcdefghijklmnopqrstuvwxyz0123456789")
-_ALNUM = _LETTERS | frozenset("0123456789")
 
-
-def _original_identifier_match(text: str) -> bool:
-    """Reference for the adapters' original pattern, written without a regex.
-
-    The original is a letter, then letters or digits, then one or more groups, where
-    a group is a separator (``_`` or ``-``) plus letters or digits, or an upper-case
-    letter plus lower-case letters or digits. It is spelled out here because the
-    pattern itself backtracks exponentially.
-    """
-    size = len(text)
-
-    @functools.cache
-    def groups_from(start: int) -> bool:
-        if start >= size:
-            return False
-        if text[start] in "_-":
-            allowed = _ALNUM
-        elif text[start] in _UPPER:
-            allowed = _LOWER_OR_DIGIT
-        else:
-            return False
-        end = start + 1
-        while end < size and text[end] in allowed:
-            end += 1
-            if end == size or groups_from(end):
-                return True
-        return False
-
-    if not text or text[0] not in _LETTERS:
-        return False
-    prefix_end = 1
-    while True:
-        if groups_from(prefix_end):
-            return True
-        if prefix_end < size and text[prefix_end] in _ALNUM:
-            prefix_end += 1
-        else:
-            return False
-
-
-def test_identifier_pattern_matches_the_same_strings_as_the_original() -> None:
+def test_identifier_pattern_matches_expected_tokens() -> None:
     from acgs_lite.tool_calls import _IDENTIFIER_VALUE
 
-    differences = [
-        candidate
-        for length in range(7)
-        for candidate in map("".join, itertools.product("aA0-_!", repeat=length))
-        if bool(_IDENTIFIER_VALUE.match(candidate)) != _original_identifier_match(candidate)
-    ]
-    assert differences == []
+    for token in (
+        "skip_audit",
+        "skip__audit",
+        "_skip_audit",
+        "__skip_audit__",
+        "skip.audit",
+        "skip/audit",
+        "skip:audit",
+        "skip[audit]",
+        "disableLogging",
+        "_delete",
+        "skip_audit_" + "x" * 100,
+        "x" * 100 + "_skip_audit",
+    ):
+        assert _IDENTIFIER_VALUE.match(token) is not None, token
+
+    for rejected in ("", "a@example.com", "plain words", "---", "[]", "{}", "skip_audit!"):
+        assert _IDENTIFIER_VALUE.match(rejected) is None, rejected
 
 
-def test_identifier_pattern_does_not_backtrack_exponentially() -> None:
+def test_identifier_pattern_runs_in_linear_time() -> None:
     from acgs_lite.tool_calls import _IDENTIFIER_VALUE
 
-    # The original pattern roughly doubles its time with every repetition and
-    # needs several seconds for this input.
-    hostile = "A-" + "0A0-" * 25
+    matching = "A-" + "0A0-" * 250
+    hostile = matching + "!"
     started = time.perf_counter()
+    assert _IDENTIFIER_VALUE.match(matching) is not None
     assert _IDENTIFIER_VALUE.match(hostile) is None
     assert time.perf_counter() - started < 1.0
 
@@ -548,6 +513,15 @@ def test_multiple_whitespace_controls_in_tool_names_or_keys_are_denied_fail_clos
         ("disable logging", "disable\x0bLogging", {}),
         ("skip audit", "execute", {"skip_\x0baudit": 1}),
         ("disable logging", "execute", {"disable\x0bLogging": 1}),
+        ("skip audit", "execute", {"mode": "skip__audit"}),
+        ("skip audit", "execute", {"mode": "skip.audit"}),
+        ("skip audit", "execute", {"mode": "skip/audit"}),
+        ("skip audit", "execute", {"mode": "skip:audit"}),
+        ("skip audit", "execute", {"mode": "_skip_audit"}),
+        ("skip audit", "execute", {"mode": "__skip_audit__"}),
+        ("skip audit", "execute", {"mode": "skip_audit_" + "x" * 100}),
+        ("skip audit", "execute", {"mode": "x" * 100 + "_skip_audit"}),
+        ("skip audit", "execute", {"mode": "please skip_audit now"}),
     ],
 )
 def test_obfuscated_identifiers_still_match_phrase_rules(
@@ -558,6 +532,19 @@ def test_obfuscated_identifiers_still_match_phrase_rules(
     decision = governor.evaluate(tool_name, arguments)
     assert decision.verdict is Verdict.DENY
     assert decision.rule_ids == ("T-PHRASE",)
+
+
+def test_leading_underscore_single_word_is_humanized() -> None:
+    rule = Rule(id="T-WORD", text="word block", severity=Severity.CRITICAL, keywords=["delete"])
+    governor = ToolCallGovernor(_constitution(rule), agent_id="agent")
+    decision = governor.evaluate("execute", {"flag": "_delete"})
+    assert decision.verdict is Verdict.DENY
+    assert decision.rule_ids == ("T-WORD",)
+
+
+def test_email_and_plain_punctuation_do_not_pollute_normalized_line() -> None:
+    rendered = format_tool_call("search", {"to": "a@example.com", "body": "Hello there."})
+    assert "normalized:" not in rendered
 
 
 class TestTrustedContext:
