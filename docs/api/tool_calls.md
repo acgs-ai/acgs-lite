@@ -60,10 +60,11 @@ values.
 `disableLogging` as plain words, so a keyword rule for `skip audit` matches
 both. Pass `tool_call_formatter=` to `ToolCallGovernor` to replace it.
 
-Whitespace in a value is collapsed to single spaces. A value that contains
-hidden control characters (vertical tab, form feed, the `\x1c`-`\x1f`
-separators, NEL and similar) is also rendered with them dropped and as spaces;
-values containing more than one whitespace control character are denied
+Whitespace in tool names, argument keys, and values is collapsed to single
+spaces. Any tool name, argument key, or leaf value that contains hidden control
+characters (vertical tab, form feed, the `\x1c`-`\x1f` separators, NEL and
+similar) is also rendered with them dropped and as spaces; any name, key, or
+value containing more than one whitespace control character is denied
 fail-closed, and rules match any emitted reading so such characters cannot split
 or join keywords. Identifier matching and humanization run after
 hidden-character and NFKC normalization, preventing zero-width characters, NUL

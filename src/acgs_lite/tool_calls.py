@@ -138,7 +138,7 @@ def _extra_hidden_readings(value: Any, rendered: str) -> list[str]:
         return []
     text = value if isinstance(value, str) else str(value)
     if len(_SPACE_CONTROLS.findall(text)) > 1:
-        msg = "A tool call argument contains more than one whitespace control character."
+        msg = "A tool call contains more than one whitespace control character."
         raise ValueError(msg)
     engine_rendered = normalize_for_matching(rendered)
     candidates: list[str] = [normalize_for_matching(text)]
@@ -188,13 +188,14 @@ def format_tool_call(tool_name: str, arguments: Any) -> str:
     Render a tool call as the text that ACGS keyword and pattern rules are matched against.
 
     The output has one ``path: value`` line per argument leaf, so argument names and values are
-    both visible to rules, and multi-line values are collapsed onto one line. A value that
-    contains hidden control characters is also rendered with them dropped and as spaces, so that
-    they can neither split a word nor join two; values with more than one whitespace control
-    character raise ``ValueError``. Identifiers (the tool name, argument names and single-token
-    string values, checked after hidden-character and NFKC normalization) that contain separators
-    or camelCase are repeated in a trailing ``normalized:`` line as plain words, so that a rule
-    keyword such as ``skip audit`` also matches ``skip_audit`` or obfuscated variants.
+    both visible to rules, and multi-line values are collapsed onto one line. A tool name, argument
+    key or argument value that contains hidden control characters is also rendered with them
+    dropped and as spaces, so that they can neither split a word nor join two; values, names or
+    keys with more than one whitespace control character raise ``ValueError``. Identifiers (the
+    tool name, argument names and single-token string values, checked after hidden-character and
+    NFKC normalization) that contain separators or camelCase are repeated in a trailing
+    ``normalized:`` line as plain words, so that a rule keyword such as ``skip audit`` also matches
+    ``skip_audit`` or obfuscated variants.
 
     Example::
 
@@ -208,33 +209,41 @@ def format_tool_call(tool_name: str, arguments: Any) -> str:
     :param tool_name: Name of the tool the model wants to call.
     :param arguments: The tool arguments, usually a mapping. Other values are rendered as ``input``.
     :returns: The text passed to ``GovernanceEngine.validate``.
-    :raises ValueError: If the arguments are nested deeper than ``MAX_ARGUMENT_DEPTH`` or contain
-        more than one whitespace control character in a single leaf value.
+    :raises ValueError: If the arguments are nested deeper than ``MAX_ARGUMENT_DEPTH`` or the tool
+        name, an argument key or a leaf value contains more than one whitespace control character.
     """
-    lines = [f"tool: {tool_name}", "arguments:"]
-    identifiers = [tool_name]
+    rendered_tool = _render_scalar(tool_name)
+    extra_tools = _extra_hidden_readings(tool_name, rendered_tool)
+    tool_readings = (rendered_tool, *extra_tools)
+    lines = [*(f"tool: {reading}" for reading in tool_readings), "arguments:"]
+    identifiers = list(tool_readings)
     leaves = list(_flatten(arguments, "" if isinstance(arguments, Mapping) else "input", 0))
     if isinstance(arguments, Mapping) and not arguments:
         leaves = []
     if not leaves:
         lines.append("(none)")
     for path, leaf in leaves:
-        rendered = _render_scalar(leaf)
-        extra_readings = _extra_hidden_readings(leaf, rendered)
-        lines.append(f"{path}: {rendered}")
-        lines.extend(f"{path}: {reading}" for reading in extra_readings)
-        identifiers.append(path)
+        rendered_path = _render_scalar(path)
+        extra_paths = _extra_hidden_readings(path, rendered_path)
+        path_readings = (rendered_path, *extra_paths)
+
+        rendered_leaf = _render_scalar(leaf)
+        extra_leaves = _extra_hidden_readings(leaf, rendered_leaf)
+        leaf_readings = (rendered_leaf, *extra_leaves)
+
+        for path_reading in path_readings:
+            for leaf_reading in leaf_readings:
+                lines.append(f"{path_reading}: {leaf_reading}")
+        identifiers.extend(path_readings)
         if isinstance(leaf, str):
             id_candidates = (
-                rendered,
-                *extra_readings,
+                *leaf_readings,
                 " ".join(normalize_for_matching(leaf).split()),
-                " ".join(normalize_for_matching(rendered).split()),
+                " ".join(normalize_for_matching(rendered_leaf).split()),
             )
             for candidate in dict.fromkeys(id_candidates):
-                if (
-                    len(candidate) <= _MAX_IDENTIFIER_VALUE_LENGTH
-                    and _IDENTIFIER_VALUE.match(candidate)
+                if len(candidate) <= _MAX_IDENTIFIER_VALUE_LENGTH and _IDENTIFIER_VALUE.match(
+                    candidate
                 ):
                     identifiers.append(candidate)
     normalized: list[str] = []

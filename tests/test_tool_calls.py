@@ -490,6 +490,48 @@ def test_non_space_control_used_as_word_separator_is_denied() -> None:
 
 
 @pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        ("delete\x0beverything", {}),
+        ("delete\x85everything", {}),
+        ("del\x0bete everything", {}),
+        ("delete\x00everything", {}),
+        ("execute", {"delete\x0beverything": "ok"}),
+        ("execute", {"del\x0bete everything": "ok"}),
+        ("execute", {"delete\x00everything": 1}),
+        ("execute", {"outer": {"delete\x0beverything": {}}}),
+    ],
+)
+def test_hidden_controls_in_tool_names_and_keys_do_not_bypass_rules(
+    tool_name: str, arguments: dict[str, Any]
+) -> None:
+    governor = ToolCallGovernor(_constitution(BLOCK), agent_id="agent")
+    decision = governor.evaluate(tool_name, arguments)
+    assert decision.verdict is Verdict.DENY
+    assert decision.rule_ids == ("T-BLOCK",)
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        ("del\x0bete\x0ceverything", {}),
+        ("execute", {"del\x0bete\x0ceverything": "ok"}),
+        ("execute", {"outer\x0b": {"inner\x0c": "ok"}}),
+    ],
+)
+def test_multiple_whitespace_controls_in_tool_names_or_keys_are_denied_fail_closed(
+    tool_name: str, arguments: dict[str, Any]
+) -> None:
+    with pytest.raises(ValueError, match="more than one whitespace control"):
+        format_tool_call(tool_name, arguments)
+    governor = ToolCallGovernor(_constitution(BLOCK), agent_id="agent")
+    decision = governor.evaluate(tool_name, arguments)
+    assert decision.verdict is Verdict.DENY
+    assert decision.error is not None
+    assert "ValueError:" in decision.error
+
+
+@pytest.mark.parametrize(
     ("phrase", "tool_name", "arguments"),
     [
         ("skip audit", "execute", {"mode": "skip_\u200baudit"}),
@@ -502,6 +544,10 @@ def test_non_space_control_used_as_word_separator_is_denied() -> None:
         ("disable logging", "execute", {"mode": "disable\u200bLogging"}),
         ("disable logging", "disable\u200bLogging", {"mode": "normal"}),
         ("skip audit", "execute", {"skip_\u200baudit": "true"}),
+        ("skip audit", "skip_\x0baudit", {}),
+        ("disable logging", "disable\x0bLogging", {}),
+        ("skip audit", "execute", {"skip_\x0baudit": 1}),
+        ("disable logging", "execute", {"disable\x0bLogging": 1}),
     ],
 )
 def test_obfuscated_identifiers_still_match_phrase_rules(
